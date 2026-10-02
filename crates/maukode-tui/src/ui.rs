@@ -64,6 +64,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         } => {
             draw_sessions_modal(f, sessions, *selected_idx);
         }
+        ActiveModal::DiffViewer {
+            diff,
+            stat,
+            scroll,
+            ..
+        } => {
+            draw_diff_modal(f, diff, stat, *scroll);
+        }
         ActiveModal::Help => {
             draw_help_modal(f);
         }
@@ -411,6 +419,10 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Provider  ", theme::dim_style()),
             Span::styled("/sessions ", Style::default().fg(COLOR_BLUE)),
             Span::styled("History  ", theme::dim_style()),
+            Span::styled("/diff ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Diff  ", theme::dim_style()),
+            Span::styled("/undo ", Style::default().fg(COLOR_AMBER)),
+            Span::styled("Undo  ", theme::dim_style()),
             Span::styled("/help ", theme::muted_style()),
             Span::styled("Commands  ", theme::dim_style()),
             Span::styled("^C ", Style::default().fg(COLOR_RED)),
@@ -817,6 +829,14 @@ fn draw_help_modal(f: &mut Frame) {
             Span::styled("Browse and resume saved sessions from SQLite", theme::text_style()),
         ]),
         Line::from(vec![
+            Span::styled("/diff           ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled("Inspect git shadow diff of session modifications", theme::text_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("/undo [N]       ", Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)),
+            Span::styled("Roll back modified/added files by N turns (default: 1)", theme::text_style()),
+        ]),
+        Line::from(vec![
             Span::styled("/new            ", theme::brand_style()),
             Span::styled("Start a fresh session in the current directory", theme::text_style()),
         ]),
@@ -930,4 +950,111 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
         ]),
     ];
     f.render_widget(Paragraph::new(options), inner[4]);
+}
+
+fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
+    let area = centered_rect(82, 72, f.area());
+    f.render_widget(Clear, area);
+
+    let title_span = Span::styled(
+        " 🔍 Session Changes Diff ",
+        Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_CYAN))
+        .title(title_span);
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Stat summary bar
+            Constraint::Length(1), // Separator
+            Constraint::Min(4),    // Diff lines viewport
+            Constraint::Length(1), // Footer hotkeys
+        ])
+        .margin(1)
+        .split(block.inner(area));
+
+    f.render_widget(block, area);
+
+    // 1. Stat summary bar
+    let stat_line = if stat.trim().is_empty() && diff.trim().is_empty() {
+        Line::from(vec![
+            Span::styled("No changes detected in working directory compared to checkpoints.", theme::muted_style()),
+        ])
+    } else if !stat.trim().is_empty() {
+        Line::from(vec![
+            Span::styled("Summary: ", theme::brand_style()),
+            Span::styled(stat.trim(), theme::text_style()),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("Session Checkpoint Diff", theme::brand_style()),
+        ])
+    };
+    f.render_widget(Paragraph::new(stat_line), inner[0]);
+
+    // Separator line
+    let sep = Paragraph::new("─".repeat(inner[1].width as usize))
+        .style(theme::dim_style());
+    f.render_widget(sep, inner[1]);
+
+    // 2. Diff lines viewport
+    let mut diff_lines = Vec::new();
+    if diff.trim().is_empty() {
+        diff_lines.push(Line::from(vec![
+            Span::styled("  (Clean working tree - No modified or added files)", theme::dim_style()),
+        ]));
+    } else {
+        for l in diff.lines() {
+            let line_style = if l.starts_with("+++") || l.starts_with("---") {
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD)
+            } else if l.starts_with('+') {
+                theme::diff_add_style()
+            } else if l.starts_with('-') {
+                theme::diff_del_style()
+            } else if l.starts_with("@@") {
+                theme::diff_hunk_style()
+            } else if l.starts_with("diff --git") {
+                Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD)
+            } else {
+                theme::dim_style()
+            };
+            diff_lines.push(Line::from(Span::styled(l, line_style)));
+        }
+    }
+
+    let total_lines = diff_lines.len();
+    let viewport_height = inner[2].height as usize;
+    let max_scroll = total_lines.saturating_sub(viewport_height);
+    let effective_scroll = scroll.min(max_scroll);
+
+    let p = Paragraph::new(diff_lines)
+        .scroll((effective_scroll as u16, 0));
+    f.render_widget(p, inner[2]);
+
+    if total_lines > viewport_height {
+        let mut scrollbar_state = ScrollbarState::new(total_lines).position(effective_scroll);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .track_symbol(Some("│"))
+            .thumb_symbol("┃")
+            .style(theme::dim_style());
+        f.render_stateful_widget(scrollbar, inner[2], &mut scrollbar_state);
+    }
+
+    // 3. Footer hotkeys
+    let footer = Line::from(vec![
+        Span::styled("[Esc/q] ", theme::brand_style()),
+        Span::styled("Close  ", theme::dim_style()),
+        Span::styled("[↑/↓ / j/k] ", theme::brand_style()),
+        Span::styled("Scroll  ", theme::dim_style()),
+        Span::styled("[PageUp/Dn] ", theme::brand_style()),
+        Span::styled("Fast  ", theme::dim_style()),
+        Span::styled("[u] ", Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)),
+        Span::styled("Undo Changes (Rollback)", Style::default().fg(COLOR_AMBER)),
+    ]);
+    f.render_widget(Paragraph::new(footer).alignment(Alignment::Center), inner[3]);
 }

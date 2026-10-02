@@ -55,6 +55,18 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/sessions/{id}/permissions/{request_id}",
             post(sessions::respond_permission),
         )
+        .route(
+            "/api/v1/sessions/{id}/diff",
+            get(sessions::get_session_diff),
+        )
+        .route(
+            "/api/v1/sessions/{id}/undo",
+            post(sessions::undo_session),
+        )
+        .route(
+            "/api/v1/sessions/{id}/checkpoints",
+            get(sessions::list_session_checkpoints),
+        )
         .route_layer(from_fn_with_state(Arc::clone(&state), auth_middleware));
 
     Router::new()

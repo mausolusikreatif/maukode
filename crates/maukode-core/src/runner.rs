@@ -36,6 +36,7 @@ pub struct SessionRunner {
     context: Arc<ContextManager>,
     config: RunnerConfig,
     permission_manager: Option<Arc<PermissionManager>>,
+    checkpoint_manager: Option<Arc<crate::checkpoint::CheckpointManager>>,
 }
 
 impl SessionRunner {
@@ -53,11 +54,17 @@ impl SessionRunner {
             context,
             config,
             permission_manager: None,
+            checkpoint_manager: None,
         }
     }
 
     pub fn with_permission_manager(mut self, pm: Arc<PermissionManager>) -> Self {
         self.permission_manager = Some(pm);
+        self
+    }
+
+    pub fn with_checkpoint_manager(mut self, cm: Arc<crate::checkpoint::CheckpointManager>) -> Self {
+        self.checkpoint_manager = Some(cm);
         self
     }
 
@@ -67,12 +74,22 @@ impl SessionRunner {
         user_prompt: Option<String>,
         event_tx: mpsc::UnboundedSender<LLMEvent>,
     ) -> anyhow::Result<()> {
-        let mut session = self.session.write().await;
-        if let Some(prompt) = user_prompt {
-            session.add_message(Message::user(prompt));
+        let (session_id_str, turn_idx) = {
+            let mut session = self.session.write().await;
+            if let Some(ref prompt) = user_prompt {
+                session.add_message(Message::user(prompt.clone()));
+            }
+            session.state = SessionState::Running;
+            (session.id.to_string(), session.messages.len())
+        };
+
+        // Automatic pre-turn shadow git snapshot before any agent tool modifications
+        if let Some(ref cm) = self.checkpoint_manager {
+            let desc = user_prompt.as_deref().unwrap_or("Pre-turn snapshot");
+            if let Err(e) = cm.create_checkpoint(&session_id_str, turn_idx, desc).await {
+                tracing::warn!("Failed to capture shadow git checkpoint: {e}");
+            }
         }
-        session.state = SessionState::Running;
-        drop(session);
 
         let system_prompt = self.context.render_system_context().await;
         let mut step = 0;

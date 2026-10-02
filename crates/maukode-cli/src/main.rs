@@ -265,6 +265,44 @@ async fn main() -> anyhow::Result<()> {
                 if trimmed == "exit" || trimmed == "quit" {
                     break;
                 }
+                if trimmed == "/diff" {
+                    match client.get_diff(target_session_id).await {
+                        Ok(diff_resp) => {
+                            println!("\x1b[1;36m=== Session Diff ===\x1b[0m");
+                            if !diff_resp.stat_summary.is_empty() {
+                                println!("\x1b[2m{}\x1b[0m", diff_resp.stat_summary);
+                            }
+                            if diff_resp.diff_content.is_empty() {
+                                println!("No changes detected.");
+                            } else {
+                                for line in diff_resp.diff_content.lines() {
+                                    if line.starts_with('+') && !line.starts_with("+++") {
+                                        println!("\x1b[32m{line}\x1b[0m");
+                                    } else if line.starts_with('-') && !line.starts_with("---") {
+                                        println!("\x1b[31m{line}\x1b[0m");
+                                    } else if line.starts_with("@@") {
+                                        println!("\x1b[36m{line}\x1b[0m");
+                                    } else {
+                                        println!("{line}");
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("\x1b[31mFailed to get diff: {e}\x1b[0m"),
+                    }
+                    continue;
+                }
+                if trimmed.starts_with("/undo") {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    let turns = parts.get(1).and_then(|s| s.parse::<usize>().ok());
+                    match client.undo(target_session_id, turns).await {
+                        Ok(undo_resp) => {
+                            println!("\x1b[32m✓ {}\x1b[0m", undo_resp.message);
+                        }
+                        Err(e) => eprintln!("\x1b[31mUndo failed: {e}\x1b[0m"),
+                    }
+                    continue;
+                }
                 println!();
                 remote::run_remote_turn(&client, target_session_id, trimmed).await?;
                 println!();
@@ -339,13 +377,16 @@ async fn main() -> anyhow::Result<()> {
             temperature: None,
         };
 
+        let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&cwd).await?);
         let runner = SessionRunner::new(
             Arc::clone(&session_arc),
             llm_client,
             tools,
             context,
             runner_config,
-        ).with_permission_manager(Arc::clone(&perm_mgr));
+        )
+        .with_permission_manager(Arc::clone(&perm_mgr))
+        .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
 
         execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(prompt)).await?;
 
@@ -372,6 +413,7 @@ async fn main() -> anyhow::Result<()> {
             Session::new(&cwd)
         };
 
+        let active_sess_id = active_sess.id;
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
         let tools = if config.security.jail_path_traversal {
             let jail = maukode_tools::PathJail::new(&cwd)
@@ -386,6 +428,7 @@ async fn main() -> anyhow::Result<()> {
         );
         let context = Arc::new(ContextManager::new(&cwd));
         let llm_client = config.create_active_llm_client()?;
+        let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&cwd).await?);
 
         let runner = SessionRunner::new(
             Arc::clone(&session_arc),
@@ -398,7 +441,9 @@ async fn main() -> anyhow::Result<()> {
                 max_tokens: Some(4096),
                 temperature: None,
             },
-        ).with_permission_manager(Arc::clone(&perm_mgr));
+        )
+        .with_permission_manager(Arc::clone(&perm_mgr))
+        .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
 
         loop {
             print!("\x1b[1;32mmaukode>\x1b[0m ");
@@ -415,6 +460,46 @@ async fn main() -> anyhow::Result<()> {
             }
             if trimmed == "exit" || trimmed == "quit" {
                 break;
+            }
+            if trimmed == "/diff" {
+                let sid = active_sess_id.to_string();
+                match checkpoint_manager.get_diff(&sid, None).await {
+                    Ok(diff_resp) => {
+                        println!("\x1b[1;36m=== Session Diff ===\x1b[0m");
+                        if !diff_resp.stat_summary.is_empty() {
+                            println!("\x1b[2m{}\x1b[0m", diff_resp.stat_summary);
+                        }
+                        if diff_resp.diff_content.is_empty() {
+                            println!("No changes detected.");
+                        } else {
+                            for line in diff_resp.diff_content.lines() {
+                                if line.starts_with('+') && !line.starts_with("+++") {
+                                    println!("\x1b[32m{line}\x1b[0m");
+                                } else if line.starts_with('-') && !line.starts_with("---") {
+                                    println!("\x1b[31m{line}\x1b[0m");
+                                } else if line.starts_with("@@") {
+                                    println!("\x1b[36m{line}\x1b[0m");
+                                } else {
+                                    println!("{line}");
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("\x1b[31mFailed to get diff: {e}\x1b[0m"),
+                }
+                continue;
+            }
+            if trimmed.starts_with("/undo") {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                let turns = parts.get(1).and_then(|s| s.parse::<usize>().ok());
+                let sid = active_sess_id.to_string();
+                match checkpoint_manager.undo(&sid, turns).await {
+                    Ok(undo_resp) => {
+                        println!("\x1b[32m✓ {}\x1b[0m", undo_resp.message);
+                    }
+                    Err(e) => eprintln!("\x1b[31mUndo failed: {e}\x1b[0m"),
+                }
+                continue;
             }
 
             println!();

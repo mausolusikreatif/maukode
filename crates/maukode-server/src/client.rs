@@ -225,4 +225,44 @@ impl ServerClient {
         }
         Ok(())
     }
+
+    pub async fn get_diff(&self, session_id: SessionId) -> Result<maukode_protocol::DiffResponse> {
+        let resp = self
+            .http
+            .get(format!("{}/api/v1/sessions/{session_id}/diff", self.base_url))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to get session diff: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn undo(&self, session_id: SessionId, turns: Option<usize>) -> Result<maukode_protocol::UndoResponse> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/sessions/{session_id}/undo", self.base_url))
+            .json(&serde_json::json!({ "turns": turns }))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to undo session: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn list_checkpoints(&self, session_id: SessionId) -> Result<Vec<maukode_protocol::Checkpoint>> {
+        let resp = self
+            .http
+            .get(format!("{}/api/v1/sessions/{session_id}/checkpoints", self.base_url))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to list session checkpoints: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
 }

@@ -35,7 +35,7 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(backend)?;
 
     let (mut events, event_tx) = EventHandler::new(Duration::from_millis(50));
-    let mut app = App::new(cwd, event_tx, session_id, continue_latest, server_client)?;
+    let mut app = App::new(cwd, event_tx, session_id, continue_latest, server_client).await?;
 
     let res = run_loop(&mut terminal, &mut app, &mut events).await;
 
@@ -104,6 +104,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 ActiveModal::SessionSelector { selected_idx, .. } => {
                     *selected_idx = selected_idx.saturating_sub(1);
                 }
+                ActiveModal::DiffViewer { scroll, .. } => {
+                    *scroll = scroll.saturating_sub(3);
+                }
                 _ => app.scroll_up(3),
             },
             crossterm::event::MouseEventKind::ScrollDown => match &mut app.active_modal {
@@ -135,6 +138,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                         *selected_idx += 1;
                     }
                 }
+                ActiveModal::DiffViewer { scroll, max_scroll, .. } => {
+                    *scroll = (*scroll + 3).min(*max_scroll);
+                }
                 _ => app.scroll_down(3),
             },
             _ => {}
@@ -165,6 +171,32 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 }
             }
         }
+        AppEvent::DiffFetched(resp) => {
+            let line_count = resp.diff_content.lines().count();
+            app.active_modal = ActiveModal::DiffViewer {
+                diff: resp.diff_content,
+                stat: resp.stat_summary,
+                scroll: 0,
+                max_scroll: line_count.saturating_sub(10),
+            };
+            app.set_status("Diff viewer opened");
+        }
+        AppEvent::UndoCompleted(res) => match res {
+            Ok(msg) => {
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content: format!("Undo successful: {msg}"),
+                });
+                app.set_status(format!("Undo: {msg}"));
+            }
+            Err(e) => {
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content: format!("Undo failed: {e}"),
+                });
+                app.set_status(format!("Undo failed: {e}"));
+            }
+        },
     }
 }
 
@@ -484,6 +516,38 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     }
                 }
                 app.active_modal = ActiveModal::None;
+            }
+            _ => {}
+        },
+        ActiveModal::DiffViewer {
+            scroll,
+            max_scroll,
+            ..
+        } => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                app.active_modal = ActiveModal::None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                *scroll = scroll.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                *scroll = (*scroll + 1).min(*max_scroll);
+            }
+            KeyCode::PageUp => {
+                *scroll = scroll.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                *scroll = (*scroll + 10).min(*max_scroll);
+            }
+            KeyCode::Home => {
+                *scroll = 0;
+            }
+            KeyCode::End => {
+                *scroll = *max_scroll;
+            }
+            KeyCode::Char('u') | KeyCode::Char('U') => {
+                app.active_modal = ActiveModal::None;
+                app.undo_turn(None);
             }
             _ => {}
         },
