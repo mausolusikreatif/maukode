@@ -432,6 +432,8 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Init  ", theme::dim_style()),
             Span::styled("/mcp ", Style::default().fg(COLOR_TOOL)),
             Span::styled("MCP  ", theme::dim_style()),
+            Span::styled("/compact ", Style::default().fg(COLOR_AMBER)),
+            Span::styled("Compact  ", theme::dim_style()),
             Span::styled("/help ", theme::muted_style()),
             Span::styled("Commands  ", theme::dim_style()),
             Span::styled("^C ", Style::default().fg(COLOR_RED)),
@@ -856,6 +858,10 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled("/mcp            ", Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD)),
             Span::styled("Inspect active MCP servers and registered dynamic tools", theme::text_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("/compact [focus]", Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)),
+            Span::styled("Summarize older conversation turns & reclaim context tokens", theme::text_style()),
         ]),
         Line::from(vec![
             Span::styled("/new            ", theme::brand_style()),

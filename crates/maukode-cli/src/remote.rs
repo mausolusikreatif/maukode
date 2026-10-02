@@ -73,6 +73,9 @@ pub async fn run_remote_turn(
                 LLMEvent::Usage(usage) => {
                     println!("\n\x1b[2m[Tokens: in={}, out={}]\x1b[0m", usage.input_tokens, usage.output_tokens);
                 }
+                LLMEvent::ContextWarning { current_tokens, max_tokens, percent, message } => {
+                    println!("\n\x1b[1;33m⚠️  [CONTEXT WARNING]\x1b[0m {message} ({current_tokens}/{max_tokens} tokens, {percent}%)");
+                }
                 LLMEvent::PermissionRequest(req) => {
                     let cmd = req.command.as_deref().unwrap_or(req.path.as_deref().unwrap_or(&req.description));
                     println!("\n\x1b[1;33m⚠️  [CONFIRMATION REQUIRED]\x1b[0m");
