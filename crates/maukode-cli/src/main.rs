@@ -263,6 +263,23 @@ async fn execute_turn(runner: &SessionRunner, prompt: Option<String>) -> anyhow:
                 LLMEvent::ToolCallFinish { tool_call } => {
                     println!("\x1b[2m  Args: {}\x1b[0m", tool_call.arguments);
                 }
+                LLMEvent::ToolResult(tr) => {
+                    let badge = if tr.is_error {
+                        "\x1b[1;31m✗ Tool Error:\x1b[0m"
+                    } else {
+                        "\x1b[1;32m✓ Tool Result:\x1b[0m"
+                    };
+                    println!("{badge} \x1b[1m{}\x1b[0m \x1b[2m({})\x1b[0m", tr.tool_name, tr.tool_call_id);
+                    let preview = if tr.content.len() > 300 {
+                        format!("{}... (truncated)", &tr.content[..300])
+                    } else {
+                        tr.content
+                    };
+                    for l in preview.lines() {
+                        println!("\x1b[2m  {l}\x1b[0m");
+                    }
+                    println!();
+                }
                 LLMEvent::Usage(usage) => {
                     println!(
                         "\n\x1b[2m[Tokens: In {} | Out {}{}]\x1b[0m",

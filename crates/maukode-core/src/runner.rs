@@ -96,7 +96,7 @@ impl SessionRunner {
 
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
-            let mut finish_reason = FinishReason::EndTurn;
+            let mut _finish_reason = FinishReason::EndTurn;
 
             while let Some(event_res) = stream.next().await {
                 match event_res {
@@ -109,7 +109,7 @@ impl SessionRunner {
                                 tool_calls.push(tool_call.clone());
                             }
                             LLMEvent::Finish { reason } => {
-                                finish_reason = reason.clone();
+                                _finish_reason = reason.clone();
                             }
                             _ => {}
                         }
@@ -142,8 +142,8 @@ impl SessionRunner {
             session.add_message(Message::assistant(assistant_parts));
             drop(session);
 
-            // If there are no tool calls or finish reason is EndTurn, we are done
-            if tool_calls.is_empty() || finish_reason == FinishReason::EndTurn {
+            // If there are no tool calls to execute, the turn is complete!
+            if tool_calls.is_empty() {
                 debug!("Turn complete with no further tool calls.");
                 break;
             }
@@ -158,12 +158,14 @@ impl SessionRunner {
                     Err(err) => (format!("Error executing tool: {err}"), true),
                 };
 
-                tool_results.push(ContentPart::ToolResult(ToolResult {
+                let tr = ToolResult {
                     tool_call_id: call.id,
                     tool_name: call.name,
                     content,
                     is_error,
-                }));
+                };
+                let _ = event_tx.send(LLMEvent::ToolResult(tr.clone()));
+                tool_results.push(ContentPart::ToolResult(tr));
             }
 
             // Append tool results as user role message for LLM continuation

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::message::ToolCall;
+use crate::message::{ToolCall, ToolResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +27,7 @@ pub enum LLMEvent {
     ToolCallStart { id: String, name: String },
     ToolCallDelta { id: String, delta: String },
     ToolCallFinish { tool_call: ToolCall },
+    ToolResult(ToolResult),
     Usage(TokenUsage),
     Finish { reason: FinishReason },
     Error { message: String },

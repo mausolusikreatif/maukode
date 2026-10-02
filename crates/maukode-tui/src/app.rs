@@ -465,6 +465,18 @@ impl App {
                     }
                 }
             }
+            LLMEvent::ToolResult(tr) => {
+                self.items.push(ChatItem {
+                    role: ChatRole::ToolResult {
+                        name: tr.tool_name,
+                        id: tr.tool_call_id,
+                        is_error: tr.is_error,
+                    },
+                    content: tr.content,
+                });
+                self.set_status("Tool executed");
+                self.auto_scroll = true;
+            }
             LLMEvent::Usage(usage) => {
                 self.token_usage = Some(usage);
             }

@@ -122,7 +122,14 @@ impl LLMClient for OpenAIClient {
             body["max_tokens"] = json!(max_tokens);
         }
 
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        let base = self.base_url.trim_end_matches('/');
+        let url = if base.ends_with("/chat/completions") {
+            base.to_string()
+        } else if base.ends_with("/v1") {
+            format!("{base}/chat/completions")
+        } else {
+            format!("{base}/v1/chat/completions")
+        };
         let mut req_builder = self
             .http
             .post(&url)
@@ -175,109 +182,111 @@ impl LLMClient for OpenAIClient {
                         Err(_) => return None,
                     };
 
+                    let choice = val.get("choices").and_then(|c| c.get(0));
+
+                    if let Some(choice) = choice {
+                        let delta = choice.get("delta");
+
+                        // Text content delta
+                        if let Some(text) = delta.and_then(|d| d.get("content")).and_then(|t| t.as_str()) {
+                            if !text.is_empty() {
+                                return Some(Ok(LLMEvent::TextDelta {
+                                    text: text.to_string(),
+                                }));
+                            }
+                        }
+
+                        // Reasoning delta (DeepSeek / OpenAI reasoning)
+                        if let Some(reasoning) = delta.and_then(|d| d.get("reasoning_content")).and_then(|t| t.as_str()) {
+                            if !reasoning.is_empty() {
+                                return Some(Ok(LLMEvent::ReasoningDelta {
+                                    text: reasoning.to_string(),
+                                }));
+                            }
+                        }
+
+                        // Tool calls
+                        if let Some(tool_calls) = delta.and_then(|d| d.get("tool_calls")).and_then(|tc| tc.as_array()) {
+                            let mut lock = state.lock().await;
+                            for tc in tool_calls {
+                                let index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                                let entry = lock.tools.entry(index).or_insert_with(|| ToolAccumulator {
+                                    id: String::new(),
+                                    name: String::new(),
+                                    args: String::new(),
+                                });
+
+                                if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+                                    entry.id = id.to_string();
+                                }
+                                if let Some(func) = tc.get("function") {
+                                    if let Some(name) = func.get("name").and_then(|n| n.as_str()) {
+                                        if !name.is_empty() && entry.name.is_empty() {
+                                            entry.name = name.to_string();
+                                            return Some(Ok(LLMEvent::ToolCallStart {
+                                                id: entry.id.clone(),
+                                                name: entry.name.clone(),
+                                            }));
+                                        }
+                                    }
+                                    if let Some(args_chunk) = func.get("arguments").and_then(|a| a.as_str()) {
+                                        entry.args.push_str(args_chunk);
+                                        return Some(Ok(LLMEvent::ToolCallDelta {
+                                            id: entry.id.clone(),
+                                            delta: args_chunk.to_string(),
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+
+                        // Finish reason
+                        if let Some(finish_reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                            let mut lock = state.lock().await;
+                            // If tools were accumulated, emit finish for them
+                            if !lock.tools.is_empty() {
+                                let mut tool_results = Vec::new();
+                                for (_, tool) in lock.tools.drain() {
+                                    if tool.name.is_empty() {
+                                        continue;
+                                    }
+                                    let parsed_args: serde_json::Value =
+                                        serde_json::from_str(&tool.args).unwrap_or_default();
+                                    tool_results.push(LLMEvent::ToolCallFinish {
+                                        tool_call: ToolCall {
+                                            id: tool.id,
+                                            name: tool.name,
+                                            arguments: parsed_args,
+                                        },
+                                    });
+                                }
+                                if let Some(first) = tool_results.into_iter().next() {
+                                    return Some(Ok(first));
+                                }
+                            }
+
+                            let reason = match finish_reason {
+                                "tool_calls" => FinishReason::ToolUse,
+                                "stop" => FinishReason::EndTurn,
+                                "length" => FinishReason::MaxTokens,
+                                _ => FinishReason::EndTurn,
+                            };
+                            return Some(Ok(LLMEvent::Finish { reason }));
+                        }
+                    }
+
                     // Check for usage in stream
                     if let Some(usage) = val.get("usage").and_then(|u| u.as_object()) {
                         let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
                         let completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                        return Some(Ok(LLMEvent::Usage(TokenUsage {
-                            input_tokens: prompt_tokens,
-                            output_tokens: completion_tokens,
-                            cache_read_tokens: None,
-                            cache_write_tokens: None,
-                        })));
-                    }
-
-                    let choice = match val.get("choices").and_then(|c| c.get(0)) {
-                        Some(c) => c,
-                        None => return None,
-                    };
-
-                    let delta = match choice.get("delta") {
-                        Some(d) => d,
-                        None => return None,
-                    };
-
-                    // Text content delta
-                    if let Some(text) = delta.get("content").and_then(|t| t.as_str()) {
-                        if !text.is_empty() {
-                            return Some(Ok(LLMEvent::TextDelta {
-                                text: text.to_string(),
-                            }));
+                        if prompt_tokens > 0 || completion_tokens > 0 {
+                            return Some(Ok(LLMEvent::Usage(TokenUsage {
+                                input_tokens: prompt_tokens,
+                                output_tokens: completion_tokens,
+                                cache_read_tokens: None,
+                                cache_write_tokens: None,
+                            })));
                         }
-                    }
-
-                    // Reasoning delta (DeepSeek / OpenAI reasoning)
-                    if let Some(reasoning) = delta.get("reasoning_content").and_then(|t| t.as_str()) {
-                        if !reasoning.is_empty() {
-                            return Some(Ok(LLMEvent::ReasoningDelta {
-                                text: reasoning.to_string(),
-                            }));
-                        }
-                    }
-
-                    // Tool calls
-                    if let Some(tool_calls) = delta.get("tool_calls").and_then(|tc| tc.as_array()) {
-                        let mut lock = state.lock().await;
-                        for tc in tool_calls {
-                            let index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
-                            let entry = lock.tools.entry(index).or_insert_with(|| ToolAccumulator {
-                                id: String::new(),
-                                name: String::new(),
-                                args: String::new(),
-                            });
-
-                            if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
-                                entry.id = id.to_string();
-                            }
-                            if let Some(func) = tc.get("function") {
-                                if let Some(name) = func.get("name").and_then(|n| n.as_str()) {
-                                    entry.name = name.to_string();
-                                    return Some(Ok(LLMEvent::ToolCallStart {
-                                        id: entry.id.clone(),
-                                        name: entry.name.clone(),
-                                    }));
-                                }
-                                if let Some(args_chunk) = func.get("arguments").and_then(|a| a.as_str()) {
-                                    entry.args.push_str(args_chunk);
-                                    return Some(Ok(LLMEvent::ToolCallDelta {
-                                        id: entry.id.clone(),
-                                        delta: args_chunk.to_string(),
-                                    }));
-                                }
-                            }
-                        }
-                    }
-
-                    // Finish reason
-                    if let Some(finish_reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
-                        let mut lock = state.lock().await;
-                        // If tools were accumulated, emit finish for them
-                        if !lock.tools.is_empty() {
-                            let mut tool_results = Vec::new();
-                            for (_, tool) in lock.tools.drain() {
-                                let parsed_args: serde_json::Value =
-                                    serde_json::from_str(&tool.args).unwrap_or_default();
-                                tool_results.push(LLMEvent::ToolCallFinish {
-                                    tool_call: ToolCall {
-                                        id: tool.id,
-                                        name: tool.name,
-                                        arguments: parsed_args,
-                                    },
-                                });
-                            }
-                            // Return first finished tool call, others will follow or finish event
-                            if let Some(first) = tool_results.into_iter().next() {
-                                return Some(Ok(first));
-                            }
-                        }
-
-                        let reason = match finish_reason {
-                            "tool_calls" => FinishReason::ToolUse,
-                            "stop" => FinishReason::EndTurn,
-                            "length" => FinishReason::MaxTokens,
-                            _ => FinishReason::EndTurn,
-                        };
-                        return Some(Ok(LLMEvent::Finish { reason }));
                     }
 
                     None
