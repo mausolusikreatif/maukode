@@ -1,96 +1,172 @@
 # MauKode 🤖
 
-**MauKode** adalah implementasi *open-source AI coding agent* berkinerja tinggi yang ditulis dalam bahasa **Rust** (diporting dan terinspirasi dari arsitektur [OpenCode](https://opencode.ai)).
+**MauKode** is a high-performance, autonomous agentic AI coding assistant written in **Rust** (inspired by the architecture of [OpenCode](https://opencode.ai) and Claude Code).
 
-MauKode dirancang untuk mengeksekusi instruksi coding secara otonom, bernalar menggunakan Large Language Models (LLM), mengeksekusi *tools* (seperti eksekusi terminal, baca/tulis/edit file, pencarian regex grep), dan terus beriterasi hingga tugas selesai.
+MauKode operates autonomously to plan and execute complex software engineering tasks using Large Language Models (LLMs), executing local tools (shell commands, surgical file edits, regex grepping, filesystem navigation), and continuously iterating until the task is solved.
 
 ---
 
-## 🏗 Arsitektur Monorepo Cargo Workspace
+## 🌟 Key Highlights
 
-Proyek ini dibangun sebagai Rust workspace modular yang memisahkan tanggung jawab secara ketat:
+- **Decoupled Client-Server Architecture**:
+  - Automatically manages a local background server daemon on `http://127.0.0.1:4096`. Running `maukode` in any terminal immediately connects without opening multiple windows.
+  - Supports headless remote server deployment on VPS with optional Bearer token authentication (`maukode --remote http://vps:4096`).
+  - Connect multiple terminals across different directories to the same daemon simultaneously.
+- **Modern, Sleek Terminal User Interface (TUI)**:
+  - Built with `ratatui` and `crossterm`.
+  - Non-blocking OS thread polling with zero CPU spikes.
+  - Curated semantic theme (*Electric Mint*, *Slate*, *Iris Violet*, *Amber Gold*).
+  - High-density 1-line telemetry status bar.
+  - Structured tool call cards and syntax-highlighted git diffs (`+` green, `-` red).
+  - Floating Telescope-style search modals (`/model`, `/provider`, `/sessions`) with real-time filtering, `ListState` scrolling, and mouse wheel support.
+- **Multi-Workspace & Directory Awareness**:
+  - Dynamically switch working directories during conversations via `/cd <path>` or inspect with `/dir`.
+  - SQLite sessions are indexed and filtered per directory.
+- **Universal Multi-Turn Drain Loop**:
+  - Automatic tool calling iteration until completion.
+  - Built-in tools: `bash` (command runner with timeout), `read_file`, `write_file`, `edit_file` (surgical substring replacement), `grep` (fast regex matching), and `glob`.
+- **Multi-Provider & Model Hub**:
+  - Native streaming integration for Anthropic, OpenAI, Ollama (Local), OpenRouter, and any OpenAI-compatible proxy (e.g. `llm-kita`).
+  - Dynamic model discovery from provider endpoints (`/v1/models`).
+- **Persistent SQLite Storage**:
+  - Full session history, token analytics, and messages automatically preserved in `~/.local/share/maukode/maukode.db`.
+
+---
+
+## 🏗 Cargo Workspace Architecture
+
+MauKode is structured as a modular Rust monorepo:
 
 ```text
 maukode/
-├── Cargo.toml                      # Workspace root manifest
+├── Cargo.toml                    # Workspace root manifest
 ├── crates/
-│   ├── maukode-protocol/           # Definisi schema, Message, Role, ToolCall, ToolResult, LLMEvent
-│   ├── maukode-llm/                # Adapter LLM streaming SSE (Anthropic & OpenAI/Ollama/OpenRouter)
-│   ├── maukode-tools/              # Eksekutor tools: bash, read_file, write_file, edit_file, glob, grep
-│   ├── maukode-core/               # Session state, ContextManager (AGENTS.md), Drain loop, SQLite Store
-│   ├── maukode-tui/                # Interactive Terminal UI (Ratatui + Crossterm)
-│   └── maukode-cli/                # Binary CLI utama (`maukode`)
+│   ├── maukode-protocol/         # Core schemas: SessionId, Message, Role, ToolCall, LLMEvent
+│   ├── maukode-llm/              # Streaming SSE adapters (Anthropic & OpenAI-compatible)
+│   ├── maukode-tools/            # Tool definitions and executors: bash, file, grep, glob
+│   ├── maukode-core/             # Session state, ContextManager (AGENTS.md), Drain loop, SQLite Store
+│   ├── maukode-server/           # Axum HTTP REST + SSE Server, ServerClient SDK & Daemon manager
+│   ├── maukode-tui/              # Interactive Terminal UI (Ratatui, theme, modals, events)
+│   └── maukode-cli/              # Main CLI entrypoint (`maukode`)
 ```
 
 ---
 
-## 🚀 Fitur yang Sudah Diimplementasikan
+## 🚀 Installation
 
-- [x] **Interactive TUI Penuh (`ratatui` + `crossterm`)**:
-  - Live token streaming, thinking/reasoning blocks, tool execution blocks, scrollable chat viewport.
-  - Shortcut navigasi: `PageUp`/`PageDown` scroll, `Esc` cancel/dismiss, `Ctrl+C` quit.
-- [x] **Slash Commands Interaktif di TUI**:
-  - `/provider`: Buka modal pemilihan provider atau tekan `a` untuk menambahkan provider OpenAI-compatible baru (nama, base URL, API key, model default).
-  - `/model`: Buka modal pemilih model yang secara otomatis mengambil daftar model dari endpoint `/v1/models` atau `/api/tags` provider.
-  - `/new`: Memulai sesi baru yang bersih.
-  - `/sessions`: Membuka modal riwayat sesi yang tersimpan untuk dimuat kembali.
-  - `/clear`: Membersihkan tampilan pesan aktif.
-  - `/help`: Menampilkan panduan bantuan perintah.
-- [x] **Persistensi Sesi SQLite (`rusqlite`)**:
-  - Semua pesan, tool calls, tool results, dan metadata tersimpan secara otomatis di `~/.local/share/maukode/maukode.db` (atau `~/.maukode/maukode.db`).
-  - Lanjutkan sesi sebelumnya dengan `-c, --continue-session` atau `-s, --session <UUID>`.
-- [x] **Konfigurasi Provider Persisten (`~/.config/maukode/config.json`)**:
-  - Provider bawaan: Anthropic, OpenAI, Ollama (Local), OpenRouter.
-  - Tambah provider OpenAI-compatible baru langsung dari TUI atau CLI.
-- [x] **Universal Tool Calling & Settlement Loop**: Loop otomatis multi-turn yang mengeksekusi tool dan mengembalikan hasilnya ke LLM sampai turn selesai (*drain loop*).
-- [x] **Built-in Coding Tools**:
-  - `bash`: Eksekusi terminal dengan timeout dan output capture.
-  - `read_file`: Membaca konten file dengan nomor baris (opsional range).
-  - `write_file`: Menulis / membuat file baru beserta direktori parent.
-  - `edit_file`: Penggantian substring teks secara bedah (*surgical edit*).
-  - `glob`: Pencarian berkas berdasarkan pola.
-  - `grep`: Pencarian isi file berbasis regex yang cepat.
-- [x] **Context Discovery**: Menemukan dan menyertakan instruksi `AGENTS.md` dari root project secara otomatis ke dalam baseline system prompt.
+### Prerequisites
+- [Rust toolchain](https://rustup.rs/) (Rust 1.80+ or 2021 Edition)
+
+### Install via Cargo
+
+To install the `maukode` binary globally into `~/.cargo/bin`:
+
+```bash
+cargo install --path crates/maukode-cli --force
+```
+
+Ensure `~/.cargo/bin` is in your `$PATH`.
 
 ---
 
-## 🛠 Cara Membangun & Menjalankan
+## 💻 Usage
 
-### Persyaratan
-- Rust toolchain (Rust 1.80+ atau edisi 2021)
-
-### Build
-```bash
-cargo build --release
-```
-
-### Menjalankan MauKode
+### 1. Launch Interactive TUI (Recommended)
+Simply navigate to your project directory and run:
 
 ```bash
-# 1. Jalankan Interactive TUI (default)
-./target/debug/maukode
+maukode
+```
+If the background daemon is not already running, MauKode will automatically start it silently and connect instantly.
 
-# 2. Lanjutkan sesi sebelumnya di TUI
-./target/debug/maukode --continue-session
+### 2. Resume Previous Sessions
+```bash
+# Continue the latest session in the current directory
+maukode -c
 
-# 3. Jalankan mode single-shot (headless command)
-./target/debug/maukode run "buatkan file hello.rs yang mencetak halo dunia"
-
-# 4. Mode CLI REPL sederhana (tanpa TUI)
-./target/debug/maukode --cli
+# Resume a specific session by UUID
+maukode -s <SESSION_UUID>
 ```
 
-### Slash Commands di TUI
+### 3. Server Daemon Management
+Control the background server daemon explicitly:
 
-| Perintah | Deskripsi |
-|---|---|
-| `/provider` | Membuka popup provider. Tekan `a` untuk menambah provider OpenAI-compatible baru. |
-| `/provider use <id>` | Langsung mengaktifkan provider tertentu (contoh: `/provider use ollama`). |
-| `/provider add <name> <base_url> [key]` | Menambahkan provider OpenAI-compatible via teks perintah. |
-| `/model` | Membuka popup pemilih model (mengambil daftar model dari API provider secara otomatis). |
-| `/model <nama_model>` | Langsung mengganti model aktif (contoh: `/model gpt-4o-mini`). |
-| `/sessions` | Membuka dialog untuk memuat riwayat sesi lama dari SQLite. |
-| `/new` | Memulai percakapan baru. |
-| `/clear` | Membersihkan layar chat saat ini. |
-| `/help` | Menampilkan bantuan. |
-| `/exit` | Keluar dari aplikasi. |
+```bash
+# Check if the daemon is active, view PID and URL
+maukode server status
+
+# Start daemon in the background
+maukode server start
+
+# Stop the background daemon
+maukode server stop
+
+# Restart the background daemon
+maukode server restart
+
+# Run in foreground (ideal for systemd services or Docker containers)
+maukode server --bind 0.0.0.0:4096 --token "your-secret-token"
+```
+
+### 4. Connect to Remote VPS
+```bash
+maukode --remote http://vps-ip:4096 --token "your-secret-token"
+```
+
+### 5. Headless Single-Prompt Execution
+```bash
+maukode run "refactor the error handling in crates/maukode-core/src/runner.rs"
+```
+
+### 6. Simple CLI REPL (Non-TUI mode)
+```bash
+maukode --cli
+```
+
+### 7. Standalone In-Process Mode
+Run without touching any background daemon:
+```bash
+maukode --standalone
+```
+
+---
+
+## ⌨️ Interactive Slash Commands
+
+Inside the TUI, you can type slash commands directly into the prompt:
+
+| Command | Description |
+| :--- | :--- |
+| `/model` | Open the Telescope model selector modal (dynamic search across provider models). |
+| `/model <name>` | Immediately set the active model (e.g. `/model deepseek-v4-pro`). |
+| `/provider` | Open the provider menu to choose or add an AI provider. |
+| `/provider use <id>` | Switch active provider (e.g. `/provider use ollama`). |
+| `/provider add <name> <base_url> [key]` | Register a custom OpenAI-compatible provider. |
+| `/cd <path>` | Switch working directory on the fly without closing the session. |
+| `/dir` | Print the current working directory. |
+| `/sessions` | Open the session history modal to resume previous chats from SQLite. |
+| `/new` | Start a fresh session in the current directory. |
+| `/clear` | Clear the current conversation viewport. |
+| `/help` | Open the quick reference cheat sheet. |
+| `/exit`, `/quit` | Exit MauKode. |
+
+---
+
+## 📁 Configuration & Storage
+
+- **Configuration File**: `~/.config/maukode/config.json`  
+  Stores active provider, active model, and configured endpoints.
+- **SQLite Database**: `~/.local/share/maukode/maukode.db`  
+  Stores all conversation history, metadata, and token usage.
+- **Daemon Metadata**: `~/.local/share/maukode/daemon.json`
+- **Server Logs**: `~/.local/share/maukode/server.log`
+
+---
+
+## 📜 License
+
+Licensed under either of:
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
+
+at your option.
