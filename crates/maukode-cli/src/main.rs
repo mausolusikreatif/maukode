@@ -516,7 +516,7 @@ async fn execute_turn(
                     let mut answer = String::new();
                     let decision = if io::stdin().read_line(&mut answer).is_ok() {
                         match answer.trim().to_lowercase().as_str() {
-                            "y" | "yes" | "" => maukode_protocol::PermissionDecision::AllowOnce,
+                            "y" | "yes" => maukode_protocol::PermissionDecision::AllowOnce,
                             "a" | "all" => maukode_protocol::PermissionDecision::AllowSession,
                             _ => maukode_protocol::PermissionDecision::Deny,
                         }
