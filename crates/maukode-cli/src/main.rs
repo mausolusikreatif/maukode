@@ -121,11 +121,11 @@ async fn main() -> anyhow::Result<()> {
         println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
 
         let active_sess = if let Some(id) = parsed_session_id {
-            store.load_session(id).await?.unwrap_or_else(Session::new)
+            store.load_session(id).await?.unwrap_or_else(|| Session::new(&cwd))
         } else if cli.continue_session {
-            store.get_latest_session().await?.unwrap_or_else(Session::new)
+            store.get_latest_session_in_directory(&cwd).await?.unwrap_or_else(|| Session::new(&cwd))
         } else {
-            Session::new()
+            Session::new(&cwd)
         };
 
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
@@ -166,11 +166,11 @@ async fn main() -> anyhow::Result<()> {
         println!("══════════════════════════════════════════════════════════════════\n");
 
         let active_sess = if let Some(id) = parsed_session_id {
-            store.load_session(id).await?.unwrap_or_else(Session::new)
+            store.load_session(id).await?.unwrap_or_else(|| Session::new(&cwd))
         } else if cli.continue_session {
-            store.get_latest_session().await?.unwrap_or_else(Session::new)
+            store.get_latest_session_in_directory(&cwd).await?.unwrap_or_else(|| Session::new(&cwd))
         } else {
-            Session::new()
+            Session::new(&cwd)
         };
 
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));

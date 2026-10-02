@@ -91,15 +91,15 @@ impl App {
                 tokio::runtime::Handle::current().block_on(async {
                     store.load_session(id).await.unwrap_or(None)
                 })
-            }).unwrap_or_else(Session::new)
+            }).unwrap_or_else(|| Session::new(&cwd))
         } else if continue_latest {
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
-                    store.get_latest_session().await.unwrap_or(None)
+                    store.get_latest_session_in_directory(&cwd).await.unwrap_or(None)
                 })
-            }).unwrap_or_else(Session::new)
+            }).unwrap_or_else(|| Session::new(&cwd))
         } else {
-            Session::new()
+            Session::new(&cwd)
         };
 
         let session = Arc::new(RwLock::new(initial_session));
@@ -266,9 +266,15 @@ impl App {
     }
 
     pub fn open_sessions_modal(&mut self) {
+        let cwd = self.cwd.clone();
         let sessions = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                self.store.list_sessions().await.unwrap_or_default()
+                let current_dir_sessions = self.store.list_sessions_by_directory(&cwd).await.unwrap_or_default();
+                if !current_dir_sessions.is_empty() {
+                    current_dir_sessions
+                } else {
+                    self.store.list_all_sessions().await.unwrap_or_default()
+                }
             })
         });
         self.active_modal = ActiveModal::SessionSelector {
@@ -278,12 +284,12 @@ impl App {
     }
 
     pub fn switch_to_new_session(&mut self) {
-        let new_sess = Session::new();
+        let new_sess = Session::new(&self.cwd);
         self.session = Arc::new(RwLock::new(new_sess));
         self.items.clear();
         self.items.push(ChatItem {
             role: ChatRole::System,
-            content: "Started a fresh new session.".to_string(),
+            content: format!("Started a fresh new session in '{}'.", self.cwd.display()),
         });
         self.set_status("Started new session");
     }
@@ -293,6 +299,54 @@ impl App {
         let cmd = parts.first().copied().unwrap_or("");
 
         match cmd {
+            "/dir" | "/pwd" => {
+                self.items.push(ChatItem {
+                    role: ChatRole::System,
+                    content: format!("Current working directory: '{}'", self.cwd.display()),
+                });
+            }
+            "/cd" => {
+                if parts.len() < 2 {
+                    self.items.push(ChatItem {
+                        role: ChatRole::System,
+                        content: format!("Usage: /cd <path>. Current: '{}'", self.cwd.display()),
+                    });
+                } else {
+                    let target_str = parts[1..].join(" ");
+                    let expanded = if target_str.starts_with('~') {
+                        if let Some(home) = dirs::home_dir() {
+                            home.join(target_str.trim_start_matches("~/").trim_start_matches('~'))
+                        } else {
+                            PathBuf::from(&target_str)
+                        }
+                    } else {
+                        self.cwd.join(&target_str)
+                    };
+
+                    match std::fs::canonicalize(&expanded) {
+                        Ok(canonical) => {
+                            self.cwd = canonical.clone();
+                            self.tools = Arc::new(create_default_registry(&canonical));
+                            self.context = Arc::new(ContextManager::new(&canonical));
+                            if let Ok(mut sess) = self.session.try_write() {
+                                sess.directory = canonical.clone();
+                            }
+                            self.set_status(format!("Directory: {}", canonical.display()));
+                            self.items.push(ChatItem {
+                                role: ChatRole::System,
+                                content: format!("Changed working directory to '{}'. Tools and context reloaded.", canonical.display()),
+                            });
+                        }
+                        Err(e) => {
+                            self.set_status(format!("Cannot change dir: {e}"));
+                            self.items.push(ChatItem {
+                                role: ChatRole::System,
+                                content: format!("Failed to change directory to '{target_str}': {e}"),
+                            });
+                        }
+                    }
+                }
+            }
             "/provider" | "/providers" => {
                 if parts.len() == 1 {
                     self.open_provider_modal();

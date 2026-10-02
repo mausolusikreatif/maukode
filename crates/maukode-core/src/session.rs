@@ -1,8 +1,10 @@
+use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use maukode_protocol::{Message, SessionId, SessionMetadata, SessionState};
 
 pub struct Session {
     pub id: SessionId,
+    pub directory: PathBuf,
     pub messages: Vec<Message>,
     pub state: SessionState,
     pub created_at: DateTime<Utc>,
@@ -10,10 +12,11 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new() -> Self {
+    pub fn new(directory: impl Into<PathBuf>) -> Self {
         let now = Utc::now();
         Self {
             id: SessionId::new(),
+            directory: directory.into(),
             messages: Vec::new(),
             state: SessionState::Idle,
             created_at: now,
@@ -21,10 +24,11 @@ impl Session {
         }
     }
 
-    pub fn with_id(id: SessionId) -> Self {
+    pub fn with_id(id: SessionId, directory: impl Into<PathBuf>) -> Self {
         let now = Utc::now();
         Self {
             id,
+            directory: directory.into(),
             messages: Vec::new(),
             state: SessionState::Idle,
             created_at: now,
@@ -40,6 +44,7 @@ impl Session {
     pub fn metadata(&self) -> SessionMetadata {
         SessionMetadata {
             id: self.id,
+            directory: self.directory.to_string_lossy().to_string(),
             title: None,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -50,6 +55,7 @@ impl Session {
 
 impl Default for Session {
     fn default() -> Self {
-        Self::new()
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::new(cwd)
     }
 }

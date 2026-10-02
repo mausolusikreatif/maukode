@@ -1404,6 +1404,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "crossterm",
+ "dirs",
  "futures",
  "maukode-core",
  "maukode-llm",

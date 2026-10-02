@@ -322,6 +322,9 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     });
                     if let Some(loaded_session) = loaded {
                         let messages = loaded_session.messages.clone();
+                        app.cwd = loaded_session.directory.clone();
+                        app.tools = std::sync::Arc::new(maukode_tools::create_default_registry(&app.cwd));
+                        app.context = std::sync::Arc::new(maukode_core::ContextManager::new(&app.cwd));
                         app.session = std::sync::Arc::new(tokio::sync::RwLock::new(loaded_session));
                         app.items.clear();
                         for msg in &messages {
@@ -335,7 +338,7 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                                 app.items.push(crate::app::ChatItem { role, content: text });
                             }
                         }
-                        app.set_status(format!("Loaded session {}", target_id));
+                        app.set_status(format!("Loaded session {} ({})", target_id, app.cwd.display()));
                     }
                 }
                 app.active_modal = ActiveModal::None;

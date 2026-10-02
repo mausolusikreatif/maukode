@@ -37,6 +37,7 @@ pub enum SessionState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMetadata {
     pub id: SessionId,
+    pub directory: String,
     pub title: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

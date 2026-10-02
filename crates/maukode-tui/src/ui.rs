@@ -569,9 +569,18 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
 
             let time_str = s.updated_at.format("%Y-%m-%d %H:%M").to_string();
 
+            let dir_label = if s.directory.is_empty() {
+                String::new()
+            } else {
+                let p = std::path::Path::new(&s.directory);
+                let folder = p.file_name().and_then(|n| n.to_str()).unwrap_or(&s.directory);
+                format!(" 📁 {folder}")
+            };
+
             ListItem::new(Line::from(vec![
                 Span::styled(prefix, style),
                 Span::styled(&s.title, style),
+                Span::styled(dir_label, Style::default().fg(Color::Yellow)),
                 Span::styled(format!(" [{}]", s.model), Style::default().fg(Color::DarkGray)),
                 Span::styled(format!(" ({time_str}, {} msgs)", s.message_count), Style::default().fg(Color::Blue)),
             ]))
@@ -583,7 +592,7 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
 }
 
 fn draw_help_modal(f: &mut Frame) {
-    let area = centered_rect(60, 50, f.area());
+    let area = centered_rect(65, 55, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -602,15 +611,23 @@ fn draw_help_modal(f: &mut Frame) {
             Span::raw("Open model menu to fetch & choose model from current provider"),
         ]),
         Line::from(vec![
+            Span::styled("/cd <path>      ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw("Switch project/workspace directory on the fly"),
+        ]),
+        Line::from(vec![
+            Span::styled("/dir            ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw("Print the active project working directory"),
+        ]),
+        Line::from(vec![
             Span::styled("/new            ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw("Start a new clean session"),
+            Span::raw("Start a new clean session in current directory"),
         ]),
         Line::from(vec![
             Span::styled("/sessions       ", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
             Span::raw("View and resume previous saved sessions from SQLite"),
         ]),
         Line::from(vec![
-            Span::styled("/clear          ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("/clear          ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
             Span::raw("Clear the current conversation view"),
         ]),
         Line::from(vec![
@@ -620,7 +637,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(""),
         Line::from(vec![
             Span::styled("Keys: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw("PageUp/PageDown to scroll, Esc to dismiss dialogs, Ctrl+C to quit."),
+            Span::raw("PageUp/PageDown/Arrows to scroll, Esc to dismiss dialogs, Ctrl+C to quit."),
         ]),
     ];
 
