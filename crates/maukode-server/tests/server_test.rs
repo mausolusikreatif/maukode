@@ -120,4 +120,10 @@ async fn test_diff_and_undo_endpoints() {
     let map_resp = client.get_codebase_map(meta.id, None, None, Some(500)).await.unwrap();
     assert!(map_resp.map.contains("server_core.rs:"));
     assert!(map_resp.map.contains("pub struct AppServer"));
+
+    // 4. Test init project endpoint
+    let init_resp = client.init_project(meta.id, false).await.unwrap();
+    assert!(init_resp.created);
+    assert!(temp_dir.path().join("AGENTS.md").is_file());
+    assert!(init_resp.content.contains("# Project:"));
 }

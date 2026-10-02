@@ -65,6 +65,11 @@ enum Commands {
         #[arg(required = true, help = "The prompt instruction for MauKode")]
         prompt: String,
     },
+    #[command(about = "Scan project and initialize standard AGENTS.md conventions")]
+    Init {
+        #[arg(short, long, help = "Force overwrite existing AGENTS.md")]
+        force: bool,
+    },
     #[command(about = "Manage background server daemon or start foreground server")]
     Server {
         #[command(subcommand)]
@@ -116,6 +121,20 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let cwd = cli.cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    // Handle "init" subcommand
+    if let Some(Commands::Init { force }) = cli.command {
+        let res = maukode_core::init_project(&cwd, force).await?;
+        if res.created || res.overwritten {
+            println!("\x1b[1;32m{}\x1b[0m", res.message);
+            println!("  Path: \x1b[1;36m{}\x1b[0m", res.path.display());
+            println!("  Stack: \x1b[2m{}\x1b[0m\n", res.detected_type);
+        } else {
+            println!("\x1b[1;33m{}\x1b[0m", res.message);
+            println!("  Path: \x1b[1;36m{}\x1b[0m", res.path.display());
+        }
+        return Ok(());
+    }
 
     // Handle "server" subcommand
     if let Some(Commands::Server { action, bind, token, dir }) = cli.command {
@@ -312,6 +331,21 @@ async fn main() -> anyhow::Result<()> {
                     }
                     continue;
                 }
+                if trimmed == "/init" || trimmed.starts_with("/init ") {
+                    let force = trimmed.split_whitespace().any(|p| p == "--force" || p == "-f");
+                    match client.init_project(target_session_id, force).await {
+                        Ok(resp) => {
+                            if resp.created || resp.overwritten {
+                                println!("\x1b[1;32m{}\x1b[0m", resp.message);
+                                println!("  Path: \x1b[1;36m{}\x1b[0m", resp.path);
+                            } else {
+                                println!("\x1b[1;33m{}\x1b[0m", resp.message);
+                            }
+                        }
+                        Err(e) => eprintln!("\x1b[31mFailed to init AGENTS.md: {e}\x1b[0m"),
+                    }
+                    continue;
+                }
                 println!();
                 remote::run_remote_turn(&client, target_session_id, trimmed).await?;
                 println!();
@@ -413,7 +447,7 @@ async fn main() -> anyhow::Result<()> {
         println!("══════════════════════════════════════════════════════════════════");
         println!("  🤖 \x1b[1;36mMauKode\x1b[0m - AI Coding Agent (CLI Mode)");
         println!("  Provider: \x1b[1;32m{}\x1b[0m | Model: \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
-        println!("  Commands: /diff, /undo, /map, exit");
+        println!("  Commands: /diff, /undo, /map, /init, exit");
         println!("══════════════════════════════════════════════════════════════════\n");
 
         let active_sess = if let Some(id) = parsed_session_id {
@@ -528,6 +562,22 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     Err(e) => eprintln!("\x1b[31mFailed to generate codebase map: {e}\x1b[0m"),
+                }
+                continue;
+            }
+            if trimmed == "/init" || trimmed.starts_with("/init ") {
+                let force = trimmed.split_whitespace().any(|p| p == "--force" || p == "-f");
+                println!("\x1b[2mScanning project stack and generating standard AGENTS.md...\x1b[0m");
+                match maukode_core::init_project(&cwd, force).await {
+                    Ok(res) => {
+                        if res.created || res.overwritten {
+                            println!("\x1b[1;32m{}\x1b[0m", res.message);
+                            println!("  Path: \x1b[1;36m{}\x1b[0m", res.path.display());
+                        } else {
+                            println!("\x1b[1;33m{}\x1b[0m", res.message);
+                        }
+                    }
+                    Err(e) => eprintln!("\x1b[31mFailed to init AGENTS.md: {e}\x1b[0m"),
                 }
                 continue;
             }

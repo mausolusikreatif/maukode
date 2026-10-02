@@ -321,3 +321,30 @@ pub async fn get_codebase_map(
         map,
     }))
 }
+
+pub async fn init_project(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<maukode_protocol::InitProjectRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = state
+        .get_or_load_session(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
+
+    let session_dir = session_arc.read().await.directory.clone();
+    let res = maukode_core::init_project(&session_dir, payload.force)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(maukode_protocol::InitProjectResponse {
+        session_id: id.to_string(),
+        path: res.path.display().to_string(),
+        created: res.created,
+        overwritten: res.overwritten,
+        detected_type: res.detected_type,
+        message: res.message,
+        content: res.content,
+    }))
+}

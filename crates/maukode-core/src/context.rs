@@ -1,43 +1,43 @@
 use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use crate::memory::ProjectMemory;
 use crate::repo_map::RepoMapGenerator;
 
 pub struct ContextManager {
     cwd: PathBuf,
     repo_map: Arc<RepoMapGenerator>,
+    memory: Arc<ProjectMemory>,
 }
 
 impl ContextManager {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         let cwd = cwd.into();
         let repo_map = Arc::new(RepoMapGenerator::new(&cwd));
-        Self { cwd, repo_map }
+        let memory = Arc::new(ProjectMemory::new(&cwd));
+        Self { cwd, repo_map, memory }
     }
 
     pub fn repo_map(&self) -> &Arc<RepoMapGenerator> {
         &self.repo_map
     }
 
+    pub fn memory(&self) -> &Arc<ProjectMemory> {
+        &self.memory
+    }
+
     pub fn cwd(&self) -> &Path {
         &self.cwd
     }
 
-    /// Discover project instruction files (e.g., AGENTS.md or .maukoderc) upwards
+    /// Discover project and global instruction files (e.g., AGENTS.md, MAUKODE.md, CLAUDE.md)
     pub async fn discover_instructions(&self) -> Option<String> {
-        let mut curr = self.cwd.clone();
-        loop {
-            let agents_file = curr.join("AGENTS.md");
-            if agents_file.is_file() {
-                if let Ok(content) = tokio::fs::read_to_string(&agents_file).await {
-                    return Some(content);
-                }
-            }
-            if !curr.pop() {
-                break;
-            }
+        let merged = self.memory.render_merged_rules().await;
+        if merged.is_empty() {
+            None
+        } else {
+            Some(merged)
         }
-        None
     }
 
     /// Render baseline system context with project instructions and codebase repository map
@@ -61,9 +61,9 @@ impl ContextManager {
         );
 
         if let Some(instructions) = self.discover_instructions().await {
-            prompt.push_str("\n--- Project Instructions (from AGENTS.md) ---\n");
+            prompt.push_str("\n");
             prompt.push_str(&instructions);
-            prompt.push_str("\n---------------------------------------------\n");
+            prompt.push_str("\n");
         }
 
         // Generate and inject concise codebase skeleton map

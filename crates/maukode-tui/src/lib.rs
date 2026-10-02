@@ -221,6 +221,22 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 app.set_status(format!("Map failed: {e}"));
             }
         },
+        AppEvent::InitProjectCompleted(res) => match res {
+            Ok(resp) => {
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content: format!("{}\nFile: {}", resp.message, resp.path),
+                });
+                app.set_status(&resp.message);
+            }
+            Err(e) => {
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content: format!("Failed to initialize AGENTS.md: {e}"),
+                });
+                app.set_status(format!("Init failed: {e}"));
+            }
+        },
     }
 }
 
