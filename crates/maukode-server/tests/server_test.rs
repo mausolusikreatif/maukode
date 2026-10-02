@@ -110,4 +110,14 @@ async fn test_diff_and_undo_endpoints() {
     // 2. Listing checkpoints initially should be empty
     let cps = client.list_checkpoints(meta.id).await.unwrap();
     assert!(cps.is_empty());
+
+    // 3. Test codebase map endpoint
+    tokio::fs::write(
+        temp_dir.path().join("server_core.rs"),
+        "pub struct AppServer { pub port: u16 }\nimpl AppServer { pub fn run(&self) {} }",
+    ).await.unwrap();
+
+    let map_resp = client.get_codebase_map(meta.id, None, None, Some(500)).await.unwrap();
+    assert!(map_resp.map.contains("server_core.rs:"));
+    assert!(map_resp.map.contains("pub struct AppServer"));
 }

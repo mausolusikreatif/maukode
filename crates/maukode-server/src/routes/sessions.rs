@@ -158,15 +158,17 @@ pub async fn submit_prompt(
     let active_model = config_guard.active_model.clone();
 
     let session_dir = session_arc.read().await.directory.clone();
-    let tools = if config_guard.security.jail_path_traversal {
+    let mut tool_registry = if config_guard.security.jail_path_traversal {
         let jail = maukode_tools::PathJail::new(&session_dir)
             .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
-        Arc::new(maukode_tools::create_default_registry_with_jail(&session_dir, jail))
+        maukode_tools::create_default_registry_with_jail(&session_dir, jail)
     } else {
-        Arc::new(create_default_registry(&session_dir))
+        create_default_registry(&session_dir)
     };
     drop(config_guard);
     let context = Arc::new(ContextManager::new(&session_dir));
+    tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+    let tools = Arc::new(tool_registry);
 
     let runner = SessionRunner::new(
         Arc::clone(&session_arc),
@@ -282,4 +284,40 @@ pub async fn list_session_checkpoints(
         .list_checkpoints(&id.to_string())
         .await;
     Ok(Json(checkpoints))
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct CodebaseMapQuery {
+    pub subpath: Option<String>,
+    pub query: Option<String>,
+    pub max_tokens: Option<usize>,
+}
+
+pub async fn get_codebase_map(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Query(query_params): Query<CodebaseMapQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = state
+        .get_or_load_session(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
+
+    let session_dir = session_arc.read().await.directory.clone();
+    let repo_map = maukode_core::RepoMapGenerator::new(&session_dir);
+    let tokens = query_params.max_tokens.unwrap_or(1000);
+    let map = repo_map
+        .generate_map(
+            tokens,
+            query_params.subpath.as_deref(),
+            query_params.query.as_deref(),
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(maukode_protocol::CodebaseMapResponse {
+        session_id: id.to_string(),
+        map,
+    }))
 }

@@ -81,3 +81,9 @@ pub struct UndoResponse {
     pub restored_checkpoint_id: String,
     pub message: String,
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodebaseMapResponse {
+    pub session_id: String,
+    pub map: String,
+}

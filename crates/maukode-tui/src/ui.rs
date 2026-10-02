@@ -72,6 +72,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         } => {
             draw_diff_modal(f, diff, stat, *scroll);
         }
+        ActiveModal::CodebaseMapViewer { map, scroll, .. } => {
+            draw_codebase_map_modal(f, map, *scroll);
+        }
         ActiveModal::Help => {
             draw_help_modal(f);
         }
@@ -423,6 +426,8 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Diff  ", theme::dim_style()),
             Span::styled("/undo ", Style::default().fg(COLOR_AMBER)),
             Span::styled("Undo  ", theme::dim_style()),
+            Span::styled("/map ", Style::default().fg(COLOR_MINT)),
+            Span::styled("Map  ", theme::dim_style()),
             Span::styled("/help ", theme::muted_style()),
             Span::styled("Commands  ", theme::dim_style()),
             Span::styled("^C ", Style::default().fg(COLOR_RED)),
@@ -837,6 +842,10 @@ fn draw_help_modal(f: &mut Frame) {
             Span::styled("Roll back modified/added files by N turns (default: 1)", theme::text_style()),
         ]),
         Line::from(vec![
+            Span::styled("/map            ", Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD)),
+            Span::styled("Inspect tree-sitter AST symbol skeleton of codebase", theme::text_style()),
+        ]),
+        Line::from(vec![
             Span::styled("/new            ", theme::brand_style()),
             Span::styled("Start a fresh session in the current directory", theme::text_style()),
         ]),
@@ -1055,6 +1064,117 @@ fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
         Span::styled("Fast  ", theme::dim_style()),
         Span::styled("[u] ", Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)),
         Span::styled("Undo Changes (Rollback)", Style::default().fg(COLOR_AMBER)),
+    ]);
+    f.render_widget(Paragraph::new(footer).alignment(Alignment::Center), inner[3]);
+}
+
+fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
+    let area = centered_rect(84, 76, f.area());
+    f.render_widget(Clear, area);
+
+    let title_span = Span::styled(
+        " 🗺️ Codebase Map (Tree-Sitter AST Skeleton) ",
+        Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_MINT))
+        .title(title_span);
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Subtitle
+            Constraint::Length(1), // Separator
+            Constraint::Min(4),    // Map lines viewport
+            Constraint::Length(1), // Footer hotkeys
+        ])
+        .margin(1)
+        .split(block.inner(area));
+
+    f.render_widget(block, area);
+
+    // 1. Subtitle
+    let subtitle = Line::from(vec![
+        Span::styled("Codebase Landscape: ", theme::brand_style()),
+        Span::styled("Top architectural definitions, structs, classes & methods ranked by symbol centrality.", theme::muted_style()),
+    ]);
+    f.render_widget(Paragraph::new(subtitle), inner[0]);
+
+    // Separator line
+    let sep = Paragraph::new("─".repeat(inner[1].width as usize)).style(theme::dim_style());
+    f.render_widget(sep, inner[1]);
+
+    // 2. Map lines viewport
+    let mut map_lines = Vec::new();
+    if map.trim().is_empty() {
+        map_lines.push(Line::from(vec![
+            Span::styled("  (No code symbols found in current workspace)", theme::dim_style()),
+        ]));
+    } else {
+        for l in map.lines() {
+            if l.ends_with(':') {
+                // File header
+                map_lines.push(Line::from(vec![
+                    Span::styled("📁 ", Style::default().fg(COLOR_MINT)),
+                    Span::styled(l, Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD)),
+                ]));
+            } else if l.contains('│') {
+                // Tree symbol line
+                let parts: Vec<&str> = l.split('│').collect();
+                let indent = parts.first().copied().unwrap_or("");
+                let content = parts.get(1).copied().unwrap_or("").trim();
+
+                let style = if content.contains("struct ") || content.contains("class ") || content.contains("interface ") || content.contains("trait ") {
+                    Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)
+                } else if content.contains("fn ") || content.contains("def ") || content.contains("func ") {
+                    Style::default().fg(COLOR_AMBER)
+                } else if content.contains("impl ") {
+                    Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(COLOR_FG)
+                };
+
+                map_lines.push(Line::from(vec![
+                    Span::raw(indent),
+                    Span::styled("│ ", theme::dim_style()),
+                    Span::styled(content, style),
+                ]));
+            } else {
+                map_lines.push(Line::from(Span::styled(l, theme::dim_style())));
+            }
+        }
+    }
+
+    let total_lines = map_lines.len();
+    let viewport_height = inner[2].height as usize;
+    let max_scroll = total_lines.saturating_sub(viewport_height);
+    let effective_scroll = scroll.min(max_scroll);
+
+    let p = Paragraph::new(map_lines).scroll((effective_scroll as u16, 0));
+    f.render_widget(p, inner[2]);
+
+    if total_lines > viewport_height {
+        let mut scrollbar_state = ScrollbarState::new(total_lines).position(effective_scroll);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .track_symbol(Some("│"))
+            .thumb_symbol("┃")
+            .style(theme::dim_style());
+        f.render_stateful_widget(scrollbar, inner[2], &mut scrollbar_state);
+    }
+
+    // 3. Footer hotkeys
+    let footer = Line::from(vec![
+        Span::styled("[Esc/q] ", theme::brand_style()),
+        Span::styled("Close  ", theme::dim_style()),
+        Span::styled("[↑/↓ / j/k] ", theme::brand_style()),
+        Span::styled("Scroll  ", theme::dim_style()),
+        Span::styled("[PageUp/Dn] ", theme::brand_style()),
+        Span::styled("Fast  ", theme::dim_style()),
+        Span::styled("[Home/End] ", theme::brand_style()),
+        Span::styled("Jump", theme::dim_style()),
     ]);
     f.render_widget(Paragraph::new(footer).alignment(Alignment::Center), inner[3]);
 }

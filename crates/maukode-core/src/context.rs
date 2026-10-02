@@ -1,13 +1,26 @@
 use chrono::Utc;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use crate::repo_map::RepoMapGenerator;
 
 pub struct ContextManager {
     cwd: PathBuf,
+    repo_map: Arc<RepoMapGenerator>,
 }
 
 impl ContextManager {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
-        Self { cwd: cwd.into() }
+        let cwd = cwd.into();
+        let repo_map = Arc::new(RepoMapGenerator::new(&cwd));
+        Self { cwd, repo_map }
+    }
+
+    pub fn repo_map(&self) -> &Arc<RepoMapGenerator> {
+        &self.repo_map
+    }
+
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
     }
 
     /// Discover project instruction files (e.g., AGENTS.md or .maukoderc) upwards
@@ -27,7 +40,7 @@ impl ContextManager {
         None
     }
 
-    /// Render baseline system context
+    /// Render baseline system context with project instructions and codebase repository map
     pub async fn render_system_context(&self) -> String {
         let now = Utc::now().to_rfc3339();
         let os = std::env::consts::OS;
@@ -42,7 +55,7 @@ impl ContextManager {
              - Current Time: {now}\n\n\
              Guidelines:\n\
              - Always inspect existing files before making modifications.\n\
-             - Use the provided tools (read_file, write_file, edit_file, bash, grep, glob) to explore and make changes.\n\
+             - Use the provided tools (read_file, write_file, edit_file, bash, grep, glob, get_codebase_map) to explore and make changes.\n\
              - Keep responses concise and focused on the solution.\n\
              - Prefer surgical edits using `edit_file` over overwriting complete files when possible.\n"
         );
@@ -51,6 +64,15 @@ impl ContextManager {
             prompt.push_str("\n--- Project Instructions (from AGENTS.md) ---\n");
             prompt.push_str(&instructions);
             prompt.push_str("\n---------------------------------------------\n");
+        }
+
+        // Generate and inject concise codebase skeleton map
+        if let Ok(map) = self.repo_map.generate_map(800, None, None).await {
+            if !map.trim().is_empty() {
+                prompt.push_str("\n--- Codebase Map (Tree-Sitter Symbol Skeleton) ---\n");
+                prompt.push_str(&map);
+                prompt.push_str("\n--------------------------------------------------\n");
+            }
         }
 
         prompt

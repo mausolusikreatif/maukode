@@ -107,6 +107,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 ActiveModal::DiffViewer { scroll, .. } => {
                     *scroll = scroll.saturating_sub(3);
                 }
+                ActiveModal::CodebaseMapViewer { scroll, .. } => {
+                    *scroll = scroll.saturating_sub(3);
+                }
                 _ => app.scroll_up(3),
             },
             crossterm::event::MouseEventKind::ScrollDown => match &mut app.active_modal {
@@ -139,6 +142,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                     }
                 }
                 ActiveModal::DiffViewer { scroll, max_scroll, .. } => {
+                    *scroll = (*scroll + 3).min(*max_scroll);
+                }
+                ActiveModal::CodebaseMapViewer { scroll, max_scroll, .. } => {
                     *scroll = (*scroll + 3).min(*max_scroll);
                 }
                 _ => app.scroll_down(3),
@@ -195,6 +201,24 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                     content: format!("Undo failed: {e}"),
                 });
                 app.set_status(format!("Undo failed: {e}"));
+            }
+        },
+        AppEvent::CodebaseMapFetched(res) => match res {
+            Ok(map) => {
+                let line_count = map.lines().count();
+                app.active_modal = ActiveModal::CodebaseMapViewer {
+                    map,
+                    scroll: 0,
+                    max_scroll: line_count.saturating_sub(10),
+                };
+                app.set_status("Codebase map opened");
+            }
+            Err(e) => {
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content: format!("Failed to generate codebase map: {e}"),
+                });
+                app.set_status(format!("Map failed: {e}"));
             }
         },
     }
@@ -548,6 +572,34 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
             KeyCode::Char('u') | KeyCode::Char('U') => {
                 app.active_modal = ActiveModal::None;
                 app.undo_turn(None);
+            }
+            _ => {}
+        },
+        ActiveModal::CodebaseMapViewer {
+            scroll,
+            max_scroll,
+            ..
+        } => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                app.active_modal = ActiveModal::None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                *scroll = scroll.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                *scroll = (*scroll + 1).min(*max_scroll);
+            }
+            KeyCode::PageUp => {
+                *scroll = scroll.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                *scroll = (*scroll + 10).min(*max_scroll);
+            }
+            KeyCode::Home => {
+                *scroll = 0;
+            }
+            KeyCode::End => {
+                *scroll = *max_scroll;
             }
             _ => {}
         },
