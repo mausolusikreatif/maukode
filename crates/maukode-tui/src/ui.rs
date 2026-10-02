@@ -119,7 +119,10 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                     Span::styled("● MauKode: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                 ]));
                 for l in item.content.lines() {
-                    lines.push(Line::from(format!("  {l}")));
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(l, Style::default().fg(Color::White)),
+                    ]));
                 }
                 lines.push(Line::from(""));
             }
@@ -129,7 +132,8 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                 ]));
                 for l in item.content.lines() {
                     lines.push(Line::from(vec![
-                        Span::styled(format!("  {l}"), Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
+                        Span::raw("  "),
+                        Span::styled(l, Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
                     ]));
                 }
                 lines.push(Line::from(""));
@@ -157,14 +161,22 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                     badge,
                     Span::styled(name, Style::default().fg(Color::White)),
                 ]));
-                let content_preview = if item.content.len() > 300 {
-                    format!("{}... (truncated)", &item.content[..300])
+                let (content_preview, is_truncated) = if item.content.len() > 600 {
+                    let end = item.content.floor_char_boundary(600);
+                    (&item.content[..end], true)
                 } else {
-                    item.content.clone()
+                    (item.content.as_str(), false)
                 };
                 for l in content_preview.lines() {
                     lines.push(Line::from(vec![
-                        Span::styled(format!("  {l}"), Style::default().fg(Color::DarkGray)),
+                        Span::raw("  "),
+                        Span::styled(l, Style::default().fg(Color::DarkGray)),
+                    ]));
+                }
+                if is_truncated {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled("... (output preview truncated)", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
                     ]));
                 }
                 lines.push(Line::from(""));
@@ -182,7 +194,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let inner_width = area.width.saturating_sub(4).max(1) as usize;
     let mut total_visual_lines = 0;
     for line in &lines {
-        let line_len: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+        let line_len = line.width();
         let wrapped = (line_len + inner_width - 1) / inner_width;
         total_visual_lines += wrapped.max(1);
     }

@@ -58,57 +58,77 @@ async fn run_loop<B: ratatui::backend::Backend>(
     app: &mut App,
     events: &mut EventHandler,
 ) -> Result<()> {
-    while !app.should_quit {
-        terminal
-            .draw(|f| ui::draw(f, app))
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Initial draw
+    terminal
+        .draw(|f| ui::draw(f, app))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
+    while !app.should_quit {
         if let Some(event) = events.next().await {
-            match event {
-                AppEvent::Input(key) => {
-                    handle_key(app, key);
+            handle_app_event(app, event);
+
+            // Drain any pending events that arrived in the same batch
+            // (e.g. streaming tokens, rapid typing, or tick queue)
+            while let Some(buffered) = events.try_next() {
+                handle_app_event(app, buffered);
+                if app.should_quit {
+                    break;
                 }
-                AppEvent::Mouse(mouse) => {
-                    match mouse.kind {
-                        crossterm::event::MouseEventKind::ScrollUp => {
-                            app.scroll_up(3);
-                        }
-                        crossterm::event::MouseEventKind::ScrollDown => {
-                            app.scroll_down(3);
-                        }
-                        _ => {}
-                    }
+            }
+
+            terminal
+                .draw(|f| ui::draw(f, app))
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        } else {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn handle_app_event(app: &mut App, event: AppEvent) {
+    match event {
+        AppEvent::Input(key) => {
+            handle_key(app, key);
+        }
+        AppEvent::Mouse(mouse) => {
+            match mouse.kind {
+                crossterm::event::MouseEventKind::ScrollUp => {
+                    app.scroll_up(3);
                 }
-                AppEvent::Tick => {}
-                AppEvent::LLM(llm_event) => {
-                    app.handle_llm_event(llm_event);
+                crossterm::event::MouseEventKind::ScrollDown => {
+                    app.scroll_down(3);
                 }
-                AppEvent::TurnFinished(result) => {
-                    app.handle_turn_finished(result);
-                }
-                AppEvent::ModelsFetched {
-                    provider_id,
-                    models,
-                } => {
-                    if let ActiveModal::ModelSelector {
-                        models: ref mut m_list,
-                        ref mut is_loading,
-                        ..
-                    } = app.active_modal
-                    {
-                        *is_loading = false;
-                        match models {
-                            Ok(fetched) => *m_list = fetched,
-                            Err(err) => {
-                                app.set_status(format!("Failed to fetch models for {provider_id}: {err}"));
-                            }
-                        }
+                _ => {}
+            }
+        }
+        AppEvent::Tick => {}
+        AppEvent::LLM(llm_event) => {
+            app.handle_llm_event(llm_event);
+        }
+        AppEvent::TurnFinished(result) => {
+            app.handle_turn_finished(result);
+        }
+        AppEvent::ModelsFetched {
+            provider_id,
+            models,
+        } => {
+            if let ActiveModal::ModelSelector {
+                models: ref mut m_list,
+                ref mut is_loading,
+                ..
+            } = app.active_modal
+            {
+                *is_loading = false;
+                match models {
+                    Ok(fetched) => *m_list = fetched,
+                    Err(err) => {
+                        app.set_status(format!("Failed to fetch models for {provider_id}: {err}"));
                     }
                 }
             }
         }
     }
-    Ok(())
 }
 
 fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
