@@ -52,3 +52,32 @@ pub enum LLMEvent {
     Finish { reason: FinishReason },
     Error { message: String },
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Checkpoint {
+    pub id: String,
+    pub session_id: String,
+    pub turn_index: usize,
+    pub description: String,
+    pub tree_hash: String,
+    pub commit_hash: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiffResponse {
+    pub session_id: String,
+    pub files_changed: usize,
+    pub insertions: usize,
+    pub deletions: usize,
+    pub stat_summary: String,
+    pub diff_content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UndoResponse {
+    pub session_id: String,
+    pub target_turn: usize,
+    pub restored_checkpoint_id: String,
+    pub message: String,
+}

@@ -81,3 +81,33 @@ async fn test_permission_endpoint() {
         .await;
     assert!(res.is_err());
 }
+
+#[tokio::test]
+async fn test_diff_and_undo_endpoints() {
+    let port = 14098;
+    let bind_addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    let temp_dir = tempdir().unwrap();
+
+    let server_config = ServerConfig {
+        bind_addr,
+        auth_token: Some("secret123".to_string()),
+        default_dir: Some(temp_dir.path().to_path_buf()),
+    };
+
+    let _handle = tokio::spawn(async move {
+        let _ = run_server(server_config).await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let client = ServerClient::new(format!("http://127.0.0.1:{port}"), Some("secret123".to_string())).unwrap();
+    let meta = client.create_session(Some(temp_dir.path()), None).await.unwrap();
+
+    // 1. Initially diff should report clean / empty
+    let diff = client.get_diff(meta.id).await.unwrap();
+    assert_eq!(diff.files_changed, 0);
+
+    // 2. Listing checkpoints initially should be empty
+    let cps = client.list_checkpoints(meta.id).await.unwrap();
+    assert!(cps.is_empty());
+}

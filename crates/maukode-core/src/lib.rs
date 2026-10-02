@@ -1,3 +1,4 @@
+pub mod checkpoint;
 pub mod config;
 pub mod context;
 pub mod permission;
@@ -5,6 +6,7 @@ pub mod runner;
 pub mod session;
 pub mod store;
 
+pub use checkpoint::CheckpointManager;
 pub use config::{AppConfig, ProviderConfig, ProviderKind, SecurityConfig};
 pub use context::ContextManager;
 pub use permission::{PermissionManager, PermissionMode};

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use maukode_core::{
-    AppConfig, ContextManager, PermissionManager, ProviderConfig, ProviderKind, RunnerConfig,
-    Session, SessionRunner, SessionSummary, SqliteSessionStore,
+    AppConfig, CheckpointManager, ContextManager, PermissionManager, ProviderConfig, ProviderKind,
+    RunnerConfig, Session, SessionRunner, SessionSummary, SqliteSessionStore,
 };
 use maukode_protocol::{
     ContentPart, LLMEvent, PermissionDecision, PermissionRequest, Role, SessionId, TokenUsage,
@@ -52,6 +52,12 @@ pub enum ActiveModal {
         sessions: Vec<SessionSummary>,
         selected_idx: usize,
     },
+    DiffViewer {
+        diff: String,
+        stat: String,
+        scroll: usize,
+        max_scroll: usize,
+    },
     Help,
     PermissionConfirmation {
         request: PermissionRequest,
@@ -66,6 +72,7 @@ pub struct App {
     pub tools: Arc<ToolRegistry>,
     pub context: Arc<ContextManager>,
     pub permission_manager: Arc<PermissionManager>,
+    pub checkpoint_manager: Arc<CheckpointManager>,
     pub items: Vec<ChatItem>,
     pub is_running: bool,
     pub input: String,
@@ -82,7 +89,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(
+    pub async fn new(
         cwd: PathBuf,
         event_tx: mpsc::UnboundedSender<AppEvent>,
         session_id_to_load: Option<SessionId>,
@@ -103,29 +110,30 @@ impl App {
             PermissionManager::new(config.security.permission_mode)
                 .with_whitelist(config.security.bash_whitelist.clone()),
         );
+        let checkpoint_manager = Arc::new(CheckpointManager::new(&cwd).await?);
 
         // Determine session to start with
         let initial_session = if let Some(id) = session_id_to_load {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    if let Some(ref client) = server_client {
-                        if let Ok(detail) = client.get_session(id).await {
-                            let mut s = Session::new(&detail.directory);
-                            s.id = detail.id;
-                            s.messages = detail.messages;
-                            s.state = detail.state;
-                            return Some(s);
-                        }
-                    }
+            if let Some(ref client) = server_client {
+                if let Ok(detail) = client.get_session(id).await {
+                    let mut s = Session::new(&detail.directory);
+                    s.id = detail.id;
+                    s.messages = detail.messages;
+                    s.state = detail.state;
+                    Some(s)
+                } else {
                     store.load_session(id).await.unwrap_or(None)
-                })
-            }).unwrap_or_else(|| Session::new(&cwd))
+                }
+            } else {
+                store.load_session(id).await.unwrap_or(None)
+            }
+            .unwrap_or_else(|| Session::new(&cwd))
         } else if continue_latest {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    store.get_latest_session_in_directory(&cwd).await.unwrap_or(None)
-                })
-            }).unwrap_or_else(|| Session::new(&cwd))
+            store
+                .get_latest_session_in_directory(&cwd)
+                .await
+                .unwrap_or(None)
+                .unwrap_or_else(|| Session::new(&cwd))
         } else {
             Session::new(&cwd)
         };
@@ -219,6 +227,7 @@ impl App {
             tools,
             context,
             permission_manager,
+            checkpoint_manager,
             items,
             is_running: false,
             input: String::new(),
@@ -385,6 +394,11 @@ impl App {
                             self.cwd = canonical.clone();
                             self.tools = Arc::new(create_default_registry(&canonical));
                             self.context = Arc::new(ContextManager::new(&canonical));
+                            if let Ok(cm) = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(CheckpointManager::new(&canonical))
+                            }) {
+                                self.checkpoint_manager = Arc::new(cm);
+                            }
                             if let Ok(mut sess) = self.session.try_write() {
                                 sess.directory = canonical.clone();
                             }
@@ -472,6 +486,13 @@ impl App {
                         content: format!("Switched model to '{}' for provider '{}'", model, self.config.active_provider),
                     });
                 }
+            }
+            "/diff" => {
+                self.open_diff_modal();
+            }
+            "/undo" => {
+                let turns = parts.get(1).and_then(|s| s.parse::<usize>().ok());
+                self.undo_turn(turns);
             }
             "/new" => {
                 self.switch_to_new_session();
@@ -601,7 +622,8 @@ impl App {
         };
 
         let runner = SessionRunner::new(session, llm_client, tools, context, runner_config)
-            .with_permission_manager(Arc::clone(&self.permission_manager));
+            .with_permission_manager(Arc::clone(&self.permission_manager))
+            .with_checkpoint_manager(Arc::clone(&self.checkpoint_manager));
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let app_event_tx = self.event_tx.clone();
 
@@ -776,6 +798,91 @@ impl App {
             let req_id = request.request_id.clone();
             tokio::spawn(async move {
                 pm.respond(&req_id, decision).await;
+            });
+        }
+    }
+
+    pub fn open_diff_modal(&mut self) {
+        self.set_status("Inspecting diff...");
+        let tx = self.event_tx.clone();
+        let session_id = {
+            let guard = self.session.try_read();
+            match guard {
+                Ok(s) => s.id,
+                Err(_) => SessionId::new(),
+            }
+        };
+
+        if let Some(client) = self.server_client.clone() {
+            tokio::spawn(async move {
+                match client.get_diff(session_id).await {
+                    Ok(diff_resp) => {
+                        let _ = tx.send(AppEvent::DiffFetched(diff_resp));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppEvent::DiffFetched(maukode_protocol::DiffResponse {
+                            session_id: session_id.to_string(),
+                            files_changed: 0,
+                            insertions: 0,
+                            deletions: 0,
+                            stat_summary: format!("Error fetching diff: {e}"),
+                            diff_content: String::new(),
+                        }));
+                    }
+                }
+            });
+        } else {
+            let cm = Arc::clone(&self.checkpoint_manager);
+            tokio::spawn(async move {
+                let diff_resp = cm.get_diff(&session_id.to_string(), None).await.unwrap_or_else(|e| {
+                    maukode_protocol::DiffResponse {
+                        session_id: session_id.to_string(),
+                        files_changed: 0,
+                        insertions: 0,
+                        deletions: 0,
+                        stat_summary: format!("Error fetching diff: {e}"),
+                        diff_content: String::new(),
+                    }
+                });
+                let _ = tx.send(AppEvent::DiffFetched(diff_resp));
+            });
+        }
+    }
+
+    pub fn undo_turn(&mut self, turns: Option<usize>) {
+        let n = turns.unwrap_or(1);
+        self.set_status(format!("Rolling back {n} turn(s)..."));
+        let tx = self.event_tx.clone();
+        let session_id = {
+            let guard = self.session.try_read();
+            match guard {
+                Ok(s) => s.id,
+                Err(_) => SessionId::new(),
+            }
+        };
+
+        if let Some(client) = self.server_client.clone() {
+            tokio::spawn(async move {
+                match client.undo(session_id, turns).await {
+                    Ok(resp) => {
+                        let _ = tx.send(AppEvent::UndoCompleted(Ok(resp.message)));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppEvent::UndoCompleted(Err(e.to_string())));
+                    }
+                }
+            });
+        } else {
+            let cm = Arc::clone(&self.checkpoint_manager);
+            tokio::spawn(async move {
+                match cm.undo(&session_id.to_string(), turns).await {
+                    Ok(resp) => {
+                        let _ = tx.send(AppEvent::UndoCompleted(Ok(resp.message)));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppEvent::UndoCompleted(Err(e.to_string())));
+                    }
+                }
             });
         }
     }

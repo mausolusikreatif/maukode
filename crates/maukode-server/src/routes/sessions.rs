@@ -174,7 +174,9 @@ pub async fn submit_prompt(
         tools,
         context,
         runner_config,
-    ).with_permission_manager(Arc::clone(&state.permission_manager));
+    )
+    .with_permission_manager(Arc::clone(&state.permission_manager))
+    .with_checkpoint_manager(Arc::clone(&state.checkpoint_manager));
 
     let event_broadcast_tx = state.get_event_sender(id).await;
     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
@@ -239,4 +241,45 @@ pub async fn respond_permission(
     } else {
         Err((StatusCode::NOT_FOUND, "Permission request not found or expired".to_string()))
     }
+}
+
+pub async fn get_session_diff(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let diff = state
+        .checkpoint_manager
+        .get_diff(&id.to_string(), None)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(diff))
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct UndoRequestPayload {
+    pub turns: Option<usize>,
+}
+
+pub async fn undo_session(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<UndoRequestPayload>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let undo_res = state
+        .checkpoint_manager
+        .undo(&id.to_string(), payload.turns)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(Json(undo_res))
+}
+
+pub async fn list_session_checkpoints(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let checkpoints = state
+        .checkpoint_manager
+        .list_checkpoints(&id.to_string())
+        .await;
+    Ok(Json(checkpoints))
 }

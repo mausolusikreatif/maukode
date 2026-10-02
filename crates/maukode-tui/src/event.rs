@@ -13,6 +13,8 @@ pub enum AppEvent {
         provider_id: String,
         models: Result<Vec<String>, String>,
     },
+    DiffFetched(maukode_protocol::DiffResponse),
+    UndoCompleted(Result<String, String>),
 }
 
 pub struct EventHandler {

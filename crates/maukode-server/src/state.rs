@@ -12,12 +12,13 @@ pub struct ServerState {
     pub sessions: Arc<RwLock<HashMap<SessionId, Arc<RwLock<Session>>>>>,
     pub event_broadcasters: Arc<RwLock<HashMap<SessionId, broadcast::Sender<LLMEvent>>>>,
     pub permission_manager: Arc<PermissionManager>,
+    pub checkpoint_manager: Arc<maukode_core::CheckpointManager>,
     pub auth_token: Option<String>,
     pub default_dir: PathBuf,
 }
 
 impl ServerState {
-    pub fn new(auth_token: Option<String>, default_dir: Option<PathBuf>) -> Result<Self> {
+    pub async fn new(auth_token: Option<String>, default_dir: Option<PathBuf>) -> Result<Self> {
         let config = AppConfig::load();
         let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
         let dir = default_dir.unwrap_or_else(|| {
@@ -29,12 +30,15 @@ impl ServerState {
                 .with_whitelist(config.security.bash_whitelist.clone()),
         );
 
+        let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&dir).await?);
+
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
             store: Arc::new(store),
             sessions: Arc::new(RwLock::new(HashMap::new())),
             event_broadcasters: Arc::new(RwLock::new(HashMap::new())),
             permission_manager,
+            checkpoint_manager,
             auth_token,
             default_dir: dir,
         })
