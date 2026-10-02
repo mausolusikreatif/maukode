@@ -44,9 +44,14 @@ impl ToolRegistry {
     }
 
     pub async fn execute(&self, name: &str, args: serde_json::Value) -> Result<String, ToolError> {
-        let tool = self
-            .get(name)
-            .ok_or_else(|| ToolError::NotFound(format!("Tool '{name}' is not registered")))?;
+        let tool = self.get(name).ok_or_else(|| {
+            let mut names: Vec<_> = self.tools.keys().map(String::as_str).collect();
+            names.sort_unstable();
+            ToolError::NotFound(format!(
+                "Tool '{name}' is not registered. Available tools: {}. Call one of these exact names.",
+                names.join(", ")
+            ))
+        })?;
         tool.execute(args).await
     }
 }
@@ -91,5 +96,18 @@ mod tests {
         reg.unregister("test_tool");
         assert!(reg.get("test_tool").is_none());
         assert!(reg.get("alias_tool").is_none());
+    }
+
+    #[tokio::test]
+    async fn unknown_name_returns_exact_available_names_without_execution() {
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(MockTool));
+
+        let err = reg
+            .execute("test_too", serde_json::json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::NotFound(message)
+            if message.contains("test_too") && message.contains("test_tool")));
     }
 }

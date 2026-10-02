@@ -325,7 +325,8 @@ impl SqliteSessionStore {
         })?;
 
         let mut summaries = Vec::new();
-        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten() {
+        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten()
+        {
             if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
                 let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
                     .map(|dt| dt.with_timezone(&Utc))
@@ -378,7 +379,8 @@ impl SqliteSessionStore {
         })?;
 
         let mut summaries = Vec::new();
-        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten() {
+        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten()
+        {
             if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
                 let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
                     .map(|dt| dt.with_timezone(&Utc))
