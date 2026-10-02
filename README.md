@@ -91,6 +91,38 @@ cargo install --path crates/maukode-cli --force
 
 Ensure `~/.cargo/bin` is in your `$PATH`.
 
+### Use a ChatGPT plan
+
+MauKode offers **ChatGPT plan** and **OpenAI API key** as separate providers. To
+use an eligible ChatGPT Plus or Pro plan, run:
+
+```bash
+maukode auth login
+maukode auth status
+maukode
+```
+
+The login command opens the official Sign in with ChatGPT page in your browser.
+Approve use of your ChatGPT plan there. MauKode selects an available model and
+activates the `chatgpt` provider. In the TUI, `/provider` lets you switch between
+ChatGPT plan and an API-key provider; `maukode -p chatgpt` selects the plan from
+the CLI. Run `maukode auth logout` to revoke the active session, or
+`maukode auth login --new-account` to connect another account. List saved
+accounts with `maukode auth accounts`, then switch with
+`maukode auth use <CLIENT_ID>`.
+
+Credentials are stored separately from API keys in
+`~/.config/maukode/chatgpt_auth.json` (or the platform's configuration
+directory). On Unix, the file is owner-readable only. API-key usage has its
+own billing and still uses the `openai` provider. ChatGPT plan usage currently
+works with the local daemon or standalone mode; remote-server credential
+transfer is not yet implemented.
+
+The implementation follows [OpenAI's open-source Sign in with ChatGPT
+guide](https://developers.openai.com/siwc/token-sharing-open-source) and uses
+the public Responses API. Login requires a browser on the same machine as the
+MauKode CLI because the callback listens on `127.0.0.1`.
+
 ---
 
 ## 💻 Usage & CLI Modes

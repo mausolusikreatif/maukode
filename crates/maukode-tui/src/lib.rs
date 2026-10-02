@@ -383,22 +383,26 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     if let Some(provider) = app.config.providers.get(*selected_idx) {
                         let id = provider.id.clone();
                         let name = provider.name.clone();
-                        let _ = app.config.set_active_provider(&id);
-                        if let Some(ref client) = app.server_client {
-                            let client = client.clone();
-                            let id_clone = id.clone();
-                            tokio::spawn(async move {
-                                let _ = client.set_active_provider(&id_clone).await;
-                            });
+                        match app.config.set_active_provider(&id) {
+                            Ok(()) => {
+                                if let Some(ref client) = app.server_client {
+                                    let client = client.clone();
+                                    let id_clone = id.clone();
+                                    tokio::spawn(async move {
+                                        let _ = client.set_active_provider(&id_clone).await;
+                                    });
+                                }
+                                app.set_status(format!("Activated provider '{name}'"));
+                                app.items.push(crate::app::ChatItem {
+                                    role: ChatRole::System,
+                                    content: format!(
+                                        "Switched to provider '{name}'. Active model: '{}'",
+                                        app.config.active_model
+                                    ),
+                                });
+                            }
+                            Err(err) => app.set_status(err.to_string()),
                         }
-                        app.set_status(format!("Activated provider '{name}'"));
-                        app.items.push(crate::app::ChatItem {
-                            role: ChatRole::System,
-                            content: format!(
-                                "Switched to provider '{name}'. Active model: '{}'",
-                                app.config.active_model
-                            ),
-                        });
                     }
                     app.active_modal = ActiveModal::None;
                 }

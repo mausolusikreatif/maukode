@@ -501,7 +501,13 @@ impl App {
                     self.open_provider_modal();
                 } else if parts.len() >= 3 && parts[1] == "use" {
                     let id = parts[2];
-                    if let Ok(()) = self.config.set_active_provider(id) {
+                    if let Err(err) = self.config.set_active_provider(id) {
+                        self.set_status(err.to_string());
+                        self.items.push(ChatItem {
+                            role: ChatRole::System,
+                            content: err.to_string(),
+                        });
+                    } else {
                         if let Some(client) = self.server_client.clone() {
                             let id_s = id.to_string();
                             tokio::spawn(async move {
@@ -516,8 +522,6 @@ impl App {
                                 id, self.config.active_model
                             ),
                         });
-                    } else {
-                        self.set_status(format!("Provider '{id}' not found"));
                     }
                 } else if parts.len() >= 4 && parts[1] == "add" {
                     let name = parts[2];

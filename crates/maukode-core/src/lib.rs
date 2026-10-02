@@ -1,3 +1,5 @@
+pub mod chatgpt_auth;
+pub mod chatgpt_client;
 pub mod checkpoint;
 pub mod compaction;
 pub mod config;
@@ -10,6 +12,8 @@ pub mod runner;
 pub mod session;
 pub mod store;
 
+pub use chatgpt_auth::{AuthEndpoints, ChatGptAuth, LoginAttempt};
+pub use chatgpt_client::ChatGptClient;
 pub use checkpoint::CheckpointManager;
 pub use compaction::{
     CompactionResult, ContextPruner, ContextUsage, ConversationCompactor, TokenEstimator,

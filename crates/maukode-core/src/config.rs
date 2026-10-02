@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub enum ProviderKind {
     Anthropic,
     OpenAiCompatible,
+    ChatGpt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +151,14 @@ impl Default for AppConfig {
                     default_model: Some("gpt-4o".to_string()),
                 },
                 ProviderConfig {
+                    id: "chatgpt".to_string(),
+                    name: "ChatGPT plan".to_string(),
+                    kind: ProviderKind::ChatGpt,
+                    base_url: "https://api.openai.com/v1".to_string(),
+                    api_key: None,
+                    default_model: None,
+                },
+                ProviderConfig {
                     id: "ollama".to_string(),
                     name: "Ollama (Local)".to_string(),
                     kind: ProviderKind::OpenAiCompatible,
@@ -193,6 +202,16 @@ impl AppConfig {
         if path.exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(mut cfg) = serde_json::from_str::<AppConfig>(&content) {
+                    if cfg.get_provider("chatgpt").is_none() {
+                        cfg.providers.push(ProviderConfig {
+                            id: "chatgpt".into(),
+                            name: "ChatGPT plan".into(),
+                            kind: ProviderKind::ChatGpt,
+                            base_url: "https://api.openai.com/v1".into(),
+                            api_key: None,
+                            default_model: None,
+                        });
+                    }
                     Self::sync_from_opencode_if_present(&mut cfg);
                     // Update keys from env if missing
                     for p in &mut cfg.providers {
@@ -262,6 +281,9 @@ impl AppConfig {
             }
 
             // Sync active model if set in OpenCode
+            if cfg.active_provider == "chatgpt" {
+                break;
+            }
             if let Some(model_str) = val.get("model").and_then(|m| m.as_str()) {
                 let parts: Vec<&str> = model_str.split('/').collect();
                 if parts.len() == 2 {
@@ -315,6 +337,12 @@ impl AppConfig {
             .ok_or_else(|| anyhow::anyhow!("Provider '{id}' not found"))?
             .clone();
 
+        if provider.kind == ProviderKind::ChatGpt
+            && crate::chatgpt_auth::ChatGptAuth::new()?.status()?.is_none()
+        {
+            anyhow::bail!("Sign in with ChatGPT first: maukode auth login");
+        }
+
         self.active_provider = provider.id;
         if let Some(model) = provider.default_model {
             self.active_model = model;
@@ -341,6 +369,10 @@ impl AppConfig {
             .ok_or_else(|| anyhow::anyhow!("No active provider configured"))?;
 
         match provider.kind {
+            ProviderKind::ChatGpt => {
+                let auth = crate::chatgpt_auth::ChatGptAuth::new()?;
+                Ok(Arc::new(crate::chatgpt_client::ChatGptClient::new(auth)))
+            }
             ProviderKind::Anthropic => {
                 let key = provider
                     .api_key
@@ -373,6 +405,25 @@ impl AppConfig {
             .build()?;
 
         match provider.kind {
+            ProviderKind::ChatGpt => {
+                let auth = crate::chatgpt_auth::ChatGptAuth::new()?;
+                let token = auth.access_token().await?;
+                let response = client
+                    .get("https://api.openai.com/v1/models")
+                    .bearer_auth(token)
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let data: serde_json::Value = response.json().await?;
+                let models = data["models"]
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("ChatGPT model catalog missing"))?
+                    .iter()
+                    .filter(|model| model["visibility"] == "list")
+                    .filter_map(|model| model["slug"].as_str().map(str::to_owned))
+                    .collect();
+                Ok(models)
+            }
             ProviderKind::Anthropic => {
                 let url = format!("{}/v1/models", provider.base_url.trim_end_matches('/'));
                 let key = provider.api_key.as_deref().unwrap_or_default();

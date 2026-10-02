@@ -99,6 +99,23 @@ impl ServerClient {
         Ok(())
     }
 
+    pub async fn add_or_update_provider(
+        &self,
+        provider: &maukode_core::ProviderConfig,
+    ) -> Result<()> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/providers", self.base_url))
+            .json(provider)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to update provider: {err}"));
+        }
+        Ok(())
+    }
+
     pub async fn list_models(&self, provider: Option<&str>) -> Result<Vec<String>> {
         let mut req = self.http.get(format!("{}/api/v1/models", self.base_url));
         if let Some(p) = provider {

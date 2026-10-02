@@ -178,6 +178,7 @@ impl LLMClient for OpenAIClient {
                 match part {
                     ContentPart::Text { text: t } => text.push_str(t),
                     ContentPart::Reasoning { .. } => {}
+                    ContentPart::ProviderItem { .. } => {}
                     ContentPart::ToolCall(tc) => {
                         tool_calls.push(json!({
                             "id": tc.id,

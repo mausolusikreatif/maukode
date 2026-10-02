@@ -55,6 +55,7 @@ impl LLMClient for AnthropicClient {
                         }));
                     }
                     ContentPart::Reasoning { .. } => {}
+                    ContentPart::ProviderItem { .. } => {}
                     ContentPart::ToolCall(call) => {
                         contents.push(json!({
                             "type": "tool_use",

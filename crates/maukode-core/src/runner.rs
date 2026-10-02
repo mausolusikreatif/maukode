@@ -180,6 +180,7 @@ impl SessionRunner {
 
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
+            let mut provider_items = Vec::new();
             let mut _finish_reason = FinishReason::EndTurn;
 
             while let Some(event_res) = stream.next().await {
@@ -191,6 +192,11 @@ impl SessionRunner {
                             }
                             LLMEvent::ToolCallFinish { tool_call } => {
                                 tool_calls.push(tool_call.clone());
+                            }
+                            LLMEvent::ProviderItem { item } => {
+                                provider_items.push(ContentPart::ProviderItem {
+                                    value: item.clone(),
+                                });
                             }
                             LLMEvent::Finish { reason } => {
                                 _finish_reason = reason.clone();
@@ -213,6 +219,7 @@ impl SessionRunner {
 
             // Record assistant message
             let mut assistant_parts = Vec::new();
+            assistant_parts.extend(provider_items);
             if !assistant_text.is_empty() {
                 assistant_parts.push(ContentPart::Text {
                     text: assistant_text,
