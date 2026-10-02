@@ -303,6 +303,15 @@ async fn main() -> anyhow::Result<()> {
                     }
                     continue;
                 }
+                if trimmed == "/map" || trimmed == "/repomap" {
+                    match client.get_codebase_map(target_session_id, None, None, Some(1000)).await {
+                        Ok(resp) => {
+                            println!("\x1b[1;32m=== Codebase Map (Tree-Sitter AST) ===\x1b[0m\n{}", resp.map);
+                        }
+                        Err(e) => eprintln!("\x1b[31mFailed to get codebase map: {e}\x1b[0m"),
+                    }
+                    continue;
+                }
                 println!();
                 remote::run_remote_turn(&client, target_session_id, trimmed).await?;
                 println!();
@@ -356,18 +365,20 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
-        let tools = if config.security.jail_path_traversal {
-            let jail = maukode_tools::PathJail::new(&cwd)
-                .with_allowed_paths(config.security.allowed_external_paths.clone());
-            Arc::new(maukode_tools::create_default_registry_with_jail(&cwd, jail))
-        } else {
-            Arc::new(create_default_registry(&cwd))
-        };
         let perm_mgr = Arc::new(
             maukode_core::PermissionManager::new(config.security.permission_mode)
                 .with_whitelist(config.security.bash_whitelist.clone()),
         );
         let context = Arc::new(ContextManager::new(&cwd));
+        let mut tool_reg = if config.security.jail_path_traversal {
+            let jail = maukode_tools::PathJail::new(&cwd)
+                .with_allowed_paths(config.security.allowed_external_paths.clone());
+            maukode_tools::create_default_registry_with_jail(&cwd, jail)
+        } else {
+            create_default_registry(&cwd)
+        };
+        tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+        let tools = Arc::new(tool_reg);
         let llm_client = config.create_active_llm_client()?;
 
         let runner_config = RunnerConfig {
@@ -402,7 +413,7 @@ async fn main() -> anyhow::Result<()> {
         println!("══════════════════════════════════════════════════════════════════");
         println!("  🤖 \x1b[1;36mMauKode\x1b[0m - AI Coding Agent (CLI Mode)");
         println!("  Provider: \x1b[1;32m{}\x1b[0m | Model: \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
-        println!("  Type 'exit' to quit.");
+        println!("  Commands: /diff, /undo, /map, exit");
         println!("══════════════════════════════════════════════════════════════════\n");
 
         let active_sess = if let Some(id) = parsed_session_id {
@@ -415,18 +426,20 @@ async fn main() -> anyhow::Result<()> {
 
         let active_sess_id = active_sess.id;
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
-        let tools = if config.security.jail_path_traversal {
-            let jail = maukode_tools::PathJail::new(&cwd)
-                .with_allowed_paths(config.security.allowed_external_paths.clone());
-            Arc::new(maukode_tools::create_default_registry_with_jail(&cwd, jail))
-        } else {
-            Arc::new(create_default_registry(&cwd))
-        };
         let perm_mgr = Arc::new(
             maukode_core::PermissionManager::new(config.security.permission_mode)
                 .with_whitelist(config.security.bash_whitelist.clone()),
         );
         let context = Arc::new(ContextManager::new(&cwd));
+        let mut tool_reg = if config.security.jail_path_traversal {
+            let jail = maukode_tools::PathJail::new(&cwd)
+                .with_allowed_paths(config.security.allowed_external_paths.clone());
+            maukode_tools::create_default_registry_with_jail(&cwd, jail)
+        } else {
+            create_default_registry(&cwd)
+        };
+        tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+        let tools = Arc::new(tool_reg);
         let llm_client = config.create_active_llm_client()?;
         let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&cwd).await?);
 
@@ -434,7 +447,7 @@ async fn main() -> anyhow::Result<()> {
             Arc::clone(&session_arc),
             llm_client,
             tools,
-            context,
+            Arc::clone(&context),
             RunnerConfig {
                 model: config.active_model.clone(),
                 max_steps: cli.max_steps,
@@ -498,6 +511,23 @@ async fn main() -> anyhow::Result<()> {
                         println!("\x1b[32m✓ {}\x1b[0m", undo_resp.message);
                     }
                     Err(e) => eprintln!("\x1b[31mUndo failed: {e}\x1b[0m"),
+                }
+                continue;
+            }
+            if trimmed == "/map" || trimmed.starts_with("/map ") {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                let subpath = parts.get(1).map(|s| s.to_string());
+                println!("\x1b[2mGenerating codebase repository map...\x1b[0m");
+                match context.repo_map().generate_map(1024, subpath.as_deref(), None).await {
+                    Ok(map) => {
+                        println!("\x1b[1;36m=== Codebase Map ===\x1b[0m");
+                        if map.is_empty() {
+                            println!("No symbol definitions found in codebase.");
+                        } else {
+                            println!("{map}");
+                        }
+                    }
+                    Err(e) => eprintln!("\x1b[31mFailed to generate codebase map: {e}\x1b[0m"),
                 }
                 continue;
             }

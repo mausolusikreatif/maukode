@@ -65,3 +65,10 @@ ignore = "0.4"
 walkdir = "2.5"
 similar = "2.6"
 dirs = "7.0"
+
+# Tree-sitter & AST Grammars
+tree-sitter = "0.24"
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"

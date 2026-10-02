@@ -67,6 +67,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/sessions/{id}/checkpoints",
             get(sessions::list_session_checkpoints),
         )
+        .route(
+            "/api/v1/sessions/{id}/map",
+            get(sessions::get_codebase_map),
+        )
         .route_layer(from_fn_with_state(Arc::clone(&state), auth_middleware));
 
     Router::new()

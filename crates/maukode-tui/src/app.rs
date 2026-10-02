@@ -58,6 +58,11 @@ pub enum ActiveModal {
         scroll: usize,
         max_scroll: usize,
     },
+    CodebaseMapViewer {
+        map: String,
+        scroll: usize,
+        max_scroll: usize,
+    },
     Help,
     PermissionConfirmation {
         request: PermissionRequest,
@@ -98,14 +103,16 @@ impl App {
     ) -> anyhow::Result<Self> {
         let config = AppConfig::load();
         let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
-        let tools = if config.security.jail_path_traversal {
+        let mut tool_registry = if config.security.jail_path_traversal {
             let jail = PathJail::new(&cwd)
                 .with_allowed_paths(config.security.allowed_external_paths.clone());
-            Arc::new(create_default_registry_with_jail(&cwd, jail))
+            create_default_registry_with_jail(&cwd, jail)
         } else {
-            Arc::new(create_default_registry(&cwd))
+            create_default_registry(&cwd)
         };
         let context = Arc::new(ContextManager::new(&cwd));
+        tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+        let tools = Arc::new(tool_registry);
         let permission_manager = Arc::new(
             PermissionManager::new(config.security.permission_mode)
                 .with_whitelist(config.security.bash_whitelist.clone()),
@@ -391,9 +398,11 @@ impl App {
 
                     match std::fs::canonicalize(&expanded) {
                         Ok(canonical) => {
-                            self.cwd = canonical.clone();
-                            self.tools = Arc::new(create_default_registry(&canonical));
-                            self.context = Arc::new(ContextManager::new(&canonical));
+                            let mut tool_reg = create_default_registry(&canonical);
+                            let context = Arc::new(ContextManager::new(&canonical));
+                            tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+                            self.tools = Arc::new(tool_reg);
+                            self.context = context;
                             if let Ok(cm) = tokio::task::block_in_place(|| {
                                 tokio::runtime::Handle::current().block_on(CheckpointManager::new(&canonical))
                             }) {
@@ -493,6 +502,9 @@ impl App {
             "/undo" => {
                 let turns = parts.get(1).and_then(|s| s.parse::<usize>().ok());
                 self.undo_turn(turns);
+            }
+            "/map" | "/repomap" => {
+                self.open_map_modal();
             }
             "/new" => {
                 self.switch_to_new_session();
@@ -881,6 +893,43 @@ impl App {
                     }
                     Err(e) => {
                         let _ = tx.send(AppEvent::UndoCompleted(Err(e.to_string())));
+                    }
+                }
+            });
+        }
+    }
+
+    pub fn open_map_modal(&mut self) {
+        self.set_status("Analyzing codebase symbols...");
+        let tx = self.event_tx.clone();
+        let session_id = {
+            let guard = self.session.try_read();
+            match guard {
+                Ok(s) => s.id,
+                Err(_) => SessionId::new(),
+            }
+        };
+
+        if let Some(client) = self.server_client.clone() {
+            tokio::spawn(async move {
+                match client.get_codebase_map(session_id, None, None, Some(1000)).await {
+                    Ok(resp) => {
+                        let _ = tx.send(AppEvent::CodebaseMapFetched(Ok(resp.map)));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppEvent::CodebaseMapFetched(Err(e.to_string())));
+                    }
+                }
+            });
+        } else {
+            let repo_map = Arc::clone(self.context.repo_map());
+            tokio::spawn(async move {
+                match repo_map.generate_map(1000, None, None).await {
+                    Ok(map) => {
+                        let _ = tx.send(AppEvent::CodebaseMapFetched(Ok(map)));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppEvent::CodebaseMapFetched(Err(e.to_string())));
                     }
                 }
             });

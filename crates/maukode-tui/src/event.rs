@@ -15,6 +15,7 @@ pub enum AppEvent {
     },
     DiffFetched(maukode_protocol::DiffResponse),
     UndoCompleted(Result<String, String>),
+    CodebaseMapFetched(Result<String, String>),
 }
 
 pub struct EventHandler {

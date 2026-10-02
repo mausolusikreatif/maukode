@@ -265,4 +265,33 @@ impl ServerClient {
         }
         Ok(resp.json().await?)
     }
+
+    pub async fn get_codebase_map(
+        &self,
+        session_id: SessionId,
+        subpath: Option<&str>,
+        query: Option<&str>,
+        max_tokens: Option<usize>,
+    ) -> Result<maukode_protocol::CodebaseMapResponse> {
+        let mut req = self
+            .http
+            .get(format!("{}/api/v1/sessions/{session_id}/map", self.base_url));
+
+        if let Some(sp) = subpath {
+            req = req.query(&[("subpath", sp)]);
+        }
+        if let Some(q) = query {
+            req = req.query(&[("query", q)]);
+        }
+        if let Some(mt) = max_tokens {
+            req = req.query(&[("max_tokens", mt)]);
+        }
+
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to get codebase map: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
 }
