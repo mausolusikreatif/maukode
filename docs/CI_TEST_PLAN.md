@@ -14,10 +14,11 @@ The `Rust CI` workflow runs `cargo test --workspace --locked` and Clippy on
 | `maukode-llm` | 4 | OpenAI-compatible fragmented names/arguments, multiple calls, invalid arguments, local SSE fixture |
 | `maukode-protocol`, `maukode-cli` | 0 | No direct tests |
 
-The server tests use fixed ports `14096`–`14098` and 300 ms startup sleeps.
-`ServerState` and the TUI construct config/database paths from the user's XDG
-directories. Tests should isolate these paths and choose an ephemeral port to
-avoid collisions and shared state. No test should require a live LLM account.
+The server tests bind ephemeral loopback ports before starting the router, so
+they do not depend on fixed ports or startup sleeps. `ServerState` and the TUI
+construct config/database paths from the user's XDG directories. Tests should
+isolate these paths to avoid shared state. No test should require a live LLM
+account.
 
 The audit found preexisting formatting drift in
 `crates/maukode-core/src/compaction/estimator.rs` and
