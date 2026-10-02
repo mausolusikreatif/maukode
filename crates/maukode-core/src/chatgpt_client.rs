@@ -262,6 +262,9 @@ impl LLMClient for ChatGptClient {
                     if let Some(event) = state.pending.pop_front() {
                         return Some((event, (source, state)));
                     }
+                    if state.completed {
+                        return None;
+                    }
                     let event = match source.next().await {
                         Some(Ok(event)) => event,
                         Some(Err(err)) => {
@@ -284,7 +287,7 @@ impl LLMClient for ChatGptClient {
                         }
                     };
                     if event.data == "[DONE]" {
-                        continue;
+                        return None;
                     }
                     match serde_json::from_str::<Value>(&event.data) {
                         Ok(value) => state.consume(&value),
@@ -453,8 +456,9 @@ mod tests {
                 json!({"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"grep","namespace":"maukode","arguments":"{}"}}),
                 json!({"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2}}}),
             ].iter().map(|event| format!("data: {event}\n\n")).collect::<String>();
-            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}", payload.len());
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n{payload}");
             socket.write_all(response.as_bytes()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         });
         let client = ChatGptClient::new(ChatGptAuth::at_path(auth_path))
             .with_responses_url(format!("http://{address}/v1/responses"));
@@ -465,8 +469,13 @@ mod tests {
                 parameters: json!({"type":"object"}),
             },
         ]);
-        let events: Vec<_> = client.stream(request).await.unwrap().collect().await;
-        server.await.unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.stream(request).await.unwrap().collect::<Vec<_>>(),
+        )
+        .await;
+        server.abort();
+        let events = result.expect("response.completed should end the stream before socket close");
         assert!(events.iter().any(|event| matches!(event, Ok(LLMEvent::ToolCallFinish { tool_call }) if tool_call.name == "grep")));
         assert!(events.iter().any(|event| matches!(
             event,
