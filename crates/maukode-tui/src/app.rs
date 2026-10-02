@@ -53,6 +53,19 @@ pub(crate) fn append_stream_delta(items: &mut Vec<ChatItem>, role: ChatRole, tex
     });
 }
 
+fn finish_tool_call(items: &mut [ChatItem], call: &maukode_protocol::ToolCall) {
+    if let Some(item) = items
+        .iter_mut()
+        .rev()
+        .find(|item| matches!(&item.role, ChatRole::ToolCall { id, .. } if id == &call.id))
+    {
+        if let ChatRole::ToolCall { name, args, .. } = &mut item.role {
+            *name = call.name.clone();
+            *args = call.arguments.to_string();
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActiveModal {
     None,
@@ -770,11 +783,7 @@ impl App {
                 self.auto_scroll = true;
             }
             LLMEvent::ToolCallFinish { tool_call } => {
-                if let Some(last) = self.items.last_mut() {
-                    if let ChatRole::ToolCall { ref mut args, .. } = last.role {
-                        *args = tool_call.arguments.to_string();
-                    }
-                }
+                finish_tool_call(&mut self.items, &tool_call);
             }
             LLMEvent::ToolResult(tr) => {
                 self.items.push(ChatItem {
@@ -1162,6 +1171,44 @@ mod stream_tests {
             started.elapsed() < Duration::from_secs(10),
             "20,000 stream chunks took {:?}",
             started.elapsed()
+        );
+    }
+
+    #[test]
+    fn tool_finish_updates_matching_name_and_arguments() {
+        let mut items = vec![
+            ChatItem {
+                role: ChatRole::ToolCall {
+                    name: "gre".into(),
+                    id: "first".into(),
+                    args: String::new(),
+                },
+                content: String::new(),
+            },
+            ChatItem {
+                role: ChatRole::ToolCall {
+                    name: "glob".into(),
+                    id: "second".into(),
+                    args: String::new(),
+                },
+                content: String::new(),
+            },
+        ];
+        finish_tool_call(
+            &mut items,
+            &maukode_protocol::ToolCall {
+                id: "first".into(),
+                name: "grep".into(),
+                arguments: serde_json::json!({"pattern": "hello"}),
+            },
+        );
+        assert!(
+            matches!(&items[0].role, ChatRole::ToolCall { name, args, .. }
+            if name == "grep" && args.contains("hello"))
+        );
+        assert!(
+            matches!(&items[1].role, ChatRole::ToolCall { name, args, .. }
+            if name == "glob" && args.is_empty())
         );
     }
 }

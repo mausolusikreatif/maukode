@@ -3,11 +3,133 @@ use crate::error::LLMError;
 use crate::request::LLMRequest;
 use async_trait::async_trait;
 use eventsource_stream::Eventsource;
-use futures::{StreamExt, TryStreamExt};
+use futures::{stream, StreamExt};
 use maukode_protocol::{ContentPart, FinishReason, LLMEvent, Role, TokenUsage, ToolCall};
 use serde_json::json;
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, VecDeque};
+
+#[derive(Default)]
+struct ToolAccumulator {
+    id: String,
+    name: String,
+    args: String,
+}
+
+#[derive(Default)]
+struct StreamState {
+    tools: BTreeMap<usize, ToolAccumulator>,
+}
+
+impl StreamState {
+    fn consume(&mut self, val: &serde_json::Value) -> Vec<Result<LLMEvent, LLMError>> {
+        let mut events = Vec::new();
+        if let Some(choice) = val.get("choices").and_then(|c| c.get(0)) {
+            let delta = choice.get("delta");
+            if let Some(text) = delta
+                .and_then(|d| d.get("content"))
+                .and_then(|t| t.as_str())
+            {
+                if !text.is_empty() {
+                    events.push(Ok(LLMEvent::TextDelta { text: text.into() }));
+                }
+            }
+            if let Some(text) = delta
+                .and_then(|d| d.get("reasoning_content"))
+                .and_then(|t| t.as_str())
+            {
+                if !text.is_empty() {
+                    events.push(Ok(LLMEvent::ReasoningDelta { text: text.into() }));
+                }
+            }
+            if let Some(tool_calls) = delta
+                .and_then(|d| d.get("tool_calls"))
+                .and_then(|t| t.as_array())
+            {
+                for tool_call in tool_calls {
+                    let index = tool_call.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
+                    let tool = self.tools.entry(index as usize).or_default();
+                    if let Some(id) = tool_call.get("id").and_then(|i| i.as_str()) {
+                        if !id.starts_with(&tool.id) {
+                            tool.id.push_str(id);
+                        } else {
+                            tool.id = id.to_string();
+                        }
+                    }
+                    if let Some(function) = tool_call.get("function") {
+                        if let Some(name) = function.get("name").and_then(|n| n.as_str()) {
+                            if !name.is_empty() {
+                                if tool.name.is_empty() {
+                                    tool.name.push_str(name);
+                                    events.push(Ok(LLMEvent::ToolCallStart {
+                                        id: tool.id.clone(),
+                                        name: tool.name.clone(),
+                                    }));
+                                } else if name.starts_with(&tool.name) {
+                                    tool.name = name.to_string();
+                                } else {
+                                    tool.name.push_str(name);
+                                }
+                            }
+                        }
+                        if let Some(args) = function.get("arguments").and_then(|a| a.as_str()) {
+                            tool.args.push_str(args);
+                            events.push(Ok(LLMEvent::ToolCallDelta {
+                                id: tool.id.clone(),
+                                delta: args.to_string(),
+                            }));
+                        }
+                    }
+                }
+            }
+            if let Some(reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                for (_, tool) in std::mem::take(&mut self.tools) {
+                    if tool.name.is_empty() {
+                        events.push(Err(LLMError::Stream("Tool call has no name".into())));
+                        continue;
+                    }
+                    match serde_json::from_str(&tool.args) {
+                        Ok(arguments) => events.push(Ok(LLMEvent::ToolCallFinish {
+                            tool_call: ToolCall {
+                                id: tool.id,
+                                name: tool.name,
+                                arguments,
+                            },
+                        })),
+                        Err(err) => events.push(Err(LLMError::Stream(format!(
+                            "Invalid arguments for tool '{}': {err}",
+                            tool.name
+                        )))),
+                    }
+                }
+                let reason = match reason {
+                    "tool_calls" => FinishReason::ToolUse,
+                    "length" => FinishReason::MaxTokens,
+                    _ => FinishReason::EndTurn,
+                };
+                events.push(Ok(LLMEvent::Finish { reason }));
+            }
+        }
+        if let Some(usage) = val.get("usage").and_then(|u| u.as_object()) {
+            let input_tokens = usage
+                .get("prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let output_tokens = usage
+                .get("completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            if input_tokens > 0 || output_tokens > 0 {
+                events.push(Ok(LLMEvent::Usage(TokenUsage {
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                })));
+            }
+        }
+        events
+    }
+}
 
 pub struct OpenAIClient {
     api_key: String,
@@ -148,171 +270,189 @@ impl LLMClient for OpenAIClient {
 
         let event_source = resp.bytes_stream().eventsource();
 
-        struct ToolAccumulator {
-            id: String,
-            name: String,
-            args: String,
-        }
-
-        struct StreamState {
-            tools: HashMap<usize, ToolAccumulator>,
-        }
-
-        let state = Arc::new(tokio::sync::Mutex::new(StreamState {
-            tools: HashMap::new(),
-        }));
-
-        let stream = event_source
-            .map_err(|e| LLMError::Stream(e.to_string()))
-            .filter_map(move |event_res| {
-                let state = Arc::clone(&state);
-                async move {
-                    let event = match event_res {
-                        Ok(ev) => ev,
-                        Err(e) => return Some(Err(e)),
+        let stream = stream::unfold(
+            (event_source, StreamState::default(), VecDeque::new()),
+            |(mut source, mut state, mut pending)| async move {
+                loop {
+                    if let Some(event) = pending.pop_front() {
+                        return Some((event, (source, state, pending)));
+                    }
+                    let event = source.next().await?;
+                    let event = match event {
+                        Ok(event) => event,
+                        Err(err) => {
+                            return Some((
+                                Err(LLMError::Stream(err.to_string())),
+                                (source, state, pending),
+                            ));
+                        }
                     };
-
                     if event.data == "[DONE]" {
-                        return None;
+                        continue;
                     }
-
-                    let val: serde_json::Value = match serde_json::from_str(&event.data) {
-                        Ok(v) => v,
-                        Err(_) => return None,
+                    let value: serde_json::Value = match serde_json::from_str(&event.data) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            return Some((
+                                Err(LLMError::Stream(format!("Invalid SSE JSON: {err}"))),
+                                (source, state, pending),
+                            ));
+                        }
                     };
-
-                    let choice = val.get("choices").and_then(|c| c.get(0));
-
-                    if let Some(choice) = choice {
-                        let delta = choice.get("delta");
-
-                        // Text content delta
-                        if let Some(text) = delta
-                            .and_then(|d| d.get("content"))
-                            .and_then(|t| t.as_str())
-                        {
-                            if !text.is_empty() {
-                                return Some(Ok(LLMEvent::TextDelta {
-                                    text: text.to_string(),
-                                }));
-                            }
-                        }
-
-                        // Reasoning delta (DeepSeek / OpenAI reasoning)
-                        if let Some(reasoning) = delta
-                            .and_then(|d| d.get("reasoning_content"))
-                            .and_then(|t| t.as_str())
-                        {
-                            if !reasoning.is_empty() {
-                                return Some(Ok(LLMEvent::ReasoningDelta {
-                                    text: reasoning.to_string(),
-                                }));
-                            }
-                        }
-
-                        // Tool calls
-                        if let Some(tool_calls) = delta
-                            .and_then(|d| d.get("tool_calls"))
-                            .and_then(|tc| tc.as_array())
-                        {
-                            let mut lock = state.lock().await;
-                            for tc in tool_calls {
-                                let index =
-                                    tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
-                                let entry =
-                                    lock.tools.entry(index).or_insert_with(|| ToolAccumulator {
-                                        id: String::new(),
-                                        name: String::new(),
-                                        args: String::new(),
-                                    });
-
-                                if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
-                                    entry.id = id.to_string();
-                                }
-                                if let Some(func) = tc.get("function") {
-                                    if let Some(name) = func.get("name").and_then(|n| n.as_str()) {
-                                        if !name.is_empty() && entry.name.is_empty() {
-                                            entry.name = name.to_string();
-                                            return Some(Ok(LLMEvent::ToolCallStart {
-                                                id: entry.id.clone(),
-                                                name: entry.name.clone(),
-                                            }));
-                                        }
-                                    }
-                                    if let Some(args_chunk) =
-                                        func.get("arguments").and_then(|a| a.as_str())
-                                    {
-                                        entry.args.push_str(args_chunk);
-                                        return Some(Ok(LLMEvent::ToolCallDelta {
-                                            id: entry.id.clone(),
-                                            delta: args_chunk.to_string(),
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-
-                        // Finish reason
-                        if let Some(finish_reason) =
-                            choice.get("finish_reason").and_then(|f| f.as_str())
-                        {
-                            let mut lock = state.lock().await;
-                            // If tools were accumulated, emit finish for them
-                            if !lock.tools.is_empty() {
-                                let mut tool_results = Vec::new();
-                                for (_, tool) in lock.tools.drain() {
-                                    if tool.name.is_empty() {
-                                        continue;
-                                    }
-                                    let parsed_args: serde_json::Value =
-                                        serde_json::from_str(&tool.args).unwrap_or_default();
-                                    tool_results.push(LLMEvent::ToolCallFinish {
-                                        tool_call: ToolCall {
-                                            id: tool.id,
-                                            name: tool.name,
-                                            arguments: parsed_args,
-                                        },
-                                    });
-                                }
-                                if let Some(first) = tool_results.into_iter().next() {
-                                    return Some(Ok(first));
-                                }
-                            }
-
-                            let reason = match finish_reason {
-                                "tool_calls" => FinishReason::ToolUse,
-                                "stop" => FinishReason::EndTurn,
-                                "length" => FinishReason::MaxTokens,
-                                _ => FinishReason::EndTurn,
-                            };
-                            return Some(Ok(LLMEvent::Finish { reason }));
-                        }
-                    }
-
-                    // Check for usage in stream
-                    if let Some(usage) = val.get("usage").and_then(|u| u.as_object()) {
-                        let prompt_tokens = usage
-                            .get("prompt_tokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let completion_tokens = usage
-                            .get("completion_tokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        if prompt_tokens > 0 || completion_tokens > 0 {
-                            return Some(Ok(LLMEvent::Usage(TokenUsage {
-                                input_tokens: prompt_tokens,
-                                output_tokens: completion_tokens,
-                                cache_read_tokens: None,
-                                cache_write_tokens: None,
-                            })));
-                        }
-                    }
-
-                    None
+                    pending.extend(state.consume(&value));
                 }
-            });
+            },
+        );
 
         Ok(Box::pin(stream))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[test]
+    fn fragmented_tool_name_and_arguments_are_assembled() {
+        let mut state = StreamState::default();
+        let first = state.consume(&json!({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "id": "call_1", "function": {"name": "gre", "arguments": r#"{"pattern":"#}
+        }]}}]}));
+        assert!(
+            matches!(first.as_slice(), [Ok(LLMEvent::ToolCallStart { name, .. }), Ok(LLMEvent::ToolCallDelta { .. })] if name == "gre")
+        );
+
+        let second = state.consume(&json!({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "function": {"name": "p", "arguments": r#""hello"}"#}
+        }]}}]}));
+        assert!(matches!(
+            second.as_slice(),
+            [Ok(LLMEvent::ToolCallDelta { .. })]
+        ));
+
+        let done = state.consume(&json!({"choices": [{"finish_reason": "tool_calls"}]}));
+        assert!(
+            matches!(done.as_slice(), [Ok(LLMEvent::ToolCallFinish { tool_call }), Ok(LLMEvent::Finish { reason: FinishReason::ToolUse })]
+            if tool_call.name == "grep" && tool_call.arguments == json!({"pattern": "hello"}))
+        );
+
+        let mut cumulative = StreamState::default();
+        cumulative.consume(&json!({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "id": "call_2", "function": {"name": "gre", "arguments": "{}"}
+        }]}}]}));
+        cumulative.consume(&json!({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "function": {"name": "grep"}
+        }]}}]}));
+        let done = cumulative.consume(&json!({"choices": [{"finish_reason": "tool_calls"}]}));
+        assert!(
+            matches!(&done[0], Ok(LLMEvent::ToolCallFinish { tool_call }) if tool_call.name == "grep")
+        );
+    }
+
+    #[test]
+    fn all_tool_calls_and_mixed_deltas_are_preserved() {
+        let mut state = StreamState::default();
+        let events = state.consume(&json!({"choices": [{"delta": {
+            "content": "Searching", "tool_calls": [
+                {"index": 1, "id": "call_2", "function": {"name": "glob", "arguments": "{}"}},
+                {"index": 0, "id": "call_1", "function": {"name": "grep", "arguments": "{}"}}
+            ]
+        }}]}));
+        assert_eq!(events.len(), 5);
+        assert!(matches!(&events[0], Ok(LLMEvent::TextDelta { text }) if text == "Searching"));
+
+        let done = state.consume(&json!({"choices": [{"finish_reason": "tool_calls"}]}));
+        assert!(
+            matches!(&done[0], Ok(LLMEvent::ToolCallFinish { tool_call }) if tool_call.name == "grep")
+        );
+        assert!(
+            matches!(&done[1], Ok(LLMEvent::ToolCallFinish { tool_call }) if tool_call.name == "glob")
+        );
+        assert!(matches!(
+            &done[2],
+            Ok(LLMEvent::Finish {
+                reason: FinishReason::ToolUse
+            })
+        ));
+    }
+
+    #[test]
+    fn invalid_tool_arguments_are_not_executed() {
+        let mut state = StreamState::default();
+        state.consume(&json!({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "id": "call_1", "function": {"name": "grep", "arguments": "{"}
+        }]}}]}));
+        let done = state.consume(&json!({"choices": [{"finish_reason": "tool_calls"}]}));
+        assert!(matches!(&done[0], Err(LLMError::Stream(_))));
+        assert!(!done
+            .iter()
+            .any(|event| matches!(event, Ok(LLMEvent::ToolCallFinish { .. }))));
+    }
+
+    #[tokio::test]
+    async fn local_sse_gateway_stream_assembles_tool_name() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let header_end = loop {
+                let mut chunk = [0; 1024];
+                let count = socket.read(&mut chunk).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+                if let Some(offset) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+                    break offset + 4;
+                }
+            };
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            assert!(headers.starts_with("POST /v1/chat/completions HTTP/1.1"));
+            let body_length: usize = headers
+                .lines()
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .and_then(|value| value.trim().parse().ok())
+                })
+                .unwrap();
+            while request.len() - header_end < body_length {
+                let mut chunk = [0; 1024];
+                let count = socket.read(&mut chunk).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+            }
+            let body: serde_json::Value =
+                serde_json::from_slice(&request[header_end..header_end + body_length]).unwrap();
+            assert_eq!(body["tools"][0]["function"]["name"], "grep");
+
+            let events = [
+                json!({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "gre", "arguments": "{"}}]}}]}),
+                json!({"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "p", "arguments": "}"}}]}}]}),
+                json!({"choices": [{"finish_reason": "tool_calls"}]}),
+            ];
+            let payload = events
+                .iter()
+                .map(|event| format!("data: {event}\n\n"))
+                .collect::<String>()
+                + "data: [DONE]\n\n";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                payload.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let client = OpenAIClient::new("test-key").with_base_url(format!("http://{address}"));
+        let request = LLMRequest::new("test-model", vec![maukode_protocol::Message::user("find")])
+            .with_tools(vec![maukode_tools::ToolDefinition {
+                name: "grep".into(),
+                description: "Search text".into(),
+                parameters: json!({"type": "object"}),
+            }]);
+        let events: Vec<_> = client.stream(request).await.unwrap().collect().await;
+        server.await.unwrap();
+        assert!(events.iter().any(|event| matches!(event, Ok(LLMEvent::ToolCallFinish { tool_call }) if tool_call.name == "grep")));
     }
 }

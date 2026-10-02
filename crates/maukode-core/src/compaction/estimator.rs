@@ -64,7 +64,12 @@ impl TokenEstimator {
             1_000_000
         } else if m.contains("gpt-4-32k") {
             32_768
-        } else if m.contains("gpt-4") && !m.contains("gpt-4o") && !m.contains("turbo") && !m.contains("1106") && !m.contains("0125") {
+        } else if m.contains("gpt-4")
+            && !m.contains("gpt-4o")
+            && !m.contains("turbo")
+            && !m.contains("1106")
+            && !m.contains("0125")
+        {
             8_192
         } else if m.contains("gpt-3.5") {
             16_384
