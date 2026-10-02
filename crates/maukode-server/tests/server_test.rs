@@ -49,3 +49,35 @@ async fn test_server_health_and_sessions() {
     assert_eq!(detail.id, meta.id);
     assert_eq!(detail.directory, temp_dir.path().to_string_lossy().to_string());
 }
+
+#[tokio::test]
+async fn test_permission_endpoint() {
+    let port = 14097;
+    let bind_addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    let temp_dir = tempdir().unwrap();
+
+    let server_config = ServerConfig {
+        bind_addr,
+        auth_token: Some("secret123".to_string()),
+        default_dir: Some(temp_dir.path().to_path_buf()),
+    };
+
+    let _handle = tokio::spawn(async move {
+        let _ = run_server(server_config).await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let client = ServerClient::new(format!("http://127.0.0.1:{port}"), Some("secret123".to_string())).unwrap();
+    let meta = client.create_session(Some(temp_dir.path()), None).await.unwrap();
+
+    // Responding to non-existent request should fail with 404
+    let res = client
+        .respond_permission(
+            meta.id,
+            "non_existent_req",
+            maukode_protocol::PermissionDecision::AllowOnce,
+        )
+        .await;
+    assert!(res.is_err());
+}

@@ -1,29 +1,32 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use crate::security::PathJail;
 use crate::tool::{Tool, ToolError};
-
-// Helper to resolve paths safely
-fn resolve_path(base: &Path, file_path: &str) -> PathBuf {
-    let p = Path::new(file_path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        base.join(p)
-    }
-}
 
 // -------------------------------------------------------------
 // ReadFileTool
 // -------------------------------------------------------------
 pub struct ReadFileTool {
     pub base_dir: PathBuf,
+    pub jail: PathJail,
 }
 
 impl ReadFileTool {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
-        Self { base_dir: base_dir.into() }
+        let base = base_dir.into();
+        Self {
+            jail: PathJail::new(&base),
+            base_dir: base,
+        }
+    }
+
+    pub fn with_jail(base_dir: impl Into<PathBuf>, jail: PathJail) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+            jail,
+        }
     }
 }
 
@@ -69,7 +72,7 @@ impl Tool for ReadFileTool {
         let args: ReadArgs = serde_json::from_value(args)
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
 
-        let target = resolve_path(&self.base_dir, &args.path);
+        let target = self.jail.validate_path(&args.path)?;
         let content = tokio::fs::read_to_string(&target)
             .await
             .map_err(|e| ToolError::Execution(format!("Cannot read {}: {e}", target.display())))?;
@@ -99,11 +102,23 @@ impl Tool for ReadFileTool {
 // -------------------------------------------------------------
 pub struct WriteFileTool {
     pub base_dir: PathBuf,
+    pub jail: PathJail,
 }
 
 impl WriteFileTool {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
-        Self { base_dir: base_dir.into() }
+        let base = base_dir.into();
+        Self {
+            jail: PathJail::new(&base),
+            base_dir: base,
+        }
+    }
+
+    pub fn with_jail(base_dir: impl Into<PathBuf>, jail: PathJail) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+            jail,
+        }
     }
 }
 
@@ -144,7 +159,7 @@ impl Tool for WriteFileTool {
         let args: WriteArgs = serde_json::from_value(args)
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
 
-        let target = resolve_path(&self.base_dir, &args.path);
+        let target = self.jail.validate_path(&args.path)?;
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -164,11 +179,23 @@ impl Tool for WriteFileTool {
 // -------------------------------------------------------------
 pub struct EditFileTool {
     pub base_dir: PathBuf,
+    pub jail: PathJail,
 }
 
 impl EditFileTool {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
-        Self { base_dir: base_dir.into() }
+        let base = base_dir.into();
+        Self {
+            jail: PathJail::new(&base),
+            base_dir: base,
+        }
+    }
+
+    pub fn with_jail(base_dir: impl Into<PathBuf>, jail: PathJail) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+            jail,
+        }
     }
 }
 
@@ -214,7 +241,7 @@ impl Tool for EditFileTool {
         let args: EditArgs = serde_json::from_value(args)
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
 
-        let target = resolve_path(&self.base_dir, &args.path);
+        let target = self.jail.validate_path(&args.path)?;
         let content = tokio::fs::read_to_string(&target)
             .await
             .map_err(|e| ToolError::Execution(format!("Cannot read {}: {e}", target.display())))?;
@@ -245,11 +272,23 @@ impl Tool for EditFileTool {
 // -------------------------------------------------------------
 pub struct GlobTool {
     pub base_dir: PathBuf,
+    pub jail: PathJail,
 }
 
 impl GlobTool {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
-        Self { base_dir: base_dir.into() }
+        let base = base_dir.into();
+        Self {
+            jail: PathJail::new(&base),
+            base_dir: base,
+        }
+    }
+
+    pub fn with_jail(base_dir: impl Into<PathBuf>, jail: PathJail) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+            jail,
+        }
     }
 }
 
@@ -291,8 +330,8 @@ impl Tool for GlobTool {
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
 
         let search_dir = match args.path {
-            Some(ref p) => resolve_path(&self.base_dir, p),
-            None => self.base_dir.clone(),
+            Some(ref p) => self.jail.validate_path(p)?,
+            None => self.jail.workspace_root.clone(),
         };
 
         let mut matches = Vec::new();

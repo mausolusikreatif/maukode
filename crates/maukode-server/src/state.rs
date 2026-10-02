@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use anyhow::Result;
-use maukode_core::{AppConfig, Session, SqliteSessionStore};
+use maukode_core::{AppConfig, PermissionManager, Session, SqliteSessionStore};
 use maukode_protocol::{LLMEvent, SessionId};
 use tokio::sync::{broadcast, RwLock};
 
@@ -11,6 +11,7 @@ pub struct ServerState {
     pub store: Arc<SqliteSessionStore>,
     pub sessions: Arc<RwLock<HashMap<SessionId, Arc<RwLock<Session>>>>>,
     pub event_broadcasters: Arc<RwLock<HashMap<SessionId, broadcast::Sender<LLMEvent>>>>,
+    pub permission_manager: Arc<PermissionManager>,
     pub auth_token: Option<String>,
     pub default_dir: PathBuf,
 }
@@ -23,11 +24,17 @@ impl ServerState {
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
         });
 
+        let permission_manager = Arc::new(
+            PermissionManager::new(config.security.permission_mode)
+                .with_whitelist(config.security.bash_whitelist.clone()),
+        );
+
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
             store: Arc::new(store),
             sessions: Arc::new(RwLock::new(HashMap::new())),
             event_broadcasters: Arc::new(RwLock::new(HashMap::new())),
+            permission_manager,
             auth_token,
             default_dir: dir,
         })

@@ -2,16 +2,29 @@ use async_trait::async_trait;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use crate::security::PathJail;
 use crate::tool::{Tool, ToolError};
 
 pub struct GrepTool {
     pub base_dir: PathBuf,
+    pub jail: PathJail,
 }
 
 impl GrepTool {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
-        Self { base_dir: base_dir.into() }
+        let base = base_dir.into();
+        Self {
+            jail: PathJail::new(&base),
+            base_dir: base,
+        }
+    }
+
+    pub fn with_jail(base_dir: impl Into<PathBuf>, jail: PathJail) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+            jail,
+        }
     }
 }
 
@@ -56,15 +69,8 @@ impl Tool for GrepTool {
             .map_err(|e| ToolError::InvalidParameters(format!("Invalid regex: {e}")))?;
 
         let search_path = match args.path {
-            Some(ref p) => {
-                let path = Path::new(p);
-                if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    self.base_dir.join(path)
-                }
-            }
-            None => self.base_dir.clone(),
+            Some(ref p) => self.jail.validate_path(p)?,
+            None => self.jail.workspace_root.clone(),
         };
 
         let mut results = Vec::new();

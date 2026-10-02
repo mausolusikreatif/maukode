@@ -206,4 +206,23 @@ impl ServerClient {
 
         Ok(Box::pin(stream))
     }
+
+    pub async fn respond_permission(
+        &self,
+        session_id: SessionId,
+        request_id: &str,
+        decision: maukode_protocol::PermissionDecision,
+    ) -> Result<()> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/sessions/{session_id}/permissions/{request_id}", self.base_url))
+            .json(&serde_json::json!({ "decision": decision }))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to respond to permission request: {err}"));
+        }
+        Ok(())
+    }
 }

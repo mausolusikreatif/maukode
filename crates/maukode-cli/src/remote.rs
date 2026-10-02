@@ -73,6 +73,28 @@ pub async fn run_remote_turn(
                 LLMEvent::Usage(usage) => {
                     println!("\n\x1b[2m[Tokens: in={}, out={}]\x1b[0m", usage.input_tokens, usage.output_tokens);
                 }
+                LLMEvent::PermissionRequest(req) => {
+                    let cmd = req.command.as_deref().unwrap_or(req.path.as_deref().unwrap_or(&req.description));
+                    println!("\n\x1b[1;33m⚠️  [CONFIRMATION REQUIRED]\x1b[0m");
+                    println!("  Tool: \x1b[1m{}\x1b[0m", req.tool_name);
+                    println!("  Command: \x1b[1;37m{}\x1b[0m", cmd);
+                    println!("  Risk: \x1b[1;31m{}\x1b[0m", req.description);
+                    print!("  Allow execution? [y: once, a: session, n: reject]: ");
+                    stdout.flush()?;
+
+                    let mut answer = String::new();
+                    let decision = if io::stdin().read_line(&mut answer).is_ok() {
+                        match answer.trim().to_lowercase().as_str() {
+                            "y" | "yes" | "" => maukode_protocol::PermissionDecision::AllowOnce,
+                            "a" | "all" => maukode_protocol::PermissionDecision::AllowSession,
+                            _ => maukode_protocol::PermissionDecision::Deny,
+                        }
+                    } else {
+                        maukode_protocol::PermissionDecision::Deny
+                    };
+
+                    let _ = client.respond_permission(session_id, &req.request_id, decision).await;
+                }
                 LLMEvent::Finish { .. } => {
                     break;
                 }

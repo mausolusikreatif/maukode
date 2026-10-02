@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
@@ -66,6 +66,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         ActiveModal::Help => {
             draw_help_modal(f);
+        }
+        ActiveModal::PermissionConfirmation { request } => {
+            draw_permission_modal(f, request);
         }
     }
 }
@@ -840,4 +843,78 @@ fn draw_help_modal(f: &mut Frame) {
         .block(block)
         .alignment(Alignment::Left);
     f.render_widget(p, area);
+}
+
+fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRequest) {
+    let area = centered_rect(65, 45, f.area());
+    f.render_widget(Clear, area);
+
+    let border_color = if request.risk_level == "danger" {
+        COLOR_RED
+    } else {
+        COLOR_AMBER
+    };
+
+    let title_span = Span::styled(
+        " ⚠️ Action Requires Confirmation ",
+        Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .title(title_span);
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Subtitle / intro
+            Constraint::Length(1), // Blank
+            Constraint::Min(3),    // Command / target box
+            Constraint::Length(1), // Blank
+            Constraint::Length(2), // Risk description
+            Constraint::Length(1), // Blank
+            Constraint::Length(1), // Action buttons footer
+        ])
+        .margin(1)
+        .split(block.inner(area));
+
+    f.render_widget(block, area);
+
+    // Intro text
+    let intro = Line::from(vec![
+        Span::styled("MauKode wants to execute tool ", theme::text_style()),
+        Span::styled(format!("'{}'", request.tool_name), theme::tool_style()),
+        Span::styled(":", theme::text_style()),
+    ]);
+    f.render_widget(Paragraph::new(intro), inner[0]);
+
+    // Command / details box
+    let cmd_text = request
+        .command
+        .as_deref()
+        .unwrap_or(request.path.as_deref().unwrap_or(&request.description));
+    let cmd_para = Paragraph::new(format!("  $ {cmd_text}"))
+        .style(Style::default().fg(Color::White).bg(Color::Rgb(25, 25, 35)))
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
+    f.render_widget(cmd_para, inner[2]);
+
+    // Risk warning text
+    let risk_line = Line::from(vec![
+        Span::styled("Risk: ", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+        Span::styled(&request.description, theme::text_style()),
+    ]);
+    f.render_widget(Paragraph::new(risk_line), inner[4]);
+
+    // Keybindings footer
+    let footer = Line::from(vec![
+        Span::styled("[y / Enter] ", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD)),
+        Span::styled("Allow Once    ", theme::dim_style()),
+        Span::styled("[a] ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
+        Span::styled("Always Allow (Session)    ", theme::dim_style()),
+        Span::styled("[n / Esc] ", Style::default().fg(COLOR_RED).add_modifier(Modifier::BOLD)),
+        Span::styled("Reject", theme::dim_style()),
+    ]);
+    f.render_widget(Paragraph::new(footer).alignment(Alignment::Center), inner[6]);
 }

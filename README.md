@@ -152,10 +152,30 @@ Inside the TUI, you can type slash commands directly into the prompt:
 
 ---
 
+## 🛡️ Security & Sandboxing
+
+MauKode is built with default-safe execution boundaries to protect your system from unintended damage:
+
+1. **Jail Path Traversal Protection**:
+   - All filesystem operations (`read_file`, `write_file`, `edit_file`, `grep`, `glob`, and `cwd`) are strictly sandboxed within the project workspace directory.
+   - Any attempt to escape the workspace (e.g., `/etc/`, `~/.ssh/`, or `../../`) is immediately blocked and returned as an access denial to the LLM agent.
+2. **Interactive Confirmation Pop-ups (Human-in-the-Loop)**:
+   - High-risk or destructive operations (`rm -rf`, `sudo`, `pkill`, `git reset --hard`, `git clean -f`, force push, etc.) automatically pause the turn and trigger an interactive approval modal in the TUI or terminal CLI.
+   - Keyboard options:
+     - `[y / Enter]`: Allow Once
+     - `[a]`: Always Allow for the current session (adds command to session whitelist)
+     - `[n / Esc]`: Reject execution (informs agent to find an alternative approach)
+3. **Security Policies (`~/.config/maukode/config.json`)**:
+   - `permission_mode`: `"ask"` (default), `"strict"` (prompt on all actions), or `"trust"` (auto-allow for CI/CD environments).
+   - `jail_path_traversal`: `true` (enforces workspace boundaries).
+   - `bash_whitelist`: customizable list of glob patterns for safe commands (e.g. `cargo *`, `npm test`).
+
+---
+
 ## 📁 Configuration & Storage
 
 - **Configuration File**: `~/.config/maukode/config.json`  
-  Stores active provider, active model, and configured endpoints.
+  Stores active provider, active model, security settings, and configured endpoints.
 - **SQLite Database**: `~/.local/share/maukode/maukode.db`  
   Stores all conversation history, metadata, and token usage.
 - **Daemon Metadata**: `~/.local/share/maukode/daemon.json`

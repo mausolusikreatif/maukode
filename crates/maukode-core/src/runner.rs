@@ -8,6 +8,7 @@ use maukode_tools::ToolRegistry;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info};
 use crate::context::ContextManager;
+use crate::permission::{PermissionManager, PermissionMode};
 use crate::session::Session;
 
 pub struct RunnerConfig {
@@ -34,6 +35,7 @@ pub struct SessionRunner {
     tools: Arc<ToolRegistry>,
     context: Arc<ContextManager>,
     config: RunnerConfig,
+    permission_manager: Option<Arc<PermissionManager>>,
 }
 
 impl SessionRunner {
@@ -50,7 +52,13 @@ impl SessionRunner {
             tools,
             context,
             config,
+            permission_manager: None,
         }
+    }
+
+    pub fn with_permission_manager(mut self, pm: Arc<PermissionManager>) -> Self {
+        self.permission_manager = Some(pm);
+        self
     }
 
     /// Run the multi-turn agent loop until completion, emitting events to `event_tx`
@@ -148,10 +156,93 @@ impl SessionRunner {
                 break;
             }
 
-            // Execute tools concurrently
+            // Execute tools
             let mut tool_results = Vec::new();
             for call in tool_calls {
                 info!("Executing tool: {} ({})", call.name, call.id);
+
+                if let Some(ref perm_mgr) = self.permission_manager {
+                    let needs_permission = match perm_mgr.mode() {
+                        PermissionMode::Trust => false,
+                        PermissionMode::Strict => true,
+                        PermissionMode::Ask => {
+                            if call.name == "bash" {
+                                if let Some(cmd_val) = call.arguments.get("command").and_then(|v| v.as_str()) {
+                                    let session_id_str = self.session.read().await.id.to_string();
+                                    if perm_mgr.is_whitelisted(&session_id_str, cmd_val).await {
+                                        false
+                                    } else {
+                                        let assessment = maukode_tools::assess_bash_command(cmd_val);
+                                        assessment.level != maukode_tools::RiskLevel::Safe
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        }
+                    };
+
+                    if needs_permission {
+                        let req_id = uuid::Uuid::new_v4().to_string();
+                        let session_id_str = self.session.read().await.id.to_string();
+
+                        let (command, risk_level, description) = if call.name == "bash" {
+                            let cmd = call.arguments.get("command").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                            let assess = maukode_tools::assess_bash_command(&cmd);
+                            (Some(cmd), assess.level.to_string(), assess.reason)
+                        } else {
+                            (None, "warning".to_string(), format!("Tool '{}' requires confirmation", call.name))
+                        };
+
+                        let perm_req = maukode_protocol::PermissionRequest {
+                            request_id: req_id.clone(),
+                            session_id: session_id_str.clone(),
+                            tool_name: call.name.clone(),
+                            command: command.clone(),
+                            path: None,
+                            risk_level,
+                            description,
+                        };
+
+                        let rx = perm_mgr.register_request(req_id).await;
+                        let _ = event_tx.send(LLMEvent::PermissionRequest(perm_req));
+
+                        // Wait for user's decision (timeout 5 minutes)
+                        let decision = match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+                            Ok(Ok(d)) => d,
+                            Ok(Err(_)) => maukode_protocol::PermissionDecision::Deny,
+                            Err(_) => {
+                                tracing::warn!("Permission request timed out");
+                                maukode_protocol::PermissionDecision::Deny
+                            }
+                        };
+
+                        match decision {
+                            maukode_protocol::PermissionDecision::AllowOnce => {
+                                // Proceed with execution
+                            }
+                            maukode_protocol::PermissionDecision::AllowSession => {
+                                if let Some(ref cmd) = command {
+                                    perm_mgr.whitelist_session_command(&session_id_str, cmd).await;
+                                }
+                            }
+                            maukode_protocol::PermissionDecision::Deny => {
+                                let tr = ToolResult {
+                                    tool_call_id: call.id,
+                                    tool_name: call.name,
+                                    content: "Execution rejected by user: permission denied.".to_string(),
+                                    is_error: true,
+                                };
+                                let _ = event_tx.send(LLMEvent::ToolResult(tr.clone()));
+                                tool_results.push(ContentPart::ToolResult(tr));
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 let exec_res = self.tools.execute(&call.name, call.arguments).await;
                 let (content, is_error) = match exec_res {
                     Ok(out) => (out, false),
