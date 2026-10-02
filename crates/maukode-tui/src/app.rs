@@ -274,16 +274,25 @@ impl App {
             filter: String::new(),
         };
 
-        // Fetch models asynchronously
+        // Fetch models asynchronously via server client if connected, or local config
+        let client_opt = self.server_client.clone();
         let config_clone = self.config.clone();
         let tx = self.event_tx.clone();
+        let p_id = provider_id.clone();
         tokio::spawn(async move {
-            let res = config_clone
-                .fetch_models_for_provider(&provider_id)
-                .await
-                .map_err(|e| e.to_string());
+            let res = if let Some(client) = client_opt {
+                client
+                    .list_models(Some(&p_id))
+                    .await
+                    .map_err(|e| e.to_string())
+            } else {
+                config_clone
+                    .fetch_models_for_provider(&p_id)
+                    .await
+                    .map_err(|e| e.to_string())
+            };
             let _ = tx.send(AppEvent::ModelsFetched {
-                provider_id,
+                provider_id: p_id,
                 models: res,
             });
         });
@@ -384,6 +393,12 @@ impl App {
                 } else if parts.len() >= 3 && parts[1] == "use" {
                     let id = parts[2];
                     if let Ok(()) = self.config.set_active_provider(id) {
+                        if let Some(client) = self.server_client.clone() {
+                            let id_s = id.to_string();
+                            tokio::spawn(async move {
+                                let _ = client.set_active_provider(&id_s).await;
+                            });
+                        }
                         self.set_status(format!("Active provider switched to {id}"));
                         self.items.push(ChatItem {
                             role: ChatRole::System,
@@ -407,6 +422,12 @@ impl App {
                     };
                     self.config.add_or_update_provider(p);
                     let _ = self.config.set_active_provider(&id);
+                    if let Some(client) = self.server_client.clone() {
+                        let id_s = id.clone();
+                        tokio::spawn(async move {
+                            let _ = client.set_active_provider(&id_s).await;
+                        });
+                    }
                     self.set_status(format!("Added and activated provider '{name}'"));
                     self.items.push(ChatItem {
                         role: ChatRole::System,
@@ -422,6 +443,12 @@ impl App {
                 } else {
                     let model = parts[1..].join(" ");
                     self.config.set_active_model(&model);
+                    if let Some(client) = self.server_client.clone() {
+                        let m_s = model.clone();
+                        tokio::spawn(async move {
+                            let _ = client.set_active_model(&m_s).await;
+                        });
+                    }
                     self.set_status(format!("Model switched to {model}"));
                     self.items.push(ChatItem {
                         role: ChatRole::System,

@@ -164,6 +164,13 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                         let id = provider.id.clone();
                         let name = provider.name.clone();
                         let _ = app.config.set_active_provider(&id);
+                        if let Some(ref client) = app.server_client {
+                            let client = client.clone();
+                            let id_clone = id.clone();
+                            tokio::spawn(async move {
+                                let _ = client.set_active_provider(&id_clone).await;
+                            });
+                        }
                         app.set_status(format!("Activated provider '{name}'"));
                         app.items.push(crate::app::ChatItem {
                             role: ChatRole::System,
@@ -282,6 +289,13 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     };
 
                     app.config.set_active_model(&chosen);
+                    if let Some(ref client) = app.server_client {
+                        let client = client.clone();
+                        let chosen_clone = chosen.clone();
+                        tokio::spawn(async move {
+                            let _ = client.set_active_model(&chosen_clone).await;
+                        });
+                    }
                     app.set_status(format!("Model set to '{chosen}'"));
                     app.items.push(crate::app::ChatItem {
                         role: ChatRole::System,
