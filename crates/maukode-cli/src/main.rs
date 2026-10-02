@@ -10,6 +10,8 @@ use maukode_protocol::{LLMEvent, SessionId};
 use maukode_tools::create_default_registry;
 use tokio::sync::mpsc;
 
+mod remote;
+
 #[derive(Parser, Debug)]
 #[command(name = "maukode", author, version, about = "Agentic AI coding assistant in Rust (inspired by OpenCode)")]
 struct Cli {
@@ -40,6 +42,12 @@ struct Cli {
     #[arg(long, help = "Run in simple command-line REPL mode instead of full TUI")]
     cli: bool,
 
+    #[arg(long, help = "Remote server URL (e.g. http://vps:4096) to connect to instead of local in-process")]
+    remote: Option<String>,
+
+    #[arg(long, env = "MAUKODE_AUTH_TOKEN", help = "Authentication Bearer token for remote server")]
+    token: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 
@@ -54,6 +62,17 @@ enum Commands {
         #[arg(required = true, help = "The prompt instruction for MauKode")]
         prompt: String,
     },
+    #[command(about = "Start headless MauKode daemon server (HTTP REST + SSE) for VPS or local")]
+    Server {
+        #[arg(short, long, default_value = "127.0.0.1:4096", help = "Socket address to bind server to (e.g. 0.0.0.0:4096)")]
+        bind: String,
+
+        #[arg(short, long, env = "MAUKODE_AUTH_TOKEN", help = "Secret Bearer token required for clients")]
+        token: Option<String>,
+
+        #[arg(short = 'd', long, help = "Default root directory for workspaces")]
+        dir: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -67,6 +86,101 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let cwd = cli.cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    // Handle "server" subcommand for VPS / headless daemon
+    if let Some(Commands::Server { bind, token, dir }) = cli.command {
+        let bind_addr: std::net::SocketAddr = bind
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid bind address '{bind}': {e}"))?;
+
+        println!("══════════════════════════════════════════════════════════════════");
+        println!("  🚀 \x1b[1;36mMauKode Server\x1b[0m (Headless Daemon for VPS / Local)");
+        println!("  Listening on: \x1b[1;32mhttp://{}\x1b[0m", bind_addr);
+        if token.is_some() {
+            println!("  Authentication: \x1b[1;33mBearer Token Enabled\x1b[0m");
+        } else {
+            println!("  Authentication: \x1b[1;31mDisabled (Open Access)\x1b[0m");
+        }
+        let workspace_dir = dir.as_deref().unwrap_or(&cwd);
+        println!("  Default workspace: \x1b[2m{}\x1b[0m", workspace_dir.display());
+        println!("══════════════════════════════════════════════════════════════════\n");
+
+        let server_config = maukode_server::ServerConfig {
+            bind_addr,
+            auth_token: token,
+            default_dir: dir.or(Some(cwd)),
+        };
+
+        maukode_server::run_server(server_config).await?;
+        return Ok(());
+    }
+
+    // Determine direct prompt
+    let prompt_to_run = match cli.command {
+        Some(Commands::Run { prompt }) => Some(prompt),
+        None => {
+            if !cli.prompt.is_empty() {
+                Some(cli.prompt.join(" "))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    let parsed_session_id = if let Some(ref s) = cli.session {
+        let u = uuid::Uuid::parse_str(s)
+            .map_err(|e| anyhow::anyhow!("Invalid session UUID '{s}': {e}"))?;
+        Some(SessionId(u))
+    } else {
+        None
+    };
+
+    // Handle remote server connection
+    if let Some(ref remote_url) = cli.remote {
+        let client = maukode_server::ServerClient::new(remote_url, cli.token.clone())?;
+        println!("🚀 \x1b[1;36mMauKode\x1b[0m connected to remote server at \x1b[1;32m{}\x1b[0m", client.base_url());
+        println!("📂 Remote Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
+
+        let target_session_id = if let Some(id) = parsed_session_id {
+            id
+        } else if cli.continue_session {
+            let sessions = client.list_sessions(Some(&cwd), false).await?;
+            if let Some(first) = sessions.first() {
+                first.id
+            } else {
+                let meta = client.create_session(Some(&cwd), None).await?;
+                meta.id
+            }
+        } else {
+            let meta = client.create_session(Some(&cwd), None).await?;
+            meta.id
+        };
+
+        if let Some(prompt) = prompt_to_run {
+            remote::run_remote_turn(&client, target_session_id, &prompt).await?;
+            return Ok(());
+        }
+
+        println!("Connected. Type your prompt, or 'exit' / 'quit' to close.\n");
+        loop {
+            print!("❯ ");
+            io::stdout().flush()?;
+            let mut line = String::new();
+            io::stdin().read_line(&mut line)?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed == "exit" || trimmed == "quit" {
+                break;
+            }
+            println!();
+            remote::run_remote_turn(&client, target_session_id, trimmed).await?;
+            println!();
+        }
+        return Ok(());
+    }
 
     let mut config = AppConfig::load();
 
@@ -92,26 +206,6 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref m) = cli.model {
         config.set_active_model(m);
     }
-
-    let parsed_session_id = if let Some(ref s) = cli.session {
-        let u = uuid::Uuid::parse_str(s)
-            .map_err(|e| anyhow::anyhow!("Invalid session UUID '{s}': {e}"))?;
-        Some(SessionId(u))
-    } else {
-        None
-    };
-
-    // Determine direct prompt
-    let prompt_to_run = match cli.command {
-        Some(Commands::Run { prompt }) => Some(prompt),
-        None => {
-            if !cli.prompt.is_empty() {
-                Some(cli.prompt.join(" "))
-            } else {
-                None
-            }
-        }
-    };
 
     let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
 

@@ -171,7 +171,10 @@ impl ServerClient {
         Ok(())
     }
 
-    pub async fn subscribe_events(&self, id: SessionId) -> Result<impl Stream<Item = Result<LLMEvent>>> {
+    pub async fn subscribe_events(
+        &self,
+        id: SessionId,
+    ) -> Result<std::pin::Pin<Box<dyn Stream<Item = Result<LLMEvent>> + Send>>> {
         let resp = self
             .http
             .get(format!("{}/api/v1/sessions/{id}/events", self.base_url))
@@ -201,6 +204,6 @@ impl ServerClient {
             }
         });
 
-        Ok(stream)
+        Ok(Box::pin(stream))
     }
 }
