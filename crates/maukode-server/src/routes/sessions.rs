@@ -156,10 +156,16 @@ pub async fn submit_prompt(
     };
     let active_provider = config_guard.active_provider.clone();
     let active_model = config_guard.active_model.clone();
-    drop(config_guard);
 
     let session_dir = session_arc.read().await.directory.clone();
-    let tools = Arc::new(create_default_registry(&session_dir));
+    let tools = if config_guard.security.jail_path_traversal {
+        let jail = maukode_tools::PathJail::new(&session_dir)
+            .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
+        Arc::new(maukode_tools::create_default_registry_with_jail(&session_dir, jail))
+    } else {
+        Arc::new(create_default_registry(&session_dir))
+    };
+    drop(config_guard);
     let context = Arc::new(ContextManager::new(&session_dir));
 
     let runner = SessionRunner::new(
@@ -168,7 +174,7 @@ pub async fn submit_prompt(
         tools,
         context,
         runner_config,
-    );
+    ).with_permission_manager(Arc::clone(&state.permission_manager));
 
     let event_broadcast_tx = state.get_event_sender(id).await;
     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
@@ -215,4 +221,22 @@ pub async fn stream_session_events(
     });
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RespondPermissionRequest {
+    pub decision: maukode_protocol::PermissionDecision,
+}
+
+pub async fn respond_permission(
+    State(state): State<Arc<ServerState>>,
+    Path((_session_id, request_id)): Path<(SessionId, String)>,
+    Json(payload): Json<RespondPermissionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let handled = state.permission_manager.respond(&request_id, payload.decision).await;
+    if handled {
+        Ok(Json(json!({ "status": "ok", "request_id": request_id })))
+    } else {
+        Err((StatusCode::NOT_FOUND, "Permission request not found or expired".to_string()))
+    }
 }

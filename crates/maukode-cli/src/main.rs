@@ -318,7 +318,17 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
-        let tools = Arc::new(create_default_registry(&cwd));
+        let tools = if config.security.jail_path_traversal {
+            let jail = maukode_tools::PathJail::new(&cwd)
+                .with_allowed_paths(config.security.allowed_external_paths.clone());
+            Arc::new(maukode_tools::create_default_registry_with_jail(&cwd, jail))
+        } else {
+            Arc::new(create_default_registry(&cwd))
+        };
+        let perm_mgr = Arc::new(
+            maukode_core::PermissionManager::new(config.security.permission_mode)
+                .with_whitelist(config.security.bash_whitelist.clone()),
+        );
         let context = Arc::new(ContextManager::new(&cwd));
         let llm_client = config.create_active_llm_client()?;
 
@@ -335,9 +345,9 @@ async fn main() -> anyhow::Result<()> {
             tools,
             context,
             runner_config,
-        );
+        ).with_permission_manager(Arc::clone(&perm_mgr));
 
-        execute_turn(&runner, Some(prompt)).await?;
+        execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(prompt)).await?;
 
         // Save session to SQLite
         let guard = session_arc.read().await;
@@ -363,7 +373,17 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
-        let tools = Arc::new(create_default_registry(&cwd));
+        let tools = if config.security.jail_path_traversal {
+            let jail = maukode_tools::PathJail::new(&cwd)
+                .with_allowed_paths(config.security.allowed_external_paths.clone());
+            Arc::new(maukode_tools::create_default_registry_with_jail(&cwd, jail))
+        } else {
+            Arc::new(create_default_registry(&cwd))
+        };
+        let perm_mgr = Arc::new(
+            maukode_core::PermissionManager::new(config.security.permission_mode)
+                .with_whitelist(config.security.bash_whitelist.clone()),
+        );
         let context = Arc::new(ContextManager::new(&cwd));
         let llm_client = config.create_active_llm_client()?;
 
@@ -378,7 +398,7 @@ async fn main() -> anyhow::Result<()> {
                 max_tokens: Some(4096),
                 temperature: None,
             },
-        );
+        ).with_permission_manager(Arc::clone(&perm_mgr));
 
         loop {
             print!("\x1b[1;32mmaukode>\x1b[0m ");
@@ -398,7 +418,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             println!();
-            execute_turn(&runner, Some(trimmed.to_string())).await?;
+            execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(trimmed.to_string())).await?;
             let guard = session_arc.read().await;
             store.save_session(&guard, &config.active_provider, &config.active_model).await?;
             println!("\n");
@@ -412,7 +432,11 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn execute_turn(runner: &SessionRunner, prompt: Option<String>) -> anyhow::Result<()> {
+async fn execute_turn(
+    runner: &SessionRunner,
+    perm_mgr: Option<Arc<maukode_core::PermissionManager>>,
+    prompt: Option<String>,
+) -> anyhow::Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<LLMEvent>();
 
     let runner_task = {
@@ -479,6 +503,30 @@ async fn execute_turn(runner: &SessionRunner, prompt: Option<String>) -> anyhow:
                             .map(|c| format!(" | Cache Read {c}"))
                             .unwrap_or_default()
                     );
+                }
+                LLMEvent::PermissionRequest(req) => {
+                    let cmd = req.command.as_deref().unwrap_or(req.path.as_deref().unwrap_or(&req.description));
+                    println!("\n\x1b[1;33m⚠️  [CONFIRMATION REQUIRED]\x1b[0m");
+                    println!("  Tool: \x1b[1m{}\x1b[0m", req.tool_name);
+                    println!("  Command: \x1b[1;37m{}\x1b[0m", cmd);
+                    println!("  Risk: \x1b[1;31m{}\x1b[0m", req.description);
+                    print!("  Allow execution? [y: once, a: session, n: reject]: ");
+                    stdout.flush().ok();
+
+                    let mut answer = String::new();
+                    let decision = if io::stdin().read_line(&mut answer).is_ok() {
+                        match answer.trim().to_lowercase().as_str() {
+                            "y" | "yes" => maukode_protocol::PermissionDecision::AllowOnce,
+                            "a" | "all" => maukode_protocol::PermissionDecision::AllowSession,
+                            _ => maukode_protocol::PermissionDecision::Deny,
+                        }
+                    } else {
+                        maukode_protocol::PermissionDecision::Deny
+                    };
+
+                    if let Some(ref pm) = perm_mgr {
+                        let _ = pm.respond(&req.request_id, decision).await;
+                    }
                 }
                 LLMEvent::Error { message } => {
                     eprintln!("\n\x1b[1;31m❌ Error: {message}\x1b[0m");

@@ -2,12 +2,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use maukode_core::{
-    AppConfig, ContextManager, ProviderConfig, ProviderKind, RunnerConfig, Session, SessionRunner,
-    SessionSummary, SqliteSessionStore,
+    AppConfig, ContextManager, PermissionManager, ProviderConfig, ProviderKind, RunnerConfig,
+    Session, SessionRunner, SessionSummary, SqliteSessionStore,
 };
-use maukode_protocol::{ContentPart, LLMEvent, Role, SessionId, TokenUsage};
+use maukode_protocol::{
+    ContentPart, LLMEvent, PermissionDecision, PermissionRequest, Role, SessionId, TokenUsage,
+};
 use maukode_server::ServerClient;
-use maukode_tools::{create_default_registry, ToolRegistry};
+use maukode_tools::{create_default_registry, create_default_registry_with_jail, PathJail, ToolRegistry};
 use tokio::sync::{mpsc, RwLock};
 use crate::event::AppEvent;
 
@@ -51,6 +53,9 @@ pub enum ActiveModal {
         selected_idx: usize,
     },
     Help,
+    PermissionConfirmation {
+        request: PermissionRequest,
+    },
 }
 
 pub struct App {
@@ -60,6 +65,7 @@ pub struct App {
     pub store: SqliteSessionStore,
     pub tools: Arc<ToolRegistry>,
     pub context: Arc<ContextManager>,
+    pub permission_manager: Arc<PermissionManager>,
     pub items: Vec<ChatItem>,
     pub is_running: bool,
     pub input: String,
@@ -85,8 +91,18 @@ impl App {
     ) -> anyhow::Result<Self> {
         let config = AppConfig::load();
         let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
-        let tools = Arc::new(create_default_registry(&cwd));
+        let tools = if config.security.jail_path_traversal {
+            let jail = PathJail::new(&cwd)
+                .with_allowed_paths(config.security.allowed_external_paths.clone());
+            Arc::new(create_default_registry_with_jail(&cwd, jail))
+        } else {
+            Arc::new(create_default_registry(&cwd))
+        };
         let context = Arc::new(ContextManager::new(&cwd));
+        let permission_manager = Arc::new(
+            PermissionManager::new(config.security.permission_mode)
+                .with_whitelist(config.security.bash_whitelist.clone()),
+        );
 
         // Determine session to start with
         let initial_session = if let Some(id) = session_id_to_load {
@@ -202,6 +218,7 @@ impl App {
             store,
             tools,
             context,
+            permission_manager,
             items,
             is_running: false,
             input: String::new(),
@@ -583,7 +600,8 @@ impl App {
             temperature: None,
         };
 
-        let runner = SessionRunner::new(session, llm_client, tools, context, runner_config);
+        let runner = SessionRunner::new(session, llm_client, tools, context, runner_config)
+            .with_permission_manager(Arc::clone(&self.permission_manager));
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let app_event_tx = self.event_tx.clone();
 
@@ -608,6 +626,10 @@ impl App {
 
     pub fn handle_llm_event(&mut self, event: LLMEvent) {
         match event {
+            LLMEvent::PermissionRequest(req) => {
+                self.active_modal = ActiveModal::PermissionConfirmation { request: req };
+                self.set_status("⚠️ Action requires user confirmation");
+            }
             LLMEvent::TextDelta { text } => {
                 if let Some(last) = self.items.last_mut() {
                     if matches!(last.role, ChatRole::Assistant) {
@@ -722,5 +744,39 @@ impl App {
                 let _ = store.save_session(&guard, &provider, &model).await;
             }
         });
+    }
+
+    pub fn respond_permission(
+        &mut self,
+        request: PermissionRequest,
+        decision: PermissionDecision,
+    ) {
+        self.active_modal = ActiveModal::None;
+        let action_str = match decision {
+            PermissionDecision::AllowOnce => "allowed (once)",
+            PermissionDecision::AllowSession => "allowed (session whitelist)",
+            PermissionDecision::Deny => "rejected",
+        };
+        self.set_status(format!("Action {action_str}"));
+
+        if let Some(ref client) = self.server_client {
+            let client = Arc::clone(client);
+            let sid = match uuid::Uuid::parse_str(&request.session_id) {
+                Ok(u) => SessionId(u),
+                Err(_) => self.session.try_read().map(|s| s.id).unwrap_or_else(|_| SessionId::new()),
+            };
+            let req_id = request.request_id.clone();
+            tokio::spawn(async move {
+                if let Err(e) = client.respond_permission(sid, &req_id, decision).await {
+                    tracing::error!("Failed to send permission decision to server: {e}");
+                }
+            });
+        } else {
+            let pm = Arc::clone(&self.permission_manager);
+            let req_id = request.request_id.clone();
+            tokio::spawn(async move {
+                pm.respond(&req_id, decision).await;
+            });
+        }
     }
 }

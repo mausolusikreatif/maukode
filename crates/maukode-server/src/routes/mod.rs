@@ -51,6 +51,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/sessions/{id}/events",
             get(sessions::stream_session_events),
         )
+        .route(
+            "/api/v1/sessions/{id}/permissions/{request_id}",
+            post(sessions::respond_permission),
+        )
         .route_layer(from_fn_with_state(Arc::clone(&state), auth_middleware));
 
     Router::new()

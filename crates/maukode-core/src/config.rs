@@ -3,12 +3,49 @@ use std::sync::Arc;
 use anyhow::Result;
 use maukode_llm::{AnthropicClient, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
+use crate::permission::PermissionMode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     Anthropic,
     OpenAiCompatible,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecurityConfig {
+    #[serde(default)]
+    pub permission_mode: PermissionMode,
+    #[serde(default = "default_true")]
+    pub jail_path_traversal: bool,
+    #[serde(default)]
+    pub allowed_external_paths: Vec<PathBuf>,
+    #[serde(default = "default_whitelist")]
+    pub bash_whitelist: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_whitelist() -> Vec<String> {
+    vec![
+        "cargo *".to_string(),
+        "git status".to_string(),
+        "git diff".to_string(),
+        "npm test".to_string(),
+    ]
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            permission_mode: PermissionMode::Ask,
+            jail_path_traversal: true,
+            allowed_external_paths: Vec::new(),
+            bash_whitelist: default_whitelist(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +63,8 @@ pub struct AppConfig {
     pub active_provider: String,
     pub active_model: String,
     pub providers: Vec<ProviderConfig>,
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 impl Default for AppConfig {
@@ -78,6 +117,7 @@ impl Default for AppConfig {
                     default_model: Some("anthropic/claude-3.7-sonnet".to_string()),
                 },
             ],
+            security: SecurityConfig::default(),
         };
         Self::sync_from_opencode_if_present(&mut cfg);
         cfg

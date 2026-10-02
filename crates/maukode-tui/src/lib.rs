@@ -492,6 +492,21 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.active_modal = ActiveModal::None;
             }
         }
+        ActiveModal::PermissionConfirmation { request } => {
+            let req = request.clone();
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    app.respond_permission(req, maukode_protocol::PermissionDecision::AllowOnce);
+                }
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    app.respond_permission(req, maukode_protocol::PermissionDecision::AllowSession);
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                    app.respond_permission(req, maukode_protocol::PermissionDecision::Deny);
+                }
+                _ => {}
+            }
+        }
     }
 }
 

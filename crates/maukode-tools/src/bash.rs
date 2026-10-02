@@ -4,17 +4,29 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
+use crate::security::PathJail;
 use crate::tool::{Tool, ToolError};
 
 pub struct BashTool {
     pub default_cwd: PathBuf,
+    pub jail: PathJail,
     pub default_timeout: Duration,
 }
 
 impl BashTool {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
+        let dir = cwd.into();
+        Self {
+            jail: PathJail::new(&dir),
+            default_cwd: dir,
+            default_timeout: Duration::from_secs(120),
+        }
+    }
+
+    pub fn with_jail(cwd: impl Into<PathBuf>, jail: PathJail) -> Self {
         Self {
             default_cwd: cwd.into(),
+            jail,
             default_timeout: Duration::from_secs(120),
         }
     }
@@ -63,7 +75,7 @@ impl Tool for BashTool {
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
 
         let cwd = match args.cwd {
-            Some(ref c) => PathBuf::from(c),
+            Some(ref c) => self.jail.validate_path(c)?,
             None => self.default_cwd.clone(),
         };
 
