@@ -1,8 +1,8 @@
-use std::path::PathBuf;
-use std::time::Duration;
+use crate::client::ServerClient;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use crate::client::ServerClient;
+use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonInfo {
@@ -137,7 +137,8 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
         }
     }
 
-    let mut child = cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| anyhow!("Failed to spawn background daemon server: {e}"))?;
 
     let pid = child.id();
@@ -153,20 +154,22 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
 
         // Check if process crashed immediately
         if let Ok(Some(status)) = child.try_wait() {
-            return Err(anyhow!("Daemon server exited immediately with status: {status}. Check log: {}", log_path.display()));
+            return Err(anyhow!(
+                "Daemon server exited immediately with status: {status}. Check log: {}",
+                log_path.display()
+            ));
         }
     }
 
     if !ready {
         let _ = child.kill();
-        return Err(anyhow!("Daemon server did not become healthy within 3 seconds. Check log: {}", log_path.display()));
+        return Err(anyhow!(
+            "Daemon server did not become healthy within 3 seconds. Check log: {}",
+            log_path.display()
+        ));
     }
 
-    let info = DaemonInfo {
-        url,
-        pid,
-        token,
-    };
+    let info = DaemonInfo { url, pid, token };
 
     let daemon_file = daemon_file_path();
     if let Some(parent) = daemon_file.parent() {

@@ -1,6 +1,6 @@
+use maukode_server::{run_server, ServerClient, ServerConfig};
 use std::net::SocketAddr;
 use std::time::Duration;
-use maukode_server::{run_server, ServerClient, ServerConfig};
 use tempfile::tempdir;
 
 #[tokio::test]
@@ -31,23 +31,42 @@ async fn test_server_health_and_sessions() {
     assert!(unauth_sessions.is_err()); // protected route fails without token!
 
     // Test authorized client
-    let client = ServerClient::new(format!("http://127.0.0.1:{port}"), Some("secret123".to_string())).unwrap();
+    let client = ServerClient::new(
+        format!("http://127.0.0.1:{port}"),
+        Some("secret123".to_string()),
+    )
+    .unwrap();
     assert!(client.health().await.unwrap());
 
     // Test create session with directory
-    let meta = client.create_session(Some(temp_dir.path()), Some("Test Session")).await.unwrap();
-    assert_eq!(meta.directory, temp_dir.path().to_string_lossy().to_string());
+    let meta = client
+        .create_session(Some(temp_dir.path()), Some("Test Session"))
+        .await
+        .unwrap();
+    assert_eq!(
+        meta.directory,
+        temp_dir.path().to_string_lossy().to_string()
+    );
 
     // Test list sessions by directory
-    let sessions = client.list_sessions(Some(temp_dir.path()), false).await.unwrap();
+    let sessions = client
+        .list_sessions(Some(temp_dir.path()), false)
+        .await
+        .unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, meta.id);
-    assert_eq!(sessions[0].directory, temp_dir.path().to_string_lossy().to_string());
+    assert_eq!(
+        sessions[0].directory,
+        temp_dir.path().to_string_lossy().to_string()
+    );
 
     // Test get session detail
     let detail = client.get_session(meta.id).await.unwrap();
     assert_eq!(detail.id, meta.id);
-    assert_eq!(detail.directory, temp_dir.path().to_string_lossy().to_string());
+    assert_eq!(
+        detail.directory,
+        temp_dir.path().to_string_lossy().to_string()
+    );
 }
 
 #[tokio::test]
@@ -68,8 +87,15 @@ async fn test_permission_endpoint() {
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    let client = ServerClient::new(format!("http://127.0.0.1:{port}"), Some("secret123".to_string())).unwrap();
-    let meta = client.create_session(Some(temp_dir.path()), None).await.unwrap();
+    let client = ServerClient::new(
+        format!("http://127.0.0.1:{port}"),
+        Some("secret123".to_string()),
+    )
+    .unwrap();
+    let meta = client
+        .create_session(Some(temp_dir.path()), None)
+        .await
+        .unwrap();
 
     // Responding to non-existent request should fail with 404
     let res = client
@@ -100,8 +126,15 @@ async fn test_diff_and_undo_endpoints() {
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    let client = ServerClient::new(format!("http://127.0.0.1:{port}"), Some("secret123".to_string())).unwrap();
-    let meta = client.create_session(Some(temp_dir.path()), None).await.unwrap();
+    let client = ServerClient::new(
+        format!("http://127.0.0.1:{port}"),
+        Some("secret123".to_string()),
+    )
+    .unwrap();
+    let meta = client
+        .create_session(Some(temp_dir.path()), None)
+        .await
+        .unwrap();
 
     // 1. Initially diff should report clean / empty
     let diff = client.get_diff(meta.id).await.unwrap();
@@ -115,9 +148,14 @@ async fn test_diff_and_undo_endpoints() {
     tokio::fs::write(
         temp_dir.path().join("server_core.rs"),
         "pub struct AppServer { pub port: u16 }\nimpl AppServer { pub fn run(&self) {} }",
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
-    let map_resp = client.get_codebase_map(meta.id, None, None, Some(500)).await.unwrap();
+    let map_resp = client
+        .get_codebase_map(meta.id, None, None, Some(500))
+        .await
+        .unwrap();
     assert!(map_resp.map.contains("server_core.rs:"));
     assert!(map_resp.map.contains("pub struct AppServer"));
 
@@ -133,7 +171,10 @@ async fn test_diff_and_undo_endpoints() {
     assert!(mcp_resp.servers.is_empty());
 
     // 6. Test compaction endpoint
-    let compact_resp = client.compact_session(meta.id, Some("Focus on server core")).await.unwrap();
+    let compact_resp = client
+        .compact_session(meta.id, Some("Focus on server core"))
+        .await
+        .unwrap();
     assert_eq!(compact_resp.session_id, meta.id.to_string());
     assert!(compact_resp.compacted_messages <= 4);
 }

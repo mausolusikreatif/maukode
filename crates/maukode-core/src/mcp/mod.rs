@@ -33,7 +33,10 @@ impl McpManager {
     }
 
     /// Load combined MCP server definitions from global config and project-local files
-    pub async fn load_server_configs(cwd: &Path, app_config: &AppConfig) -> HashMap<String, McpServerConfig> {
+    pub async fn load_server_configs(
+        cwd: &Path,
+        app_config: &AppConfig,
+    ) -> HashMap<String, McpServerConfig> {
         let mut combined = app_config.mcp_servers.clone();
 
         // 1. Global ~/.config/maukode/mcp.json or ~/.maukode/mcp.json
@@ -59,10 +62,7 @@ impl McpManager {
         }
 
         // 2. Project-local .maukode/mcp.json or mcp.json
-        let local_candidates = [
-            cwd.join(".maukode").join("mcp.json"),
-            cwd.join("mcp.json"),
-        ];
+        let local_candidates = [cwd.join(".maukode").join("mcp.json"), cwd.join("mcp.json")];
 
         for path in local_candidates {
             if path.is_file() {
@@ -149,7 +149,9 @@ impl McpManager {
         let mut statuses = Vec::new();
 
         for (name, config) in configs {
-            let cmd_str = format!("{} {}", config.command, config.args.join(" ")).trim().to_string();
+            let cmd_str = format!("{} {}", config.command, config.args.join(" "))
+                .trim()
+                .to_string();
             match self.get_or_connect(&name, &config, cwd).await {
                 Ok(client) => match client.list_tools().await {
                     Ok(tools) => {
@@ -234,7 +236,9 @@ mod tests {
                 }
             }
         }"#;
-        tokio::fs::write(maukode_dir.join("mcp.json"), local_json).await.unwrap();
+        tokio::fs::write(maukode_dir.join("mcp.json"), local_json)
+            .await
+            .unwrap();
 
         let loaded = McpManager::load_server_configs(cwd, &app_config).await;
         assert_eq!(loaded.len(), 2);
@@ -309,7 +313,9 @@ for line in sys.stdin:
         sys.stdout.flush()
 "#;
         let script_path = cwd.join("mock_mcp.py");
-        tokio::fs::write(&script_path, mock_server_py).await.unwrap();
+        tokio::fs::write(&script_path, mock_server_py)
+            .await
+            .unwrap();
 
         let cfg = McpServerConfig {
             command: "python3".to_string(),
@@ -326,7 +332,10 @@ for line in sys.stdin:
         assert_eq!(tools[0].name, "calculate");
 
         // Test tools/call
-        let res = client.call_tool("calculate", serde_json::json!({"expr": "6 * 7"})).await.unwrap();
+        let res = client
+            .call_tool("calculate", serde_json::json!({"expr": "6 * 7"}))
+            .await
+            .unwrap();
         assert!(res.contains("Result of 6 * 7 is 42"));
 
         // Test McpTool adapter
@@ -339,7 +348,10 @@ for line in sys.stdin:
         );
         use maukode_tools::Tool;
         assert_eq!(tool.name(), "mcp__mock__calculate");
-        let exec_res = tool.execute(serde_json::json!({"expr": "10 + 32"})).await.unwrap();
+        let exec_res = tool
+            .execute(serde_json::json!({"expr": "10 + 32"}))
+            .await
+            .unwrap();
         assert!(exec_res.contains("Result of 10 + 32 is 42"));
     }
 }

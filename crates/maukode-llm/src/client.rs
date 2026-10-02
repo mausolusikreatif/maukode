@@ -1,9 +1,9 @@
-use std::pin::Pin;
+use crate::error::LLMError;
+use crate::request::LLMRequest;
 use async_trait::async_trait;
 use futures::Stream;
 use maukode_protocol::LLMEvent;
-use crate::error::LLMError;
-use crate::request::LLMRequest;
+use std::pin::Pin;
 
 pub type LLMStream = Pin<Box<dyn Stream<Item = Result<LLMEvent, LLMError>> + Send>>;
 

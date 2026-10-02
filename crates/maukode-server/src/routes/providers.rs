@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use crate::state::ServerState;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -8,7 +8,7 @@ use axum::{
 use maukode_core::ProviderConfig;
 use serde::Deserialize;
 use serde_json::json;
-use crate::state::ServerState;
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 pub struct SetActiveProviderRequest {

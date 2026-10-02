@@ -4,6 +4,7 @@ pub mod grep;
 pub mod registry;
 pub mod security;
 pub mod tool;
+pub mod web;
 
 pub use bash::BashTool;
 pub use file::{EditFileTool, GlobTool, ReadFileTool, WriteFileTool};
@@ -11,6 +12,7 @@ pub use grep::GrepTool;
 pub use registry::ToolRegistry;
 pub use security::{assess_bash_command, PathJail, RiskAssessment, RiskLevel};
 pub use tool::{Tool, ToolDefinition, ToolError};
+pub use web::{html_to_clean_markdown, FetchWebContentTool, SearchResultItem, WebSearchTool};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,9 +28,17 @@ pub fn create_default_registry_with_jail(cwd: impl Into<PathBuf>, jail: PathJail
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(BashTool::with_jail(cwd.clone(), jail.clone())));
     registry.register(Arc::new(ReadFileTool::with_jail(cwd.clone(), jail.clone())));
-    registry.register(Arc::new(WriteFileTool::with_jail(cwd.clone(), jail.clone())));
+    registry.register(Arc::new(WriteFileTool::with_jail(
+        cwd.clone(),
+        jail.clone(),
+    )));
     registry.register(Arc::new(EditFileTool::with_jail(cwd.clone(), jail.clone())));
     registry.register(Arc::new(GlobTool::with_jail(cwd.clone(), jail.clone())));
     registry.register(Arc::new(GrepTool::with_jail(cwd, jail)));
+    registry.register(Arc::new(WebSearchTool::new()));
+    registry.register_alias("search_web", "web_search");
+    registry.register(Arc::new(FetchWebContentTool::new()));
+    registry.register_alias("fetch_url", "fetch_web_content");
+    registry.register_alias("read_url", "fetch_web_content");
     registry
 }

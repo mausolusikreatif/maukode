@@ -1,15 +1,15 @@
-use std::sync::Arc;
+use crate::context::ContextManager;
+use crate::permission::{PermissionManager, PermissionMode};
+use crate::session::Session;
 use futures::StreamExt;
 use maukode_llm::{LLMClient, LLMRequest};
 use maukode_protocol::{
     ContentPart, FinishReason, LLMEvent, Message, Role, SessionState, ToolCall, ToolResult,
 };
 use maukode_tools::ToolRegistry;
+use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info};
-use crate::context::ContextManager;
-use crate::permission::{PermissionManager, PermissionMode};
-use crate::session::Session;
 
 pub struct RunnerConfig {
     pub model: String,
@@ -63,7 +63,10 @@ impl SessionRunner {
         self
     }
 
-    pub fn with_checkpoint_manager(mut self, cm: Arc<crate::checkpoint::CheckpointManager>) -> Self {
+    pub fn with_checkpoint_manager(
+        mut self,
+        cm: Arc<crate::checkpoint::CheckpointManager>,
+    ) -> Self {
         self.checkpoint_manager = Some(cm);
         self
     }
@@ -97,7 +100,10 @@ impl SessionRunner {
         loop {
             step += 1;
             if step > self.config.max_steps {
-                info!("Max steps ({}) reached. Ending session turn.", self.config.max_steps);
+                info!(
+                    "Max steps ({}) reached. Ending session turn.",
+                    self.config.max_steps
+                );
                 let _ = event_tx.send(LLMEvent::Finish {
                     reason: FinishReason::MaxTokens,
                 });
@@ -145,13 +151,17 @@ impl SessionRunner {
                         Some(self.llm.as_ref()),
                         &self.config.model,
                         Some("Preserve latest active task progress and key decisions"),
-                    ).await {
+                    )
+                    .await
+                    {
                         pruned_messages = pruner.prune_messages(&session_write.messages);
                         tracing::info!(
                             "Auto-compacted session from {} to {} messages ({} tokens saved)",
                             compact_res.original_message_count,
                             compact_res.compacted_message_count,
-                            compact_res.original_tokens.saturating_sub(compact_res.compacted_tokens)
+                            compact_res
+                                .original_tokens
+                                .saturating_sub(compact_res.compacted_tokens)
                         );
                     }
                 }
@@ -233,12 +243,15 @@ impl SessionRunner {
                         PermissionMode::Strict => true,
                         PermissionMode::Ask => {
                             if call.name == "bash" {
-                                if let Some(cmd_val) = call.arguments.get("command").and_then(|v| v.as_str()) {
+                                if let Some(cmd_val) =
+                                    call.arguments.get("command").and_then(|v| v.as_str())
+                                {
                                     let session_id_str = self.session.read().await.id.to_string();
                                     if perm_mgr.is_whitelisted(&session_id_str, cmd_val).await {
                                         false
                                     } else {
-                                        let assessment = maukode_tools::assess_bash_command(cmd_val);
+                                        let assessment =
+                                            maukode_tools::assess_bash_command(cmd_val);
                                         assessment.level != maukode_tools::RiskLevel::Safe
                                     }
                                 } else {
@@ -255,11 +268,20 @@ impl SessionRunner {
                         let session_id_str = self.session.read().await.id.to_string();
 
                         let (command, risk_level, description) = if call.name == "bash" {
-                            let cmd = call.arguments.get("command").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                            let cmd = call
+                                .arguments
+                                .get("command")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string();
                             let assess = maukode_tools::assess_bash_command(&cmd);
                             (Some(cmd), assess.level.to_string(), assess.reason)
                         } else {
-                            (None, "warning".to_string(), format!("Tool '{}' requires confirmation", call.name))
+                            (
+                                None,
+                                "warning".to_string(),
+                                format!("Tool '{}' requires confirmation", call.name),
+                            )
                         };
 
                         let perm_req = maukode_protocol::PermissionRequest {
@@ -276,14 +298,17 @@ impl SessionRunner {
                         let _ = event_tx.send(LLMEvent::PermissionRequest(perm_req));
 
                         // Wait for user's decision (timeout 5 minutes)
-                        let decision = match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
-                            Ok(Ok(d)) => d,
-                            Ok(Err(_)) => maukode_protocol::PermissionDecision::Deny,
-                            Err(_) => {
-                                tracing::warn!("Permission request timed out");
-                                maukode_protocol::PermissionDecision::Deny
-                            }
-                        };
+                        let decision =
+                            match tokio::time::timeout(std::time::Duration::from_secs(300), rx)
+                                .await
+                            {
+                                Ok(Ok(d)) => d,
+                                Ok(Err(_)) => maukode_protocol::PermissionDecision::Deny,
+                                Err(_) => {
+                                    tracing::warn!("Permission request timed out");
+                                    maukode_protocol::PermissionDecision::Deny
+                                }
+                            };
 
                         match decision {
                             maukode_protocol::PermissionDecision::AllowOnce => {
@@ -291,14 +316,17 @@ impl SessionRunner {
                             }
                             maukode_protocol::PermissionDecision::AllowSession => {
                                 if let Some(ref cmd) = command {
-                                    perm_mgr.whitelist_session_command(&session_id_str, cmd).await;
+                                    perm_mgr
+                                        .whitelist_session_command(&session_id_str, cmd)
+                                        .await;
                                 }
                             }
                             maukode_protocol::PermissionDecision::Deny => {
                                 let tr = ToolResult {
                                     tool_call_id: call.id,
                                     tool_name: call.name,
-                                    content: "Execution rejected by user: permission denied.".to_string(),
+                                    content: "Execution rejected by user: permission denied."
+                                        .to_string(),
                                     is_error: true,
                                 };
                                 let _ = event_tx.send(LLMEvent::ToolResult(tr.clone()));

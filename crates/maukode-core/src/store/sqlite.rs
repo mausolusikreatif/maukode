@@ -1,12 +1,12 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use crate::session::Session;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use maukode_protocol::{Message, SessionId, SessionState};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::session::Session;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionSummary {
@@ -91,8 +91,14 @@ impl SqliteSessionStore {
         )?;
 
         // Safe migration if table previously existed without directory column
-        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN directory TEXT NOT NULL DEFAULT '';", []);
-        let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_directory ON sessions(directory);", []);
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN directory TEXT NOT NULL DEFAULT '';",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_directory ON sessions(directory);",
+            [],
+        );
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -145,7 +151,10 @@ impl SqliteSessionStore {
         )?;
 
         // Replace messages
-        conn.execute("DELETE FROM messages WHERE session_id = ?1;", params![id_str])?;
+        conn.execute(
+            "DELETE FROM messages WHERE session_id = ?1;",
+            params![id_str],
+        )?;
 
         for msg in &session.messages {
             let role_str = serde_json::to_string(&msg.role)?;
@@ -169,7 +178,11 @@ impl SqliteSessionStore {
         Ok(())
     }
 
-    pub async fn archive_session_messages(&self, session_id: SessionId, messages: &[Message]) -> Result<()> {
+    pub async fn archive_session_messages(
+        &self,
+        session_id: SessionId,
+        messages: &[Message],
+    ) -> Result<()> {
         let conn = self.conn.lock().await;
         let id_str = session_id.to_string();
         for msg in messages {
@@ -201,14 +214,12 @@ impl SqliteSessionStore {
         })?;
 
         let mut messages = Vec::new();
-        for row in message_rows {
-            if let Ok((role_str, parts_json)) = row {
-                if let (Ok(role), Ok(parts)) = (
-                    serde_json::from_str(&role_str),
-                    serde_json::from_str(&parts_json),
-                ) {
-                    messages.push(Message { role, parts });
-                }
+        for (role_str, parts_json) in message_rows.flatten() {
+            if let (Ok(role), Ok(parts)) = (
+                serde_json::from_str(&role_str),
+                serde_json::from_str(&parts_json),
+            ) {
+                messages.push(Message { role, parts });
             }
         }
 
@@ -264,14 +275,12 @@ impl SqliteSessionStore {
         })?;
 
         let mut messages = Vec::new();
-        for row in message_rows {
-            if let Ok((role_str, parts_json)) = row {
-                if let (Ok(role), Ok(parts)) = (
-                    serde_json::from_str(&role_str),
-                    serde_json::from_str(&parts_json),
-                ) {
-                    messages.push(Message { role, parts });
-                }
+        for (role_str, parts_json) in message_rows.flatten() {
+            if let (Ok(role), Ok(parts)) = (
+                serde_json::from_str(&role_str),
+                serde_json::from_str(&parts_json),
+            ) {
+                messages.push(Message { role, parts });
             }
         }
 
@@ -304,26 +313,32 @@ impl SqliteSessionStore {
             let model: String = row.get(4).unwrap_or_default();
             let updated_at_str: String = row.get(5)?;
             let msg_count: i64 = row.get(6).unwrap_or(0);
-            Ok((id_str, directory, title, provider, model, updated_at_str, msg_count))
+            Ok((
+                id_str,
+                directory,
+                title,
+                provider,
+                model,
+                updated_at_str,
+                msg_count,
+            ))
         })?;
 
         let mut summaries = Vec::new();
-        for row in rows {
-            if let Ok((id_str, directory, title, provider, model, updated_at_str, msg_count)) = row {
-                if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
-                    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .unwrap_or_else(|_| Utc::now());
-                    summaries.push(SessionSummary {
-                        id: SessionId(uuid),
-                        directory,
-                        title,
-                        message_count: msg_count as usize,
-                        provider,
-                        model,
-                        updated_at,
-                    });
-                }
+        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten() {
+            if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
+                let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                summaries.push(SessionSummary {
+                    id: SessionId(uuid),
+                    directory,
+                    title,
+                    message_count: msg_count as usize,
+                    provider,
+                    model,
+                    updated_at,
+                });
             }
         }
 
@@ -351,26 +366,32 @@ impl SqliteSessionStore {
             let model: String = row.get(4).unwrap_or_default();
             let updated_at_str: String = row.get(5)?;
             let msg_count: i64 = row.get(6).unwrap_or(0);
-            Ok((id_str, directory, title, provider, model, updated_at_str, msg_count))
+            Ok((
+                id_str,
+                directory,
+                title,
+                provider,
+                model,
+                updated_at_str,
+                msg_count,
+            ))
         })?;
 
         let mut summaries = Vec::new();
-        for row in rows {
-            if let Ok((id_str, directory, title, provider, model, updated_at_str, msg_count)) = row {
-                if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
-                    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .unwrap_or_else(|_| Utc::now());
-                    summaries.push(SessionSummary {
-                        id: SessionId(uuid),
-                        directory,
-                        title,
-                        message_count: msg_count as usize,
-                        provider,
-                        model,
-                        updated_at,
-                    });
-                }
+        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten() {
+            if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
+                let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                summaries.push(SessionSummary {
+                    id: SessionId(uuid),
+                    directory,
+                    title,
+                    message_count: msg_count as usize,
+                    provider,
+                    model,
+                    updated_at,
+                });
             }
         }
 
@@ -412,12 +433,17 @@ mod tests {
 
         let mut session = Session::new(temp_dir.path());
         session.add_message(Message::user("Turn 1 user prompt with lots of context"));
-        session.add_message(Message::assistant_text("Turn 1 assistant response with 500 lines of build output"));
+        session.add_message(Message::assistant_text(
+            "Turn 1 assistant response with 500 lines of build output",
+        ));
         session.add_message(Message::user("Turn 2 user prompt"));
         session.add_message(Message::assistant_text("Turn 2 assistant response"));
 
         // Save session originally
-        store.save_session(&session, "anthropic", "claude-3-7-sonnet").await.unwrap();
+        store
+            .save_session(&session, "anthropic", "claude-3-7-sonnet")
+            .await
+            .unwrap();
 
         // Check audit messages count
         let audit_before = store.load_audit_messages(session.id).await.unwrap();
@@ -430,7 +456,10 @@ mod tests {
         ];
 
         // Save compacted session
-        store.save_session(&session, "anthropic", "claude-3-7-sonnet").await.unwrap();
+        store
+            .save_session(&session, "anthropic", "claude-3-7-sonnet")
+            .await
+            .unwrap();
 
         // Active session messages has 2
         let loaded = store.load_session(session.id).await.unwrap().unwrap();
@@ -439,7 +468,9 @@ mod tests {
         // But audit table STILL has all original messages plus the new ones!
         let audit_after = store.load_audit_messages(session.id).await.unwrap();
         assert_eq!(audit_after.len(), 6);
-        assert_eq!(audit_after[1].text_content(), "Turn 1 assistant response with 500 lines of build output");
+        assert_eq!(
+            audit_after[1].text_content(),
+            "Turn 1 assistant response with 500 lines of build output"
+        );
     }
 }
-

@@ -20,7 +20,11 @@ pub struct McpClient {
 }
 
 impl McpClient {
-    pub async fn connect(name: impl Into<String>, config: &McpServerConfig, cwd: &Path) -> Result<Self> {
+    pub async fn connect(
+        name: impl Into<String>,
+        config: &McpServerConfig,
+        cwd: &Path,
+    ) -> Result<Self> {
         let name = name.into();
         let mut cmd = Command::new(&config.command);
         cmd.args(&config.args);
@@ -34,9 +38,9 @@ impl McpClient {
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
 
-        let mut child = cmd
-            .spawn()
-            .with_context(|| format!("Failed to spawn MCP server '{}' ({})", name, config.command))?;
+        let mut child = cmd.spawn().with_context(|| {
+            format!("Failed to spawn MCP server '{}' ({})", name, config.command)
+        })?;
 
         let stdin = child
             .stdin
@@ -77,8 +81,9 @@ impl McpClient {
         });
 
         // 3. Setup response dispatching from stdout
-        let pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending_requests: Arc<
+            Mutex<HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>>,
+        > = Arc::new(Mutex::new(HashMap::new()));
         let pending_map = Arc::clone(&pending_requests);
         let s_name = name.clone();
 
@@ -186,10 +191,12 @@ impl McpClient {
             "params": params
         });
 
-        self.stdin_tx
-            .send(payload.to_string())
-            .await
-            .map_err(|e| anyhow!("Failed to send notification to MCP server '{}': {e}", self.name))?;
+        self.stdin_tx.send(payload.to_string()).await.map_err(|e| {
+            anyhow!(
+                "Failed to send notification to MCP server '{}': {e}",
+                self.name
+            )
+        })?;
 
         Ok(())
     }

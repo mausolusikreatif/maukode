@@ -1,6 +1,4 @@
-use std::convert::Infallible;
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::state::ServerState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -11,17 +9,17 @@ use axum::{
     Json,
 };
 use futures::Stream;
-use maukode_core::{
-    ContextManager, RunnerConfig, Session, SessionRunner,
-};
+use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner};
 use maukode_protocol::{LLMEvent, Message, SessionId, SessionState};
 use maukode_tools::create_default_registry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::convert::Infallible;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
-use crate::state::ServerState;
 
 #[derive(Debug, Deserialize)]
 pub struct ListSessionsQuery {
@@ -165,10 +163,16 @@ pub async fn submit_prompt(
     } else {
         create_default_registry(&session_dir)
     };
-    state.mcp_manager.register_tools_into_registry(&mut tool_registry, &session_dir, &config_guard).await;
+    config_guard.configure_web_search_in_registry(&mut tool_registry);
+    state
+        .mcp_manager
+        .register_tools_into_registry(&mut tool_registry, &session_dir, &config_guard)
+        .await;
     drop(config_guard);
     let context = Arc::new(ContextManager::new(&session_dir));
-    tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+    tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
+        context.repo_map(),
+    ))));
     let tools = Arc::new(tool_registry);
 
     let runner = SessionRunner::new(
@@ -188,9 +192,8 @@ pub async fn submit_prompt(
 
     // Spawn execution loop in background
     tokio::spawn(async move {
-        let run_handle = tokio::spawn(async move {
-            runner.run(Some(payload.prompt), llm_tx).await
-        });
+        let run_handle =
+            tokio::spawn(async move { runner.run(Some(payload.prompt), llm_tx).await });
 
         // Forward stream events to broadcast subscribers
         while let Some(event) = llm_rx.recv().await {
@@ -201,7 +204,9 @@ pub async fn submit_prompt(
 
         // Persist final session state to SQLite
         let guard = session_for_persist.read().await;
-        let _ = store.save_session(&guard, &active_provider, &active_model).await;
+        let _ = store
+            .save_session(&guard, &active_provider, &active_model)
+            .await;
     });
 
     Ok(Json(json!({
@@ -238,11 +243,17 @@ pub async fn respond_permission(
     Path((_session_id, request_id)): Path<(SessionId, String)>,
     Json(payload): Json<RespondPermissionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let handled = state.permission_manager.respond(&request_id, payload.decision).await;
+    let handled = state
+        .permission_manager
+        .respond(&request_id, payload.decision)
+        .await;
     if handled {
         Ok(Json(json!({ "status": "ok", "request_id": request_id })))
     } else {
-        Err((StatusCode::NOT_FOUND, "Permission request not found or expired".to_string()))
+        Err((
+            StatusCode::NOT_FOUND,
+            "Permission request not found or expired".to_string(),
+        ))
     }
 }
 
@@ -362,7 +373,10 @@ pub async fn list_mcp_servers(
 
     let session_dir = session_arc.read().await.directory.clone();
     let config_guard = state.config.read().await;
-    let servers = state.mcp_manager.list_server_statuses(&session_dir, &config_guard).await;
+    let servers = state
+        .mcp_manager
+        .list_server_statuses(&session_dir, &config_guard)
+        .await;
 
     Ok(Json(maukode_protocol::McpListResponse { servers }))
 }
@@ -404,7 +418,11 @@ pub async fn compact_session(
     let config_guard = state.config.read().await;
     let _ = state
         .store
-        .save_session(&session, &config_guard.active_provider, &config_guard.active_model)
+        .save_session(
+            &session,
+            &config_guard.active_provider,
+            &config_guard.active_model,
+        )
         .await;
 
     Ok(Json(maukode_protocol::CompactResponse {
@@ -416,4 +434,3 @@ pub async fn compact_session(
         summary: result.summary,
     }))
 }
-

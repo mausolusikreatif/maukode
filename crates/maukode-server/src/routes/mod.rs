@@ -2,16 +2,16 @@ pub mod health;
 pub mod providers;
 pub mod sessions;
 
-use std::sync::Arc;
+use crate::middleware::auth::auth_middleware;
+use crate::state::ServerState;
 use axum::{
     middleware::from_fn_with_state,
     routing::{get, post},
     Router,
 };
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use crate::middleware::auth::auth_middleware;
-use crate::state::ServerState;
 
 pub fn create_router(state: Arc<ServerState>) -> Router {
     let cors = CorsLayer::new()
@@ -59,26 +59,14 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/sessions/{id}/diff",
             get(sessions::get_session_diff),
         )
-        .route(
-            "/api/v1/sessions/{id}/undo",
-            post(sessions::undo_session),
-        )
+        .route("/api/v1/sessions/{id}/undo", post(sessions::undo_session))
         .route(
             "/api/v1/sessions/{id}/checkpoints",
             get(sessions::list_session_checkpoints),
         )
-        .route(
-            "/api/v1/sessions/{id}/map",
-            get(sessions::get_codebase_map),
-        )
-        .route(
-            "/api/v1/sessions/{id}/init",
-            post(sessions::init_project),
-        )
-        .route(
-            "/api/v1/sessions/{id}/mcp",
-            get(sessions::list_mcp_servers),
-        )
+        .route("/api/v1/sessions/{id}/map", get(sessions::get_codebase_map))
+        .route("/api/v1/sessions/{id}/init", post(sessions::init_project))
+        .route("/api/v1/sessions/{id}/mcp", get(sessions::list_mcp_servers))
         .route(
             "/api/v1/sessions/{id}/compact",
             post(sessions::compact_session),

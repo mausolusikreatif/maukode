@@ -1,10 +1,10 @@
+use crate::security::PathJail;
+use crate::tool::{Tool, ToolError};
 use async_trait::async_trait;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
-use crate::security::PathJail;
-use crate::tool::{Tool, ToolError};
 
 pub struct GrepTool {
     pub base_dir: PathBuf,

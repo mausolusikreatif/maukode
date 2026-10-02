@@ -1,3 +1,5 @@
+use crate::app::{ActiveModal, App, ChatRole};
+use crate::theme::{self, *};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -8,8 +10,6 @@ use ratatui::{
     },
     Frame,
 };
-use crate::app::{ActiveModal, App, ChatRole};
-use crate::theme::{self, *};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.area();
@@ -41,14 +41,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             default_model,
             active_field,
         } => {
-            draw_add_provider_modal(
-                f,
-                name,
-                base_url,
-                api_key,
-                default_model,
-                *active_field,
-            );
+            draw_add_provider_modal(f, name, base_url, api_key, default_model, *active_field);
         }
         ActiveModal::ModelSelector {
             models,
@@ -65,10 +58,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             draw_sessions_modal(f, sessions, *selected_idx);
         }
         ActiveModal::DiffViewer {
-            diff,
-            stat,
-            scroll,
-            ..
+            diff, stat, scroll, ..
         } => {
             draw_diff_modal(f, diff, stat, *scroll);
         }
@@ -107,11 +97,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         ("○ standalone", COLOR_MUTED)
     };
 
-    let cwd_name = app
-        .cwd
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(".");
+    let cwd_name = app.cwd.file_name().and_then(|n| n.to_str()).unwrap_or(".");
 
     let mut left_spans = vec![
         Span::styled(" maukode ", theme::brand_style()),
@@ -119,9 +105,15 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" │ ", theme::border_style()),
         Span::styled(format!("📁 {cwd_name}"), theme::text_style()),
         Span::styled(" │ ", theme::border_style()),
-        Span::styled(format!("{active_prov}/{active_model}"), theme::muted_style()),
+        Span::styled(
+            format!("{active_prov}/{active_model}"),
+            theme::muted_style(),
+        ),
         Span::styled(" │ ", theme::border_style()),
-        Span::styled(format!("#{session_id_str}"), Style::default().fg(COLOR_BLUE)),
+        Span::styled(
+            format!("#{session_id_str}"),
+            Style::default().fg(COLOR_BLUE),
+        ),
     ];
 
     if let Some(ref usage) = app.token_usage {
@@ -151,9 +143,10 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     for item in &app.items {
         match &item.role {
             ChatRole::User => {
-                lines.push(Line::from(vec![
-                    Span::styled("❯ You", theme::brand_style()),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "❯ You",
+                    theme::brand_style(),
+                )]));
                 for l in item.content.lines() {
                     lines.push(Line::from(vec![
                         Span::raw("  "),
@@ -163,9 +156,10 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(""));
             }
             ChatRole::Assistant => {
-                lines.push(Line::from(vec![
-                    Span::styled("● MauKode", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "● MauKode",
+                    Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                )]));
 
                 let mut in_code_block = false;
                 for l in item.content.lines() {
@@ -195,7 +189,10 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                     } else if l.starts_with("# ") || l.starts_with("## ") || l.starts_with("### ") {
                         lines.push(Line::from(vec![
                             Span::raw("  "),
-                            Span::styled(l, Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD)),
+                            Span::styled(
+                                l,
+                                Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+                            ),
                         ]));
                     } else if l.starts_with("- ") || l.starts_with("* ") {
                         lines.push(Line::from(vec![
@@ -213,13 +210,19 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(""));
             }
             ChatRole::Reasoning => {
-                lines.push(Line::from(vec![
-                    Span::styled("💭 Thinking", theme::thinking_style()),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "💭 Thinking",
+                    theme::thinking_style(),
+                )]));
                 for l in item.content.lines() {
                     lines.push(Line::from(vec![
                         Span::styled("  │ ", theme::border_style()),
-                        Span::styled(l, Style::default().fg(COLOR_MUTED).add_modifier(Modifier::ITALIC)),
+                        Span::styled(
+                            l,
+                            Style::default()
+                                .fg(COLOR_MUTED)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
                     ]));
                 }
                 lines.push(Line::from(""));
@@ -227,7 +230,10 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
             ChatRole::ToolCall { name, id, args } => {
                 lines.push(Line::from(vec![
                     Span::styled("╭─ ⚡ ", theme::tool_style()),
-                    Span::styled(name, Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        name,
+                        Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(format!(" ({id})"), theme::dim_style()),
                 ]));
                 if !args.is_empty() {
@@ -266,10 +272,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                     } else {
                         theme::dim_style()
                     };
-                    lines.push(Line::from(vec![
-                        Span::raw("   "),
-                        Span::styled(l, style),
-                    ]));
+                    lines.push(Line::from(vec![Span::raw("   "), Span::styled(l, style)]));
                 }
                 if is_truncated {
                     lines.push(Line::from(vec![
@@ -318,7 +321,9 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let title_style = if app.auto_scroll {
         theme::dim_style()
     } else {
-        Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(COLOR_AMBER)
+            .add_modifier(Modifier::BOLD)
     };
 
     let block = Block::default()
@@ -346,7 +351,10 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
 
         f.render_stateful_widget(
             scrollbar,
-            area.inner(ratatui::layout::Margin { vertical: 1, horizontal: 0 }),
+            area.inner(ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
             &mut scrollbar_state,
         );
     }
@@ -370,7 +378,10 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
 
     // Row 0: Top divider with status title
     let title = if is_busy {
-        Span::styled(" ⠋ MauKode is thinking... (press Esc to cancel) ", Style::default().fg(COLOR_AMBER))
+        Span::styled(
+            " ⠋ MauKode is thinking... (press Esc to cancel) ",
+            Style::default().fg(COLOR_AMBER),
+        )
     } else {
         Span::styled(" Prompt ", theme::dim_style())
     };
@@ -378,7 +389,10 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     let divider = Paragraph::new(Line::from(vec![
         Span::styled("─", theme::border_style()),
         title,
-        Span::styled("─".repeat(area.width.saturating_sub(40) as usize), theme::border_style()),
+        Span::styled(
+            "─".repeat(area.width.saturating_sub(40) as usize),
+            theme::border_style(),
+        ),
     ]));
     f.render_widget(divider, input_layout[0]);
 
@@ -480,7 +494,10 @@ fn draw_model_modal(
     let area = centered_rect(65, 70, f.area());
     f.render_widget(Clear, area);
 
-    let title = format!(" Select Model ─ Provider: '{}' ", app.config.active_provider);
+    let title = format!(
+        " Select Model ─ Provider: '{}' ",
+        app.config.active_provider
+    );
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -558,8 +575,7 @@ fn draw_model_modal(
         Some(selected_idx.min(filtered_models.len().saturating_sub(1)))
     });
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::NONE));
+    let list = List::new(items).block(Block::default().borders(Borders::NONE));
 
     f.render_stateful_widget(list, inner[1], &mut state);
 
@@ -584,7 +600,10 @@ fn draw_model_modal(
         Span::styled("Esc ", Style::default().fg(COLOR_RED)),
         Span::styled("cancel", theme::dim_style()),
     ]);
-    f.render_widget(Paragraph::new(modal_footer).alignment(Alignment::Center), inner[2]);
+    f.render_widget(
+        Paragraph::new(modal_footer).alignment(Alignment::Center),
+        inner[2],
+    );
 }
 
 fn draw_provider_modal(f: &mut Frame, app: &App, selected_idx: usize) {
@@ -599,10 +618,7 @@ fn draw_provider_modal(f: &mut Frame, app: &App, selected_idx: usize) {
 
     let inner = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(4),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Min(4), Constraint::Length(1)])
         .margin(1)
         .split(area);
 
@@ -648,7 +664,8 @@ fn draw_provider_modal(f: &mut Frame, app: &App, selected_idx: usize) {
     f.render_stateful_widget(list, inner[0], &mut state);
 
     if app.config.providers.len() > inner[0].height as usize {
-        let mut scrollbar_state = ScrollbarState::new(app.config.providers.len()).position(selected_idx);
+        let mut scrollbar_state =
+            ScrollbarState::new(app.config.providers.len()).position(selected_idx);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .track_symbol(Some("│"))
             .thumb_symbol("┃")
@@ -666,10 +683,17 @@ fn draw_provider_modal(f: &mut Frame, app: &App, selected_idx: usize) {
         Span::styled("Esc ", Style::default().fg(COLOR_RED)),
         Span::styled("cancel", theme::dim_style()),
     ]);
-    f.render_widget(Paragraph::new(modal_footer).alignment(Alignment::Center), inner[1]);
+    f.render_widget(
+        Paragraph::new(modal_footer).alignment(Alignment::Center),
+        inner[1],
+    );
 }
 
-fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary], selected_idx: usize) {
+fn draw_sessions_modal(
+    f: &mut Frame,
+    sessions: &[maukode_core::SessionSummary],
+    selected_idx: usize,
+) {
     let area = centered_rect(70, 70, f.area());
     f.render_widget(Clear, area);
 
@@ -677,14 +701,14 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(COLOR_BLUE))
-        .title(Span::styled(" Resume Session History ", Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)));
+        .title(Span::styled(
+            " Resume Session History ",
+            Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD),
+        ));
 
     let inner = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(4),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Min(4), Constraint::Length(1)])
         .margin(1)
         .split(area);
 
@@ -707,7 +731,10 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
                 String::new()
             } else {
                 let p = std::path::Path::new(&s.directory);
-                let folder = p.file_name().and_then(|n| n.to_str()).unwrap_or(&s.directory);
+                let folder = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&s.directory);
                 format!(" 📁 {folder}")
             };
 
@@ -716,7 +743,10 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
                 Span::styled(&s.title, style),
                 Span::styled(dir_label, Style::default().fg(COLOR_CYAN)),
                 Span::styled(format!(" [{}]", s.model), theme::dim_style()),
-                Span::styled(format!(" ({time_str}, {} msgs)", s.message_count), theme::dim_style()),
+                Span::styled(
+                    format!(" ({time_str}, {} msgs)", s.message_count),
+                    theme::dim_style(),
+                ),
             ]))
         })
         .collect();
@@ -749,7 +779,10 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
         Span::styled("Esc ", Style::default().fg(COLOR_RED)),
         Span::styled("cancel", theme::dim_style()),
     ]);
-    f.render_widget(Paragraph::new(modal_footer).alignment(Alignment::Center), inner[1]);
+    f.render_widget(
+        Paragraph::new(modal_footer).alignment(Alignment::Center),
+        inner[1],
+    );
 }
 
 fn draw_add_provider_modal(
@@ -767,7 +800,10 @@ fn draw_add_provider_modal(
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(COLOR_CYAN))
-        .title(Span::styled(" Add Custom AI Provider ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)));
+        .title(Span::styled(
+            " Add Custom AI Provider ",
+            Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+        ));
 
     let inner = Layout::default()
         .direction(Direction::Vertical)
@@ -785,9 +821,15 @@ fn draw_add_provider_modal(
 
     let fields = [
         ("Provider Name (e.g. DeepSeek, Local Ollama, vLLM):", name),
-        ("Base URL (e.g. http://localhost:11434 or https://api.deepseek.com):", base_url),
+        (
+            "Base URL (e.g. http://localhost:11434 or https://api.deepseek.com):",
+            base_url,
+        ),
         ("API Key (optional for local models):", api_key),
-        ("Default Model (e.g. deepseek-chat, qwen2.5-coder):", default_model),
+        (
+            "Default Model (e.g. deepseek-chat, qwen2.5-coder):",
+            default_model,
+        ),
     ];
 
     for (idx, (label, val)) in fields.iter().enumerate() {
@@ -798,7 +840,14 @@ fn draw_add_provider_modal(
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color))
-            .title(Span::styled(*label, if is_active { theme::brand_style() } else { theme::dim_style() }));
+            .title(Span::styled(
+                *label,
+                if is_active {
+                    theme::brand_style()
+                } else {
+                    theme::dim_style()
+                },
+            ));
 
         let p = Paragraph::new(*val).block(field_block);
         f.render_widget(p, inner[idx]);
@@ -811,7 +860,8 @@ fn draw_add_provider_modal(
         Span::styled("save & activate  ", theme::dim_style()),
         Span::styled("Esc ", Style::default().fg(COLOR_RED)),
         Span::styled("cancel", theme::dim_style()),
-    ])).alignment(Alignment::Center);
+    ]))
+    .alignment(Alignment::Center);
 
     f.render_widget(hint, inner[4]);
 }
@@ -824,48 +874,106 @@ fn draw_help_modal(f: &mut Frame) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(COLOR_MINT))
-        .title(Span::styled(" MauKode Quick Reference ", theme::brand_style()));
+        .title(Span::styled(
+            " MauKode Quick Reference ",
+            theme::brand_style(),
+        ));
 
     let help_text = vec![
         Line::from(vec![
-            Span::styled("/model          ", Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "/model          ",
+                Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("Search and switch active LLM model", theme::text_style()),
         ]),
         Line::from(vec![
-            Span::styled("/provider       ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "/provider       ",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("Switch or register an AI provider", theme::text_style()),
         ]),
         Line::from(vec![
-            Span::styled("/sessions       ", Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)),
-            Span::styled("Browse and resume saved sessions from SQLite", theme::text_style()),
+            Span::styled(
+                "/sessions       ",
+                Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Browse and resume saved sessions from SQLite",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("/diff           ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
-            Span::styled("Inspect git shadow diff of session modifications", theme::text_style()),
+            Span::styled(
+                "/diff           ",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Inspect git shadow diff of session modifications",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("/undo [N]       ", Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)),
-            Span::styled("Roll back modified/added files by N turns (default: 1)", theme::text_style()),
+            Span::styled(
+                "/undo [N]       ",
+                Style::default()
+                    .fg(COLOR_AMBER)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Roll back modified/added files by N turns (default: 1)",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("/map            ", Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD)),
-            Span::styled("Inspect tree-sitter AST symbol skeleton of codebase", theme::text_style()),
+            Span::styled(
+                "/map            ",
+                Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Inspect tree-sitter AST symbol skeleton of codebase",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("/init [--force] ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
-            Span::styled("Scan project and generate standard AGENTS.md conventions", theme::text_style()),
+            Span::styled(
+                "/init [--force] ",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Scan project and generate standard AGENTS.md conventions",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("/mcp            ", Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD)),
-            Span::styled("Inspect active MCP servers and registered dynamic tools", theme::text_style()),
+            Span::styled(
+                "/mcp            ",
+                Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Inspect active MCP servers and registered dynamic tools",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("/compact [focus]", Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)),
-            Span::styled("Summarize older conversation turns & reclaim context tokens", theme::text_style()),
+            Span::styled(
+                "/compact [focus]",
+                Style::default()
+                    .fg(COLOR_AMBER)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Summarize older conversation turns & reclaim context tokens",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled("/new            ", theme::brand_style()),
-            Span::styled("Start a fresh session in the current directory", theme::text_style()),
+            Span::styled(
+                "Start a fresh session in the current directory",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled("/cd <path>      ", Style::default().fg(COLOR_CYAN)),
@@ -873,7 +981,10 @@ fn draw_help_modal(f: &mut Frame) {
         ]),
         Line::from(vec![
             Span::styled("/clear          ", theme::dim_style()),
-            Span::styled("Clear the current conversation viewport", theme::text_style()),
+            Span::styled(
+                "Clear the current conversation viewport",
+                theme::text_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled("/exit, /quit    ", Style::default().fg(COLOR_RED)),
@@ -882,7 +993,10 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(""),
         Line::from(vec![
             Span::styled("Navigation: ", theme::brand_style()),
-            Span::styled("PageUp / PageDn / Wheel to scroll history. Press End to resume live stream.", theme::muted_style()),
+            Span::styled(
+                "PageUp / PageDn / Wheel to scroll history. Press End to resume live stream.",
+                theme::muted_style(),
+            ),
         ]),
     ];
 
@@ -894,7 +1008,9 @@ fn draw_help_modal(f: &mut Frame) {
 
 fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRequest) {
     let screen = f.area();
-    let area_width = (screen.width * 75 / 100).max(64).min(screen.width.saturating_sub(2));
+    let area_width = (screen.width * 75 / 100)
+        .max(64)
+        .min(screen.width.saturating_sub(2));
     let area_height = 17.min(screen.height.saturating_sub(2)).max(14);
     let x = (screen.width.saturating_sub(area_width)) / 2;
     let y = (screen.height.saturating_sub(area_height)) / 2;
@@ -910,7 +1026,9 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
 
     let title_span = Span::styled(
         " ⚠️ Action Requires Confirmation ",
-        Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(border_color)
+            .add_modifier(Modifier::BOLD),
     );
 
     let block = Block::default()
@@ -948,12 +1066,21 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
         .unwrap_or(request.path.as_deref().unwrap_or(&request.description));
     let cmd_para = Paragraph::new(format!("  $ {cmd_text}"))
         .style(Style::default().fg(Color::White).bg(Color::Rgb(25, 25, 35)))
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
     f.render_widget(cmd_para, inner[1]);
 
     // Risk warning text
     let risk_line = Line::from(vec![
-        Span::styled("Risk: ", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Risk: ",
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(&request.description, theme::text_style()),
     ]);
     f.render_widget(Paragraph::new(risk_line), inner[2]);
@@ -961,18 +1088,44 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
     // Action options list (explicit, beautifully structured, never cut off)
     let options = vec![
         Line::from(vec![
-            Span::styled("  [y] ", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD)),
-            Span::styled("Yes, Allow Once        ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  [y] ",
+                Style::default()
+                    .fg(COLOR_GREEN)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Yes, Allow Once        ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("• Run this command one time", theme::dim_style()),
         ]),
         Line::from(vec![
-            Span::styled("  [a] ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
-            Span::styled("Always Allow (Session) ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  [a] ",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Always Allow (Session) ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("• Whitelist command for this session", theme::dim_style()),
         ]),
         Line::from(vec![
-            Span::styled("  [n] ", Style::default().fg(COLOR_RED).add_modifier(Modifier::BOLD)),
-            Span::styled("No, Reject & Abort     ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  [n] ",
+                Style::default().fg(COLOR_RED).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "No, Reject & Abort     ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("• Disallow execution (or press Esc)", theme::dim_style()),
         ]),
     ];
@@ -1009,32 +1162,34 @@ fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
 
     // 1. Stat summary bar
     let stat_line = if stat.trim().is_empty() && diff.trim().is_empty() {
-        Line::from(vec![
-            Span::styled("No changes detected in working directory compared to checkpoints.", theme::muted_style()),
-        ])
+        Line::from(vec![Span::styled(
+            "No changes detected in working directory compared to checkpoints.",
+            theme::muted_style(),
+        )])
     } else if !stat.trim().is_empty() {
         Line::from(vec![
             Span::styled("Summary: ", theme::brand_style()),
             Span::styled(stat.trim(), theme::text_style()),
         ])
     } else {
-        Line::from(vec![
-            Span::styled("Session Checkpoint Diff", theme::brand_style()),
-        ])
+        Line::from(vec![Span::styled(
+            "Session Checkpoint Diff",
+            theme::brand_style(),
+        )])
     };
     f.render_widget(Paragraph::new(stat_line), inner[0]);
 
     // Separator line
-    let sep = Paragraph::new("─".repeat(inner[1].width as usize))
-        .style(theme::dim_style());
+    let sep = Paragraph::new("─".repeat(inner[1].width as usize)).style(theme::dim_style());
     f.render_widget(sep, inner[1]);
 
     // 2. Diff lines viewport
     let mut diff_lines = Vec::new();
     if diff.trim().is_empty() {
-        diff_lines.push(Line::from(vec![
-            Span::styled("  (Clean working tree - No modified or added files)", theme::dim_style()),
-        ]));
+        diff_lines.push(Line::from(vec![Span::styled(
+            "  (Clean working tree - No modified or added files)",
+            theme::dim_style(),
+        )]));
     } else {
         for l in diff.lines() {
             let line_style = if l.starts_with("+++") || l.starts_with("---") {
@@ -1059,8 +1214,7 @@ fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
     let max_scroll = total_lines.saturating_sub(viewport_height);
     let effective_scroll = scroll.min(max_scroll);
 
-    let p = Paragraph::new(diff_lines)
-        .scroll((effective_scroll as u16, 0));
+    let p = Paragraph::new(diff_lines).scroll((effective_scroll as u16, 0));
     f.render_widget(p, inner[2]);
 
     if total_lines > viewport_height {
@@ -1080,10 +1234,18 @@ fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
         Span::styled("Scroll  ", theme::dim_style()),
         Span::styled("[PageUp/Dn] ", theme::brand_style()),
         Span::styled("Fast  ", theme::dim_style()),
-        Span::styled("[u] ", Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "[u] ",
+            Style::default()
+                .fg(COLOR_AMBER)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("Undo Changes (Rollback)", Style::default().fg(COLOR_AMBER)),
     ]);
-    f.render_widget(Paragraph::new(footer).alignment(Alignment::Center), inner[3]);
+    f.render_widget(
+        Paragraph::new(footer).alignment(Alignment::Center),
+        inner[3],
+    );
 }
 
 fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
@@ -1128,16 +1290,20 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
     // 2. Map lines viewport
     let mut map_lines = Vec::new();
     if map.trim().is_empty() {
-        map_lines.push(Line::from(vec![
-            Span::styled("  (No code symbols found in current workspace)", theme::dim_style()),
-        ]));
+        map_lines.push(Line::from(vec![Span::styled(
+            "  (No code symbols found in current workspace)",
+            theme::dim_style(),
+        )]));
     } else {
         for l in map.lines() {
             if l.ends_with(':') {
                 // File header
                 map_lines.push(Line::from(vec![
                     Span::styled("📁 ", Style::default().fg(COLOR_MINT)),
-                    Span::styled(l, Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        l,
+                        Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+                    ),
                 ]));
             } else if l.contains('│') {
                 // Tree symbol line
@@ -1145,9 +1311,16 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
                 let indent = parts.first().copied().unwrap_or("");
                 let content = parts.get(1).copied().unwrap_or("").trim();
 
-                let style = if content.contains("struct ") || content.contains("class ") || content.contains("interface ") || content.contains("trait ") {
+                let style = if content.contains("struct ")
+                    || content.contains("class ")
+                    || content.contains("interface ")
+                    || content.contains("trait ")
+                {
                     Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)
-                } else if content.contains("fn ") || content.contains("def ") || content.contains("func ") {
+                } else if content.contains("fn ")
+                    || content.contains("def ")
+                    || content.contains("func ")
+                {
                     Style::default().fg(COLOR_AMBER)
                 } else if content.contains("impl ") {
                     Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)
@@ -1194,5 +1367,8 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
         Span::styled("[Home/End] ", theme::brand_style()),
         Span::styled("Jump", theme::dim_style()),
     ]);
-    f.render_widget(Paragraph::new(footer).alignment(Alignment::Center), inner[3]);
+    f.render_widget(
+        Paragraph::new(footer).alignment(Alignment::Center),
+        inner[3],
+    );
 }

@@ -3,9 +3,8 @@ pub mod event;
 pub mod theme;
 pub mod ui;
 
-use std::io::stdout;
-use std::path::PathBuf;
-use std::time::Duration;
+use crate::app::{ActiveModal, App, ChatRole};
+use crate::event::{AppEvent, EventHandler};
 use anyhow::Result;
 use crossterm::{
     event::{KeyCode, KeyModifiers},
@@ -15,8 +14,9 @@ use crossterm::{
 use maukode_core::{ProviderConfig, ProviderKind};
 use maukode_protocol::SessionId;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use crate::app::{ActiveModal, App, ChatRole};
-use crate::event::{AppEvent, EventHandler};
+use std::io::stdout;
+use std::path::PathBuf;
+use std::time::Duration;
 
 pub async fn run_tui(
     cwd: PathBuf,
@@ -121,7 +121,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 } => {
                     let total = models
                         .iter()
-                        .filter(|m| filter.is_empty() || m.to_lowercase().contains(&filter.to_lowercase()))
+                        .filter(|m| {
+                            filter.is_empty() || m.to_lowercase().contains(&filter.to_lowercase())
+                        })
                         .count();
                     if total > 0 && *selected_idx + 1 < total {
                         *selected_idx += 1;
@@ -141,10 +143,14 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                         *selected_idx += 1;
                     }
                 }
-                ActiveModal::DiffViewer { scroll, max_scroll, .. } => {
+                ActiveModal::DiffViewer {
+                    scroll, max_scroll, ..
+                } => {
                     *scroll = (*scroll + 3).min(*max_scroll);
                 }
-                ActiveModal::CodebaseMapViewer { scroll, max_scroll, .. } => {
+                ActiveModal::CodebaseMapViewer {
+                    scroll, max_scroll, ..
+                } => {
                     *scroll = (*scroll + 3).min(*max_scroll);
                 }
                 _ => app.scroll_down(3),
@@ -302,7 +308,10 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                     role: ChatRole::System,
                     content,
                 });
-                app.set_status(format!("Compacted: {} msgs -> {} msgs ({:.0}% saved)", resp.original_messages, resp.compacted_messages, saved_pct));
+                app.set_status(format!(
+                    "Compacted: {} msgs -> {} msgs ({:.0}% saved)",
+                    resp.original_messages, resp.compacted_messages, saved_pct
+                ));
             }
             Err(e) => {
                 app.items.push(crate::app::ChatItem {
@@ -379,7 +388,10 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                         app.set_status(format!("Activated provider '{name}'"));
                         app.items.push(crate::app::ChatItem {
                             role: ChatRole::System,
-                            content: format!("Switched to provider '{name}'. Active model: '{}'", app.config.active_model),
+                            content: format!(
+                                "Switched to provider '{name}'. Active model: '{}'",
+                                app.config.active_model
+                            ),
                         });
                     }
                     app.active_modal = ActiveModal::None;
@@ -401,7 +413,11 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 *active_field = (*active_field + 1) % 4;
             }
             KeyCode::BackTab => {
-                *active_field = if *active_field == 0 { 3 } else { *active_field - 1 };
+                *active_field = if *active_field == 0 {
+                    3
+                } else {
+                    *active_field - 1
+                };
             }
             KeyCode::Enter => {
                 let p_name = name.trim().to_string();
@@ -438,10 +454,18 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.active_modal = ActiveModal::None;
             }
             KeyCode::Backspace => match *active_field {
-                0 => { name.pop(); }
-                1 => { base_url.pop(); }
-                2 => { api_key.pop(); }
-                3 => { default_model.pop(); }
+                0 => {
+                    name.pop();
+                }
+                1 => {
+                    base_url.pop();
+                }
+                2 => {
+                    api_key.pop();
+                }
+                3 => {
+                    default_model.pop();
+                }
                 _ => {}
             },
             KeyCode::Char(c) => match *active_field {
@@ -542,7 +566,10 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     app.set_status(format!("Model set to '{chosen}'"));
                     app.items.push(crate::app::ChatItem {
                         role: ChatRole::System,
-                        content: format!("Model set to '{chosen}' for provider '{}'", app.config.active_provider),
+                        content: format!(
+                            "Model set to '{chosen}' for provider '{}'",
+                            app.config.active_provider
+                        ),
                     });
                     app.active_modal = ActiveModal::None;
                 }
@@ -612,8 +639,10 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     if let Some(loaded_session) = loaded {
                         let messages = loaded_session.messages.clone();
                         app.cwd = loaded_session.directory.clone();
-                        app.tools = std::sync::Arc::new(maukode_tools::create_default_registry(&app.cwd));
-                        app.context = std::sync::Arc::new(maukode_core::ContextManager::new(&app.cwd));
+                        app.tools =
+                            std::sync::Arc::new(maukode_tools::create_default_registry(&app.cwd));
+                        app.context =
+                            std::sync::Arc::new(maukode_core::ContextManager::new(&app.cwd));
                         app.session = std::sync::Arc::new(tokio::sync::RwLock::new(loaded_session));
                         app.items.clear();
                         for msg in &messages {
@@ -624,10 +653,17 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                                     maukode_protocol::Role::Assistant => ChatRole::Assistant,
                                     maukode_protocol::Role::System => ChatRole::System,
                                 };
-                                app.items.push(crate::app::ChatItem { role, content: text });
+                                app.items.push(crate::app::ChatItem {
+                                    role,
+                                    content: text,
+                                });
                             }
                         }
-                        app.set_status(format!("Loaded session {} ({})", target_id, app.cwd.display()));
+                        app.set_status(format!(
+                            "Loaded session {} ({})",
+                            target_id,
+                            app.cwd.display()
+                        ));
                     }
                 }
                 app.active_modal = ActiveModal::None;
@@ -635,9 +671,7 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
             _ => {}
         },
         ActiveModal::DiffViewer {
-            scroll,
-            max_scroll,
-            ..
+            scroll, max_scroll, ..
         } => match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 app.active_modal = ActiveModal::None;
@@ -667,9 +701,7 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
             _ => {}
         },
         ActiveModal::CodebaseMapViewer {
-            scroll,
-            max_scroll,
-            ..
+            scroll, max_scroll, ..
         } => match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 app.active_modal = ActiveModal::None;
@@ -708,7 +740,11 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::AllowSession);
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                KeyCode::Char('n')
+                | KeyCode::Char('N')
+                | KeyCode::Char('q')
+                | KeyCode::Char('Q')
+                | KeyCode::Esc => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::Deny);
                 }
                 _ => {}

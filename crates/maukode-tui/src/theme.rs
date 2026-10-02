@@ -40,11 +40,15 @@ pub fn tool_style() -> Style {
 }
 
 pub fn thinking_style() -> Style {
-    Style::default().fg(COLOR_AMBER).add_modifier(Modifier::ITALIC)
+    Style::default()
+        .fg(COLOR_AMBER)
+        .add_modifier(Modifier::ITALIC)
 }
 
 pub fn success_style() -> Style {
-    Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(COLOR_GREEN)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn error_style() -> Style {

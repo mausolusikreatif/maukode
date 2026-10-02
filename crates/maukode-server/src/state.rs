@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use anyhow::Result;
 use maukode_core::{AppConfig, PermissionManager, Session, SqliteSessionStore};
 use maukode_protocol::{LLMEvent, SessionId};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
 pub struct ServerState {
@@ -22,9 +22,8 @@ impl ServerState {
     pub async fn new(auth_token: Option<String>, default_dir: Option<PathBuf>) -> Result<Self> {
         let config = AppConfig::load();
         let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
-        let dir = default_dir.unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+        let dir = default_dir
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
         let permission_manager = Arc::new(
             PermissionManager::new(config.security.permission_mode)

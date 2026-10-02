@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DetectedStack {
@@ -46,7 +46,11 @@ impl ProjectDetector {
 
         // 5. Check CMake / Makefile
         if dir.join("CMakeLists.txt").is_file() {
-            let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("project").to_string();
+            let name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("project")
+                .to_string();
             return DetectedStack {
                 name,
                 language: "C/C++".to_string(),
@@ -62,7 +66,11 @@ impl ProjectDetector {
         }
 
         // Fallback: Generic project
-        let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("project").to_string();
+        let name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("project")
+            .to_string();
         DetectedStack {
             name,
             language: "Polyglot / Generic".to_string(),
@@ -79,7 +87,11 @@ impl ProjectDetector {
 
     async fn detect_rust(dir: &Path) -> DetectedStack {
         let cargo_path = dir.join("Cargo.toml");
-        let mut name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("rust-project").to_string();
+        let mut name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("rust-project")
+            .to_string();
         let mut is_workspace = false;
         let mut frameworks = Vec::new();
 
@@ -90,11 +102,21 @@ impl ProjectDetector {
             if let Some(pkg_name) = extract_toml_value(&content, "name") {
                 name = pkg_name;
             }
-            if content.contains("tokio") { frameworks.push("tokio".to_string()); }
-            if content.contains("axum") { frameworks.push("axum".to_string()); }
-            if content.contains("actix-web") { frameworks.push("actix-web".to_string()); }
-            if content.contains("serde") { frameworks.push("serde".to_string()); }
-            if content.contains("ratatui") { frameworks.push("ratatui".to_string()); }
+            if content.contains("tokio") {
+                frameworks.push("tokio".to_string());
+            }
+            if content.contains("axum") {
+                frameworks.push("axum".to_string());
+            }
+            if content.contains("actix-web") {
+                frameworks.push("actix-web".to_string());
+            }
+            if content.contains("serde") {
+                frameworks.push("serde".to_string());
+            }
+            if content.contains("ratatui") {
+                frameworks.push("ratatui".to_string());
+            }
         }
 
         let desc = if is_workspace {
@@ -108,9 +130,15 @@ impl ProjectDetector {
             language: "Rust".to_string(),
             build_system: "Cargo".to_string(),
             package_manager: Some("cargo".to_string()),
-            test_command: if is_workspace { "cargo test --workspace".to_string() } else { "cargo test".to_string() },
+            test_command: if is_workspace {
+                "cargo test --workspace".to_string()
+            } else {
+                "cargo test".to_string()
+            },
             build_command: Some("cargo build".to_string()),
-            lint_command: Some("cargo clippy --all-targets --all-features -- -D warnings".to_string()),
+            lint_command: Some(
+                "cargo clippy --all-targets --all-features -- -D warnings".to_string(),
+            ),
             format_command: Some("cargo fmt --all".to_string()),
             frameworks,
             description: desc,
@@ -119,7 +147,11 @@ impl ProjectDetector {
 
     async fn detect_node(dir: &Path) -> DetectedStack {
         let pkg_path = dir.join("package.json");
-        let mut name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("node-project").to_string();
+        let mut name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("node-project")
+            .to_string();
         let mut frameworks = Vec::new();
         let mut test_cmd = "npm test".to_string();
         let mut build_cmd = None;
@@ -153,8 +185,14 @@ impl ProjectDetector {
                     }
                 }
                 let mut check_dep = |dep_name: &str| {
-                    let has_dep = json.get("dependencies").and_then(|d| d.get(dep_name)).is_some()
-                        || json.get("devDependencies").and_then(|d| d.get(dep_name)).is_some();
+                    let has_dep = json
+                        .get("dependencies")
+                        .and_then(|d| d.get(dep_name))
+                        .is_some()
+                        || json
+                            .get("devDependencies")
+                            .and_then(|d| d.get(dep_name))
+                            .is_some();
                     if has_dep {
                         frameworks.push(dep_name.to_string());
                     }
@@ -187,7 +225,11 @@ impl ProjectDetector {
     }
 
     async fn detect_python(dir: &Path) -> DetectedStack {
-        let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("python-project").to_string();
+        let name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("python-project")
+            .to_string();
         let mut frameworks = Vec::new();
         let mut test_cmd = "pytest".to_string();
         let mut lint_cmd = Some("ruff check .".to_string());
@@ -206,10 +248,18 @@ impl ProjectDetector {
         };
 
         if let Ok(pyproject) = tokio::fs::read_to_string(dir.join("pyproject.toml")).await {
-            if pyproject.contains("fastapi") { frameworks.push("FastAPI".to_string()); }
-            if pyproject.contains("django") { frameworks.push("Django".to_string()); }
-            if pyproject.contains("flask") { frameworks.push("Flask".to_string()); }
-            if pyproject.contains("torch") { frameworks.push("PyTorch".to_string()); }
+            if pyproject.contains("fastapi") {
+                frameworks.push("FastAPI".to_string());
+            }
+            if pyproject.contains("django") {
+                frameworks.push("Django".to_string());
+            }
+            if pyproject.contains("flask") {
+                frameworks.push("Flask".to_string());
+            }
+            if pyproject.contains("torch") {
+                frameworks.push("PyTorch".to_string());
+            }
         }
 
         DetectedStack {
@@ -227,7 +277,11 @@ impl ProjectDetector {
     }
 
     async fn detect_go(dir: &Path) -> DetectedStack {
-        let mut name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("go-project").to_string();
+        let mut name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("go-project")
+            .to_string();
         if let Ok(content) = tokio::fs::read_to_string(dir.join("go.mod")).await {
             if let Some(line) = content.lines().find(|l| l.starts_with("module ")) {
                 let mod_name = line.trim_start_matches("module ").trim();
@@ -264,7 +318,10 @@ impl ProjectDetector {
             md.push_str(&format!("- **Package Manager**: {}\n", pm));
         }
         if !stack.frameworks.is_empty() {
-            md.push_str(&format!("- **Key Frameworks / Libraries**: {}\n", stack.frameworks.join(", ")));
+            md.push_str(&format!(
+                "- **Key Frameworks / Libraries**: {}\n",
+                stack.frameworks.join(", ")
+            ));
         }
         md.push('\n');
 
@@ -297,7 +354,9 @@ impl ProjectDetector {
             "Rust" => {
                 md.push_str("- **Idiomatic Error Handling**: Use `Result<T, E>` with `thiserror` or `anyhow`; avoid `unwrap()` or `expect()` in production paths.\n");
                 md.push_str("- **Formatting**: Follow standard `rustfmt` guidelines; keep line length <= 100 where reasonable.\n");
-                md.push_str("- **Async Runtime**: Prefer `tokio` for async tasks and non-blocking I/O.\n");
+                md.push_str(
+                    "- **Async Runtime**: Prefer `tokio` for async tasks and non-blocking I/O.\n",
+                );
                 md.push_str("- **Clippy**: Ensure code passes `cargo clippy --all-targets` without warnings.\n");
             }
             "TypeScript" | "JavaScript" => {
@@ -306,8 +365,12 @@ impl ProjectDetector {
                 md.push_str("- **Code Style**: Follow ESLint and Prettier rules configured in the project.\n");
             }
             "Python" => {
-                md.push_str("- **PEP 8 & Type Hints**: Use Python 3.10+ type annotations throughout.\n");
-                md.push_str("- **Modern Tooling**: Prefer `ruff` for ultra-fast linting and formatting.\n");
+                md.push_str(
+                    "- **PEP 8 & Type Hints**: Use Python 3.10+ type annotations throughout.\n",
+                );
+                md.push_str(
+                    "- **Modern Tooling**: Prefer `ruff` for ultra-fast linting and formatting.\n",
+                );
                 md.push_str("- **Docstrings**: Provide clear Google-style or NumPy-style docstrings for public modules and functions.\n");
             }
             "Go" => {
@@ -317,7 +380,9 @@ impl ProjectDetector {
             }
             _ => {
                 md.push_str("- Follow existing naming, formatting, and structural patterns in the codebase.\n");
-                md.push_str("- Write clear, maintainable code with unit tests for new functionality.\n");
+                md.push_str(
+                    "- Write clear, maintainable code with unit tests for new functionality.\n",
+                );
             }
         }
         md.push('\n');
@@ -329,7 +394,12 @@ impl ProjectDetector {
                 if let Ok(ft) = entry.file_type() {
                     if ft.is_dir() {
                         let name = entry.file_name().to_string_lossy().to_string();
-                        if !name.starts_with('.') && name != "target" && name != "node_modules" && name != "dist" && name != "build" {
+                        if !name.starts_with('.')
+                            && name != "target"
+                            && name != "node_modules"
+                            && name != "dist"
+                            && name != "build"
+                        {
                             top_dirs.push(name);
                         }
                     }

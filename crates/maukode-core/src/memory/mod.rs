@@ -143,7 +143,11 @@ impl ProjectMemory {
 
         let project_rules = self.discover_project_rules().await;
         for rule in project_rules {
-            let filename = rule.path.file_name().and_then(|n| n.to_str()).unwrap_or("rules");
+            let filename = rule
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("rules");
             sections.push(format!(
                 "--- Project Instructions ({filename} from {}) ---\n{}\n-----------------------------------",
                 rule.path.display(),
@@ -168,10 +172,20 @@ mod tests {
         tokio::fs::create_dir_all(&sub).await.unwrap();
 
         // Root has CLAUDE.md
-        tokio::fs::write(root.join("CLAUDE.md"), "# Root Guidelines\nAlways write tests.").await.unwrap();
+        tokio::fs::write(
+            root.join("CLAUDE.md"),
+            "# Root Guidelines\nAlways write tests.",
+        )
+        .await
+        .unwrap();
 
         // Sub directory has standard AGENTS.md
-        tokio::fs::write(sub.join("AGENTS.md"), "# App Guidelines\nUse TypeScript strict mode.").await.unwrap();
+        tokio::fs::write(
+            sub.join("AGENTS.md"),
+            "# App Guidelines\nUse TypeScript strict mode.",
+        )
+        .await
+        .unwrap();
 
         let memory = ProjectMemory::new(&sub);
         let rules = memory.discover_project_rules().await;
@@ -196,7 +210,9 @@ mod tests {
         tokio::fs::write(
             root.join("Cargo.toml"),
             "[package]\nname = \"sample-crate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let res = init_project(root, false).await.unwrap();
         assert!(res.created);

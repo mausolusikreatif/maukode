@@ -1,9 +1,9 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::permission::PermissionMode;
 use anyhow::Result;
 use maukode_llm::{AnthropicClient, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
-use crate::permission::PermissionMode;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -67,6 +67,40 @@ pub struct McpServerConfig {
     pub env: std::collections::HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WebSearchConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_search_provider")]
+    pub provider: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default = "default_max_search_results")]
+    pub max_results: usize,
+}
+
+fn default_search_provider() -> String {
+    "duckduckgo".to_string()
+}
+
+fn default_max_search_results() -> usize {
+    5
+}
+
+impl Default for WebSearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            provider: "duckduckgo".to_string(),
+            api_key: None,
+            endpoint: None,
+            max_results: 5,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub active_provider: String,
@@ -76,6 +110,8 @@ pub struct AppConfig {
     pub security: SecurityConfig,
     #[serde(default, rename = "mcpServers", alias = "mcp_servers")]
     pub mcp_servers: std::collections::HashMap<String, McpServerConfig>,
+    #[serde(default)]
+    pub web_search: WebSearchConfig,
 }
 
 impl Default for AppConfig {
@@ -87,6 +123,7 @@ impl Default for AppConfig {
             active_provider: "llmkita".to_string(),
             active_model: "auto".to_string(),
             mcp_servers: std::collections::HashMap::new(),
+            web_search: WebSearchConfig::default(),
             providers: vec![
                 ProviderConfig {
                     id: "llmkita".to_string(),
@@ -189,8 +226,12 @@ impl AppConfig {
             if !path.exists() {
                 continue;
             }
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
-            let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) else { continue };
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) else {
+                continue;
+            };
 
             // Look for provider.llmkita or other custom providers in opencode
             if let Some(providers_obj) = val.get("provider").and_then(|p| p.as_object()) {
@@ -250,7 +291,9 @@ impl AppConfig {
     }
 
     pub fn get_provider(&self, id: &str) -> Option<&ProviderConfig> {
-        self.providers.iter().find(|p| p.id.eq_ignore_ascii_case(id))
+        self.providers
+            .iter()
+            .find(|p| p.id.eq_ignore_ascii_case(id))
     }
 
     pub fn get_active_provider(&self) -> Option<&ProviderConfig> {
@@ -282,7 +325,11 @@ impl AppConfig {
 
     pub fn set_active_model(&mut self, model: &str) {
         self.active_model = model.to_string();
-        if let Some(p) = self.providers.iter_mut().find(|p| p.id == self.active_provider) {
+        if let Some(p) = self
+            .providers
+            .iter_mut()
+            .find(|p| p.id == self.active_provider)
+        {
             p.default_model = Some(model.to_string());
         }
         let _ = self.save();
@@ -343,7 +390,11 @@ impl AppConfig {
                             if let Some(arr) = val.get("data").and_then(|d| d.as_array()) {
                                 let mut models: Vec<String> = arr
                                     .iter()
-                                    .filter_map(|m| m.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+                                    .filter_map(|m| {
+                                        m.get("id")
+                                            .and_then(|id| id.as_str())
+                                            .map(|s| s.to_string())
+                                    })
                                     .collect();
                                 models.sort();
                                 if !models.is_empty() {
@@ -387,7 +438,11 @@ impl AppConfig {
                             if let Some(arr) = val.get("data").and_then(|d| d.as_array()) {
                                 let mut models: Vec<String> = arr
                                     .iter()
-                                    .filter_map(|m| m.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+                                    .filter_map(|m| {
+                                        m.get("id")
+                                            .and_then(|id| id.as_str())
+                                            .map(|s| s.to_string())
+                                    })
                                     .collect();
                                 models.sort();
                                 if !models.is_empty() {
@@ -398,7 +453,11 @@ impl AppConfig {
                             if let Some(arr) = val.get("models").and_then(|m| m.as_array()) {
                                 let mut models: Vec<String> = arr
                                     .iter()
-                                    .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                                    .filter_map(|m| {
+                                        m.get("name")
+                                            .and_then(|n| n.as_str())
+                                            .map(|s| s.to_string())
+                                    })
                                     .collect();
                                 models.sort();
                                 if !models.is_empty() {
@@ -417,7 +476,11 @@ impl AppConfig {
                             if let Some(arr) = val.get("models").and_then(|m| m.as_array()) {
                                 let mut models: Vec<String> = arr
                                     .iter()
-                                    .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                                    .filter_map(|m| {
+                                        m.get("name")
+                                            .and_then(|n| n.as_str())
+                                            .map(|s| s.to_string())
+                                    })
                                     .collect();
                                 models.sort();
                                 if !models.is_empty() {
@@ -446,6 +509,33 @@ impl AppConfig {
                     Ok(vec!["default".to_string()])
                 }
             }
+        }
+    }
+
+    /// Configure web search and documentation fetching tools in a ToolRegistry based on AppConfig
+    pub fn configure_web_search_in_registry(&self, registry: &mut maukode_tools::ToolRegistry) {
+        if !self.web_search.enabled {
+            registry.unregister("web_search");
+            registry.unregister("search_web");
+            registry.unregister("fetch_web_content");
+            registry.unregister("fetch_url");
+            registry.unregister("read_url");
+        } else {
+            let mut search_tool =
+                maukode_tools::WebSearchTool::new().with_provider(&self.web_search.provider);
+
+            if let Some(ref key) = self.web_search.api_key {
+                search_tool = search_tool.with_api_key(Some(key.clone()));
+            }
+            if let Some(ref ep) = self.web_search.endpoint {
+                search_tool = search_tool.with_endpoint(Some(ep.clone()));
+            }
+
+            registry.register(Arc::new(search_tool));
+            registry.register_alias("search_web", "web_search");
+            registry.register(Arc::new(maukode_tools::FetchWebContentTool::new()));
+            registry.register_alias("fetch_url", "fetch_web_content");
+            registry.register_alias("read_url", "fetch_web_content");
         }
     }
 }

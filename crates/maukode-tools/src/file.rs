@@ -1,9 +1,9 @@
+use crate::security::PathJail;
+use crate::tool::{Tool, ToolError};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
-use crate::security::PathJail;
-use crate::tool::{Tool, ToolError};
 
 // -------------------------------------------------------------
 // ReadFileTool
@@ -84,7 +84,10 @@ impl Tool for ReadFileTool {
         let end = args.end_line.unwrap_or(total_lines).min(total_lines);
 
         if start >= total_lines {
-            return Ok(format!("File has {} lines. start_line is beyond EOF.", total_lines));
+            return Ok(format!(
+                "File has {} lines. start_line is beyond EOF.",
+                total_lines
+            ));
         }
 
         let mut output = String::new();
@@ -168,9 +171,15 @@ impl Tool for WriteFileTool {
 
         tokio::fs::write(&target, args.content.as_bytes())
             .await
-            .map_err(|e| ToolError::Execution(format!("Failed to write {}: {e}", target.display())))?;
+            .map_err(|e| {
+                ToolError::Execution(format!("Failed to write {}: {e}", target.display()))
+            })?;
 
-        Ok(format!("Successfully wrote {} bytes to {}", args.content.len(), target.display()))
+        Ok(format!(
+            "Successfully wrote {} bytes to {}",
+            args.content.len(),
+            target.display()
+        ))
     }
 }
 
@@ -249,7 +258,8 @@ impl Tool for EditFileTool {
         let occurrences = content.matches(&args.old_content).count();
         if occurrences == 0 {
             return Err(ToolError::Execution(
-                "old_content not found in the file. Ensure exact matching including whitespace.".into(),
+                "old_content not found in the file. Ensure exact matching including whitespace."
+                    .into(),
             ));
         }
         if occurrences > 1 {
@@ -261,7 +271,9 @@ impl Tool for EditFileTool {
         let new_content = content.replacen(&args.old_content, &args.new_content, 1);
         tokio::fs::write(&target, new_content.as_bytes())
             .await
-            .map_err(|e| ToolError::Execution(format!("Failed to write {}: {e}", target.display())))?;
+            .map_err(|e| {
+                ToolError::Execution(format!("Failed to write {}: {e}", target.display()))
+            })?;
 
         Ok(format!("Successfully edited {}", target.display()))
     }
@@ -353,7 +365,10 @@ impl Tool for GlobTool {
         }
 
         if matches.is_empty() {
-            Ok(format!("No files found matching pattern '{}'", args.pattern))
+            Ok(format!(
+                "No files found matching pattern '{}'",
+                args.pattern
+            ))
         } else {
             Ok(matches.join("\n"))
         }

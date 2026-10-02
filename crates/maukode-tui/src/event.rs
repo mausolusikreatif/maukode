@@ -80,7 +80,13 @@ impl EventHandler {
             }
         });
 
-        (Self { rx, _tx: tx.clone() }, tx)
+        (
+            Self {
+                rx,
+                _tx: tx.clone(),
+            },
+            tx,
+        )
     }
 
     pub async fn next(&mut self) -> Option<AppEvent> {

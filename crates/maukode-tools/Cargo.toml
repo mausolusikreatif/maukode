@@ -16,3 +16,5 @@ tracing.workspace = true
 walkdir.workspace = true
 regex.workspace = true
 similar.workspace = true
+reqwest.workspace = true
+

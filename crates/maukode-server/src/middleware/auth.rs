@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use crate::state::ServerState;
 use axum::{
     extract::{Request, State},
     http::StatusCode,
     middleware::Next,
     response::Response,
 };
-use crate::state::ServerState;
+use std::sync::Arc;
 
 pub async fn auth_middleware(
     State(state): State<Arc<ServerState>>,

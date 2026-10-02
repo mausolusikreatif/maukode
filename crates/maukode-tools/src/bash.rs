@@ -1,11 +1,11 @@
+use crate::security::PathJail;
+use crate::tool::{Tool, ToolError};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
-use crate::security::PathJail;
-use crate::tool::{Tool, ToolError};
 
 pub struct BashTool {
     pub default_cwd: PathBuf,
@@ -124,6 +124,11 @@ impl Tool for BashTool {
 
         tokio::time::timeout(timeout_dur, execution)
             .await
-            .map_err(|_| ToolError::Execution(format!("Command timed out after {} seconds", timeout_dur.as_secs())))?
+            .map_err(|_| {
+                ToolError::Execution(format!(
+                    "Command timed out after {} seconds",
+                    timeout_dur.as_secs()
+                ))
+            })?
     }
 }

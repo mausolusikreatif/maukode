@@ -17,7 +17,7 @@ impl TokenEstimator {
         if text.is_empty() {
             0
         } else {
-            (text.chars().count() + 3) / 4
+            text.chars().count().div_ceil(4)
         }
     }
 
@@ -62,24 +62,16 @@ impl TokenEstimator {
             200_000
         } else if m.contains("gemini") {
             1_000_000
-        } else if m.contains("gpt-4o") || m.contains("o1") || m.contains("o3") {
-            128_000
-        } else if m.contains("gpt-4-turbo") || m.contains("gpt-4-1106") || m.contains("gpt-4-0125") {
-            128_000
         } else if m.contains("gpt-4-32k") {
             32_768
-        } else if m.contains("gpt-4") {
+        } else if m.contains("gpt-4") && !m.contains("gpt-4o") && !m.contains("turbo") && !m.contains("1106") && !m.contains("0125") {
             8_192
-        } else if m.contains("gpt-3.5-turbo-16k") {
-            16_384
         } else if m.contains("gpt-3.5") {
             16_384
         } else if m.contains("deepseek") {
             64_000
         } else if m.contains("qwen") {
             32_768
-        } else if m.contains("llama-3.1") || m.contains("llama-3.2") || m.contains("llama-3.3") {
-            128_000
         } else {
             128_000
         }
@@ -119,10 +111,19 @@ mod tests {
 
     #[test]
     fn test_context_window_lookup() {
-        assert_eq!(TokenEstimator::context_window_for_model("claude-3-7-sonnet"), 200_000);
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-3-7-sonnet"),
+            200_000
+        );
         assert_eq!(TokenEstimator::context_window_for_model("gpt-4o"), 128_000);
-        assert_eq!(TokenEstimator::context_window_for_model("gemini-1.5-pro"), 1_000_000);
-        assert_eq!(TokenEstimator::context_window_for_model("deepseek-coder"), 64_000);
+        assert_eq!(
+            TokenEstimator::context_window_for_model("gemini-1.5-pro"),
+            1_000_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("deepseek-coder"),
+            64_000
+        );
     }
 
     #[test]
@@ -132,7 +133,8 @@ mod tests {
             Message::assistant_text("Sure, what kind of website?"),
         ];
 
-        let usage = TokenEstimator::check_threshold(&msgs, "System instructions", "claude-3-7-sonnet");
+        let usage =
+            TokenEstimator::check_threshold(&msgs, "System instructions", "claude-3-7-sonnet");
         assert!(!usage.exceeds_threshold);
         assert!(!usage.is_critical);
         assert!(usage.estimated_tokens > 0);

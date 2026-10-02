@@ -1,4 +1,3 @@
-use std::path::Path;
 use anyhow::{anyhow, Result};
 use eventsource_stream::Eventsource;
 use futures::{Stream, StreamExt};
@@ -6,6 +5,7 @@ use maukode_core::SessionSummary;
 use maukode_protocol::{LLMEvent, Message, SessionId, SessionMetadata, SessionState};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Clone)]
 pub struct ServerClient {
@@ -64,12 +64,20 @@ impl ServerClient {
     }
 
     pub async fn health(&self) -> Result<bool> {
-        let resp = self.http.get(format!("{}/health", self.base_url)).send().await?;
+        let resp = self
+            .http
+            .get(format!("{}/health", self.base_url))
+            .send()
+            .await?;
         Ok(resp.status().is_success())
     }
 
     pub async fn list_providers(&self) -> Result<ProvidersResponse> {
-        let resp = self.http.get(format!("{}/api/v1/providers", self.base_url)).send().await?;
+        let resp = self
+            .http
+            .get(format!("{}/api/v1/providers", self.base_url))
+            .send()
+            .await?;
         if !resp.status().is_success() {
             let err = resp.text().await.unwrap_or_default();
             return Err(anyhow!("Failed to list providers: {err}"));
@@ -119,7 +127,11 @@ impl ServerClient {
         Ok(())
     }
 
-    pub async fn list_sessions(&self, directory: Option<&Path>, all: bool) -> Result<Vec<SessionSummary>> {
+    pub async fn list_sessions(
+        &self,
+        directory: Option<&Path>,
+        all: bool,
+    ) -> Result<Vec<SessionSummary>> {
         let mut req = self.http.get(format!("{}/api/v1/sessions", self.base_url));
         if all {
             req = req.query(&[("all", "true")]);
@@ -135,12 +147,21 @@ impl ServerClient {
         Ok(resp.json().await?)
     }
 
-    pub async fn create_session(&self, directory: Option<&Path>, title: Option<&str>) -> Result<SessionMetadata> {
+    pub async fn create_session(
+        &self,
+        directory: Option<&Path>,
+        title: Option<&str>,
+    ) -> Result<SessionMetadata> {
         let body = serde_json::json!({
             "directory": directory.map(|d| d.to_string_lossy().to_string()),
             "title": title,
         });
-        let resp = self.http.post(format!("{}/api/v1/sessions", self.base_url)).json(&body).send().await?;
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/sessions", self.base_url))
+            .json(&body)
+            .send()
+            .await?;
         if !resp.status().is_success() {
             let err = resp.text().await.unwrap_or_default();
             return Err(anyhow!("Failed to create session: {err}"));
@@ -149,7 +170,11 @@ impl ServerClient {
     }
 
     pub async fn get_session(&self, id: SessionId) -> Result<SessionDetail> {
-        let resp = self.http.get(format!("{}/api/v1/sessions/{id}", self.base_url)).send().await?;
+        let resp = self
+            .http
+            .get(format!("{}/api/v1/sessions/{id}", self.base_url))
+            .send()
+            .await?;
         if !resp.status().is_success() {
             let err = resp.text().await.unwrap_or_default();
             return Err(anyhow!("Failed to get session {id}: {err}"));
@@ -215,7 +240,10 @@ impl ServerClient {
     ) -> Result<()> {
         let resp = self
             .http
-            .post(format!("{}/api/v1/sessions/{session_id}/permissions/{request_id}", self.base_url))
+            .post(format!(
+                "{}/api/v1/sessions/{session_id}/permissions/{request_id}",
+                self.base_url
+            ))
             .json(&serde_json::json!({ "decision": decision }))
             .send()
             .await?;
@@ -229,7 +257,10 @@ impl ServerClient {
     pub async fn get_diff(&self, session_id: SessionId) -> Result<maukode_protocol::DiffResponse> {
         let resp = self
             .http
-            .get(format!("{}/api/v1/sessions/{session_id}/diff", self.base_url))
+            .get(format!(
+                "{}/api/v1/sessions/{session_id}/diff",
+                self.base_url
+            ))
             .send()
             .await?;
         if !resp.status().is_success() {
@@ -239,10 +270,17 @@ impl ServerClient {
         Ok(resp.json().await?)
     }
 
-    pub async fn undo(&self, session_id: SessionId, turns: Option<usize>) -> Result<maukode_protocol::UndoResponse> {
+    pub async fn undo(
+        &self,
+        session_id: SessionId,
+        turns: Option<usize>,
+    ) -> Result<maukode_protocol::UndoResponse> {
         let resp = self
             .http
-            .post(format!("{}/api/v1/sessions/{session_id}/undo", self.base_url))
+            .post(format!(
+                "{}/api/v1/sessions/{session_id}/undo",
+                self.base_url
+            ))
             .json(&serde_json::json!({ "turns": turns }))
             .send()
             .await?;
@@ -253,10 +291,16 @@ impl ServerClient {
         Ok(resp.json().await?)
     }
 
-    pub async fn list_checkpoints(&self, session_id: SessionId) -> Result<Vec<maukode_protocol::Checkpoint>> {
+    pub async fn list_checkpoints(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Vec<maukode_protocol::Checkpoint>> {
         let resp = self
             .http
-            .get(format!("{}/api/v1/sessions/{session_id}/checkpoints", self.base_url))
+            .get(format!(
+                "{}/api/v1/sessions/{session_id}/checkpoints",
+                self.base_url
+            ))
             .send()
             .await?;
         if !resp.status().is_success() {
@@ -273,9 +317,10 @@ impl ServerClient {
         query: Option<&str>,
         max_tokens: Option<usize>,
     ) -> Result<maukode_protocol::CodebaseMapResponse> {
-        let mut req = self
-            .http
-            .get(format!("{}/api/v1/sessions/{session_id}/map", self.base_url));
+        let mut req = self.http.get(format!(
+            "{}/api/v1/sessions/{session_id}/map",
+            self.base_url
+        ));
 
         if let Some(sp) = subpath {
             req = req.query(&[("subpath", sp)]);
@@ -302,7 +347,10 @@ impl ServerClient {
     ) -> Result<maukode_protocol::InitProjectResponse> {
         let resp = self
             .http
-            .post(format!("{}/api/v1/sessions/{session_id}/init", self.base_url))
+            .post(format!(
+                "{}/api/v1/sessions/{session_id}/init",
+                self.base_url
+            ))
             .json(&maukode_protocol::InitProjectRequest { force })
             .send()
             .await?;
@@ -319,7 +367,10 @@ impl ServerClient {
     ) -> Result<maukode_protocol::McpListResponse> {
         let resp = self
             .http
-            .get(format!("{}/api/v1/sessions/{session_id}/mcp", self.base_url))
+            .get(format!(
+                "{}/api/v1/sessions/{session_id}/mcp",
+                self.base_url
+            ))
             .send()
             .await?;
         if !resp.status().is_success() {
@@ -336,7 +387,10 @@ impl ServerClient {
     ) -> Result<maukode_protocol::CompactResponse> {
         let resp = self
             .http
-            .post(format!("{}/api/v1/sessions/{session_id}/compact", self.base_url))
+            .post(format!(
+                "{}/api/v1/sessions/{session_id}/compact",
+                self.base_url
+            ))
             .json(&maukode_protocol::CompactRequest {
                 focus: focus.map(|s| s.to_string()),
             })
