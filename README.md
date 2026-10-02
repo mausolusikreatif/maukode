@@ -17,18 +17,32 @@ maukode/
 │   ├── maukode-protocol/           # Definisi schema, Message, Role, ToolCall, ToolResult, LLMEvent
 │   ├── maukode-llm/                # Adapter LLM streaming SSE (Anthropic & OpenAI/Ollama/OpenRouter)
 │   ├── maukode-tools/              # Eksekutor tools: bash, read_file, write_file, edit_file, glob, grep
-│   ├── maukode-core/               # Session state, ContextManager (AGENTS.md), Drain loop, Runner
-│   └── maukode-cli/                # Binary CLI utama (maukode & maukode run)
+│   ├── maukode-core/               # Session state, ContextManager (AGENTS.md), Drain loop, SQLite Store
+│   ├── maukode-tui/                # Interactive Terminal UI (Ratatui + Crossterm)
+│   └── maukode-cli/                # Binary CLI utama (`maukode`)
 ```
 
 ---
 
 ## 🚀 Fitur yang Sudah Diimplementasikan
 
+- [x] **Interactive TUI Penuh (`ratatui` + `crossterm`)**:
+  - Live token streaming, thinking/reasoning blocks, tool execution blocks, scrollable chat viewport.
+  - Shortcut navigasi: `PageUp`/`PageDown` scroll, `Esc` cancel/dismiss, `Ctrl+C` quit.
+- [x] **Slash Commands Interaktif di TUI**:
+  - `/provider`: Buka modal pemilihan provider atau tekan `a` untuk menambahkan provider OpenAI-compatible baru (nama, base URL, API key, model default).
+  - `/model`: Buka modal pemilih model yang secara otomatis mengambil daftar model dari endpoint `/v1/models` atau `/api/tags` provider.
+  - `/new`: Memulai sesi baru yang bersih.
+  - `/sessions`: Membuka modal riwayat sesi yang tersimpan untuk dimuat kembali.
+  - `/clear`: Membersihkan tampilan pesan aktif.
+  - `/help`: Menampilkan panduan bantuan perintah.
+- [x] **Persistensi Sesi SQLite (`rusqlite`)**:
+  - Semua pesan, tool calls, tool results, dan metadata tersimpan secara otomatis di `~/.local/share/maukode/maukode.db` (atau `~/.maukode/maukode.db`).
+  - Lanjutkan sesi sebelumnya dengan `-c, --continue-session` atau `-s, --session <UUID>`.
+- [x] **Konfigurasi Provider Persisten (`~/.config/maukode/config.json`)**:
+  - Provider bawaan: Anthropic, OpenAI, Ollama (Local), OpenRouter.
+  - Tambah provider OpenAI-compatible baru langsung dari TUI atau CLI.
 - [x] **Universal Tool Calling & Settlement Loop**: Loop otomatis multi-turn yang mengeksekusi tool dan mengembalikan hasilnya ke LLM sampai turn selesai (*drain loop*).
-- [x] **Protokol Streaming LLM**:
-  - **Anthropic Messages API**: Server-Sent Events (SSE) streaming dengan delta token, tool call start/delta/finish, dan usage.
-  - **OpenAI Chat API & Compatible**: Mendukung OpenAI, Ollama, OpenRouter, Groq, dan model dengan reasoning delta (DeepSeek R1).
 - [x] **Built-in Coding Tools**:
   - `bash`: Eksekusi terminal dengan timeout dan output capture.
   - `read_file`: Membaca konten file dengan nomor baris (opsional range).
@@ -37,9 +51,6 @@ maukode/
   - `glob`: Pencarian berkas berdasarkan pola.
   - `grep`: Pencarian isi file berbasis regex yang cepat.
 - [x] **Context Discovery**: Menemukan dan menyertakan instruksi `AGENTS.md` dari root project secara otomatis ke dalam baseline system prompt.
-- [x] **Mode Eksekusi Ganda**:
-  - Single-shot command: `maukode run "analisis bug ini"`
-  - Interactive REPL: `maukode`
 
 ---
 
@@ -55,26 +66,31 @@ cargo build --release
 
 ### Menjalankan MauKode
 
-Pastikan API key telah diset di environment:
-
 ```bash
-# Untuk Anthropic (Claude)
-export ANTHROPIC_API_KEY="your-anthropic-key"
-./target/debug/maukode run "buatkan fungsi fizzbuzz di Rust"
-
-# Untuk OpenAI / Ollama / Local LLM
-export OPENAI_API_KEY="your-openai-or-ollama-key"
-./target/debug/maukode --provider openai --model gpt-4o run "refactor kode ini"
-
-# Atau jalankan mode interaktif
+# 1. Jalankan Interactive TUI (default)
 ./target/debug/maukode
+
+# 2. Lanjutkan sesi sebelumnya di TUI
+./target/debug/maukode --continue-session
+
+# 3. Jalankan mode single-shot (headless command)
+./target/debug/maukode run "buatkan file hello.rs yang mencetak halo dunia"
+
+# 4. Mode CLI REPL sederhana (tanpa TUI)
+./target/debug/maukode --cli
 ```
 
----
+### Slash Commands di TUI
 
-## 🗺 Roadmap Selanjutnya
-
-1. **Persistensi SQLite** (`sqlx`): Menyimpan histori sesi ke SQLite agar sesi dapat dilanjutkan (`--continue`).
-2. **Interactive TUI**: Mengintegrasikan `ratatui` + `crossterm` untuk tampilan antarmuka terminal yang modern.
-3. **PTY Support**: Menggunakan `portable-pty` untuk eksekusi proses background dan terminal interaktif.
-4. **Daemon Server & ACP/MCP**: Menyediakan server HTTP/SSE (`axum`) untuk integrasi remote client dan plugin eksternal.
+| Perintah | Deskripsi |
+|---|---|
+| `/provider` | Membuka popup provider. Tekan `a` untuk menambah provider OpenAI-compatible baru. |
+| `/provider use <id>` | Langsung mengaktifkan provider tertentu (contoh: `/provider use ollama`). |
+| `/provider add <name> <base_url> [key]` | Menambahkan provider OpenAI-compatible via teks perintah. |
+| `/model` | Membuka popup pemilih model (mengambil daftar model dari API provider secara otomatis). |
+| `/model <nama_model>` | Langsung mengganti model aktif (contoh: `/model gpt-4o-mini`). |
+| `/sessions` | Membuka dialog untuk memuat riwayat sesi lama dari SQLite. |
+| `/new` | Memulai percakapan baru. |
+| `/clear` | Membersihkan layar chat saat ini. |
+| `/help` | Menampilkan bantuan. |
+| `/exit` | Keluar dari aplikasi. |
