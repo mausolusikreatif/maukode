@@ -430,6 +430,8 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Map  ", theme::dim_style()),
             Span::styled("/init ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Init  ", theme::dim_style()),
+            Span::styled("/mcp ", Style::default().fg(COLOR_TOOL)),
+            Span::styled("MCP  ", theme::dim_style()),
             Span::styled("/help ", theme::muted_style()),
             Span::styled("Commands  ", theme::dim_style()),
             Span::styled("^C ", Style::default().fg(COLOR_RED)),
@@ -850,6 +852,10 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled("/init [--force] ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
             Span::styled("Scan project and generate standard AGENTS.md conventions", theme::text_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("/mcp            ", Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD)),
+            Span::styled("Inspect active MCP servers and registered dynamic tools", theme::text_style()),
         ]),
         Line::from(vec![
             Span::styled("/new            ", theme::brand_style()),

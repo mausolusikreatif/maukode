@@ -58,6 +58,15 @@ pub struct ProviderConfig {
     pub default_model: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct McpServerConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub active_provider: String,
@@ -65,6 +74,8 @@ pub struct AppConfig {
     pub providers: Vec<ProviderConfig>,
     #[serde(default)]
     pub security: SecurityConfig,
+    #[serde(default, rename = "mcpServers", alias = "mcp_servers")]
+    pub mcp_servers: std::collections::HashMap<String, McpServerConfig>,
 }
 
 impl Default for AppConfig {
@@ -75,6 +86,7 @@ impl Default for AppConfig {
         let mut cfg = Self {
             active_provider: "llmkita".to_string(),
             active_model: "auto".to_string(),
+            mcp_servers: std::collections::HashMap::new(),
             providers: vec![
                 ProviderConfig {
                     id: "llmkita".to_string(),

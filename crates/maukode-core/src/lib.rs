@@ -1,6 +1,7 @@
 pub mod checkpoint;
 pub mod config;
 pub mod context;
+pub mod mcp;
 pub mod memory;
 pub mod permission;
 pub mod repo_map;
@@ -9,8 +10,9 @@ pub mod session;
 pub mod store;
 
 pub use checkpoint::CheckpointManager;
-pub use config::{AppConfig, ProviderConfig, ProviderKind, SecurityConfig};
+pub use config::{AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig};
 pub use context::ContextManager;
+pub use mcp::{McpClient, McpManager, McpTool};
 pub use memory::{init_project, DetectedStack, DiscoveredRule, InitResult, ProjectDetector, ProjectMemory, RuleSource};
 pub use permission::{PermissionManager, PermissionMode};
 pub use repo_map::{CodebaseMapTool, RepoMapGenerator};

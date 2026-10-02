@@ -165,6 +165,7 @@ pub async fn submit_prompt(
     } else {
         create_default_registry(&session_dir)
     };
+    state.mcp_manager.register_tools_into_registry(&mut tool_registry, &session_dir, &config_guard).await;
     drop(config_guard);
     let context = Arc::new(ContextManager::new(&session_dir));
     tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
@@ -347,4 +348,21 @@ pub async fn init_project(
         message: res.message,
         content: res.content,
     }))
+}
+
+pub async fn list_mcp_servers(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = state
+        .get_or_load_session(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
+
+    let session_dir = session_arc.read().await.directory.clone();
+    let config_guard = state.config.read().await;
+    let servers = state.mcp_manager.list_server_statuses(&session_dir, &config_guard).await;
+
+    Ok(Json(maukode_protocol::McpListResponse { servers }))
 }

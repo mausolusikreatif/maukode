@@ -104,3 +104,23 @@ pub struct InitProjectResponse {
     pub message: String,
     pub content: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolInfo {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerStatus {
+    pub name: String,
+    pub command: String,
+    pub status: String,
+    pub tools: Vec<McpToolInfo>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpListResponse {
+    pub servers: Vec<McpServerStatus>,
+}

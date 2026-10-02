@@ -312,4 +312,20 @@ impl ServerClient {
         }
         Ok(resp.json().await?)
     }
+
+    pub async fn list_mcp_servers(
+        &self,
+        session_id: SessionId,
+    ) -> Result<maukode_protocol::McpListResponse> {
+        let resp = self
+            .http
+            .get(format!("{}/api/v1/sessions/{session_id}/mcp", self.base_url))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to list MCP servers: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
 }

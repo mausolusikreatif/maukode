@@ -237,6 +237,47 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 app.set_status(format!("Init failed: {e}"));
             }
         },
+        AppEvent::McpStatusFetched(res) => match res {
+            Ok(resp) => {
+                let mut msg = String::from("=== Model Context Protocol (MCP) Servers ===\n");
+                if resp.servers.is_empty() {
+                    msg.push_str("No MCP servers configured.\nTo add MCP servers, configure 'mcpServers' in .maukode/mcp.json or ~/.config/maukode/config.json");
+                } else {
+                    for s in &resp.servers {
+                        let icon = match s.status.as_str() {
+                            "connected" => "●",
+                            "error" => "▲",
+                            _ => "○",
+                        };
+                        msg.push_str(&format!("{icon} {} ({})\n", s.name, s.status));
+                        msg.push_str(&format!("  Command: {}\n", s.command));
+                        if let Some(ref err) = s.error {
+                            msg.push_str(&format!("  Error: {}\n", err));
+                        }
+                        if s.tools.is_empty() {
+                            msg.push_str("  Tools: none\n");
+                        } else {
+                            msg.push_str(&format!("  Tools ({}):\n", s.tools.len()));
+                            for t in &s.tools {
+                                msg.push_str(&format!("    - {}: {}\n", t.name, t.description));
+                            }
+                        }
+                    }
+                }
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content: msg.trim_end().to_string(),
+                });
+                app.set_status("MCP server status displayed");
+            }
+            Err(e) => {
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content: format!("Failed to query MCP servers: {e}"),
+                });
+                app.set_status(format!("MCP query failed: {e}"));
+            }
+        },
     }
 }
 

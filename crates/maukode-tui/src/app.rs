@@ -91,6 +91,7 @@ pub struct App {
     pub should_quit: bool,
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
     pub server_client: Option<Arc<ServerClient>>,
+    pub mcp_manager: Arc<maukode_core::McpManager>,
 }
 
 impl App {
@@ -110,6 +111,8 @@ impl App {
         } else {
             create_default_registry(&cwd)
         };
+        let mcp_manager = Arc::new(maukode_core::McpManager::new());
+        mcp_manager.register_tools_into_registry(&mut tool_registry, &cwd, &config).await;
         let context = Arc::new(ContextManager::new(&cwd));
         tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
         let tools = Arc::new(tool_registry);
@@ -248,6 +251,7 @@ impl App {
             should_quit: false,
             event_tx,
             server_client,
+            mcp_manager,
         })
     }
 
@@ -399,6 +403,12 @@ impl App {
                     match std::fs::canonicalize(&expanded) {
                         Ok(canonical) => {
                             let mut tool_reg = create_default_registry(&canonical);
+                            let mcp = Arc::clone(&self.mcp_manager);
+                            let cfg = self.config.clone();
+                            let can_clone = canonical.clone();
+                            tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(mcp.register_tools_into_registry(&mut tool_reg, &can_clone, &cfg))
+                            });
                             let context = Arc::new(ContextManager::new(&canonical));
                             tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
                             self.tools = Arc::new(tool_reg);
@@ -509,6 +519,9 @@ impl App {
             "/init" => {
                 let force = parts.iter().any(|&p| p == "--force" || p == "-f");
                 self.init_agents_file(force);
+            }
+            "/mcp" => {
+                self.show_mcp_status();
             }
             "/new" => {
                 self.switch_to_new_session();
@@ -972,6 +985,33 @@ impl App {
                     Err(e) => Err(e.to_string()),
                 };
                 let _ = tx.send(AppEvent::InitProjectCompleted(res));
+            });
+        }
+    }
+
+    pub fn show_mcp_status(&mut self) {
+        let sid = {
+            let guard = self.session.try_read();
+            match guard {
+                Ok(s) => s.id,
+                Err(_) => SessionId::new(),
+            }
+        };
+        let tx = self.event_tx.clone();
+        self.set_status("Querying MCP servers...");
+
+        if let Some(client) = self.server_client.clone() {
+            tokio::spawn(async move {
+                let res = client.list_mcp_servers(sid).await.map_err(|e| e.to_string());
+                let _ = tx.send(AppEvent::McpStatusFetched(res));
+            });
+        } else {
+            let mcp = Arc::clone(&self.mcp_manager);
+            let cwd = self.cwd.clone();
+            let config = self.config.clone();
+            tokio::spawn(async move {
+                let servers = mcp.list_server_statuses(&cwd, &config).await;
+                let _ = tx.send(AppEvent::McpStatusFetched(Ok(maukode_protocol::McpListResponse { servers })));
             });
         }
     }

@@ -75,6 +75,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/sessions/{id}/init",
             post(sessions::init_project),
         )
+        .route(
+            "/api/v1/sessions/{id}/mcp",
+            get(sessions::list_mcp_servers),
+        )
         .route_layer(from_fn_with_state(Arc::clone(&state), auth_middleware));
 
     Router::new()
