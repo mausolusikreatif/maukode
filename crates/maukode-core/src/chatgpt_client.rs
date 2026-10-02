@@ -205,12 +205,25 @@ impl ResponseState {
             }
             "response.failed" | "response.incomplete" | "error" => {
                 self.completed = true;
-                let reason = value["response"]["error"]["message"]
+                let error = if value["error"].is_object() {
+                    &value["error"]
+                } else {
+                    &value["response"]["error"]
+                };
+                let code = error["code"].as_str();
+                let reason = error["message"]
                     .as_str()
                     .or_else(|| value["response"]["incomplete_details"]["reason"].as_str())
                     .or_else(|| value["message"].as_str())
                     .unwrap_or(kind);
-                self.pending.push_back(Err(LLMError::Stream(reason.into())));
+                let detail = match code {
+                    Some(code @ "subscription_sharing_usage_limit_exceeded") => format!(
+                        "ChatGPT app usage limit reached ({code}). Check ChatGPT Settings → Usage, retry when usage is available, or choose an API-key provider. {reason}"
+                    ),
+                    Some(code) => format!("{code}: {reason}"),
+                    None => reason.to_string(),
+                };
+                self.pending.push_back(Err(LLMError::Stream(detail)));
             }
             _ => {}
         }
@@ -369,6 +382,24 @@ mod tests {
                 reason: FinishReason::ToolUse
             }))
         ));
+    }
+
+    #[test]
+    fn streamed_plan_limit_keeps_code_and_recovery() {
+        let mut state = ResponseState::default();
+        state.consume(&json!({
+            "type": "error",
+            "error": {
+                "code": "subscription_sharing_usage_limit_exceeded",
+                "message": "The app usage limit was reached"
+            }
+        }));
+        let Some(Err(LLMError::Stream(message))) = state.pending.pop_front() else {
+            panic!("expected streaming error");
+        };
+        assert!(message.contains("subscription_sharing_usage_limit_exceeded"));
+        assert!(message.contains("ChatGPT Settings → Usage"));
+        assert!(message.contains("The app usage limit was reached"));
     }
 
     #[tokio::test]

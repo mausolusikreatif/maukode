@@ -172,7 +172,14 @@ async fn activate_chatgpt_provider() -> anyhow::Result<String> {
     if let Some(info) = maukode_server::get_daemon_status().await? {
         let client = maukode_server::ServerClient::new(&info.url, info.token)?;
         if let Some(provider) = config.get_provider("chatgpt") {
-            client.add_or_update_provider(provider).await?;
+            if let Err(error) = client.add_or_update_provider(provider).await {
+                if error.to_string().contains("unknown variant `chat_gpt`") {
+                    anyhow::bail!(
+                        "The running MauKode daemon is from an older version. Run `maukode server restart`; your ChatGPT sign-in is already saved."
+                    );
+                }
+                return Err(error);
+            }
         }
         client.set_active_provider("chatgpt").await?;
         client.set_active_model(&model).await?;

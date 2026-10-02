@@ -3,11 +3,11 @@
 ## Current baseline (2026-10-03)
 
 The `Rust CI` workflow runs `cargo test --workspace --locked` and Clippy on
-`ubuntu-latest` for every push and pull request. All 55 current tests pass:
+`ubuntu-latest` for every push and pull request. All 56 current tests pass:
 
 | Crate | Tests | Current coverage |
 | --- | ---: | --- |
-| `maukode-core` | 29 | Compaction, memory discovery, repository map parsing, MCP mock handshake, checkpoint and audit retention, local OAuth callback/token/JWKS/refresh/logout fixtures and credential locking, Responses SSE and tool replay |
+| `maukode-core` | 30 | Compaction, memory discovery, repository map parsing, MCP mock handshake, checkpoint and audit retention, local OAuth callback/token/JWKS/refresh/logout fixtures and credential locking, Responses SSE errors and tool replay |
 | `maukode-tools` | 10 | Command risk classification, basic path jail, registry aliases and unknown names, HTML parsing |
 | `maukode-server` | 3 | Health/auth and session creation, unknown permission reply, selected read endpoints |
 | `maukode-tui` | 9 | Chat wrap/scroll, input and dialog wrap, event-to-render path, tool-call completion, streaming smoke budget |
