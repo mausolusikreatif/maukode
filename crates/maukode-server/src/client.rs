@@ -294,4 +294,22 @@ impl ServerClient {
         }
         Ok(resp.json().await?)
     }
+
+    pub async fn init_project(
+        &self,
+        session_id: SessionId,
+        force: bool,
+    ) -> Result<maukode_protocol::InitProjectResponse> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/sessions/{session_id}/init", self.base_url))
+            .json(&maukode_protocol::InitProjectRequest { force })
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to init project: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
 }

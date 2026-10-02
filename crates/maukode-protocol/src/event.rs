@@ -87,3 +87,20 @@ pub struct CodebaseMapResponse {
     pub session_id: String,
     pub map: String,
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InitProjectRequest {
+    #[serde(default)]
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InitProjectResponse {
+    pub session_id: String,
+    pub path: String,
+    pub created: bool,
+    pub overwritten: bool,
+    pub detected_type: String,
+    pub message: String,
+    pub content: String,
+}

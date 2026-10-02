@@ -506,6 +506,10 @@ impl App {
             "/map" | "/repomap" => {
                 self.open_map_modal();
             }
+            "/init" => {
+                let force = parts.iter().any(|&p| p == "--force" || p == "-f");
+                self.init_agents_file(force);
+            }
             "/new" => {
                 self.switch_to_new_session();
             }
@@ -932,6 +936,42 @@ impl App {
                         let _ = tx.send(AppEvent::CodebaseMapFetched(Err(e.to_string())));
                     }
                 }
+            });
+        }
+    }
+
+    pub fn init_agents_file(&mut self, force: bool) {
+        let sid = {
+            let guard = self.session.try_read();
+            match guard {
+                Ok(s) => s.id,
+                Err(_) => SessionId::new(),
+            }
+        };
+        let tx = self.event_tx.clone();
+        self.set_status("Scanning project stack and generating standard AGENTS.md...");
+
+        if let Some(client) = self.server_client.clone() {
+            tokio::spawn(async move {
+                let res = client.init_project(sid, force).await.map_err(|e| e.to_string());
+                let _ = tx.send(AppEvent::InitProjectCompleted(res));
+            });
+        } else {
+            let cwd = self.cwd.clone();
+            tokio::spawn(async move {
+                let res = match maukode_core::init_project(&cwd, force).await {
+                    Ok(r) => Ok(maukode_protocol::InitProjectResponse {
+                        session_id: sid.to_string(),
+                        path: r.path.display().to_string(),
+                        created: r.created,
+                        overwritten: r.overwritten,
+                        detected_type: r.detected_type,
+                        message: r.message,
+                        content: r.content,
+                    }),
+                    Err(e) => Err(e.to_string()),
+                };
+                let _ = tx.send(AppEvent::InitProjectCompleted(res));
             });
         }
     }
