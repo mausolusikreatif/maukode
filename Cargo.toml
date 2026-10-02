@@ -6,6 +6,7 @@ members = [
     "crates/maukode-core",
     "crates/maukode-tui",
     "crates/maukode-cli",
+    "crates/maukode-server",
 ]
 resolver = "2"
 
@@ -22,6 +23,7 @@ maukode-llm = { path = "crates/maukode-llm" }
 maukode-tools = { path = "crates/maukode-tools" }
 maukode-core = { path = "crates/maukode-core" }
 maukode-tui = { path = "crates/maukode-tui" }
+maukode-server = { path = "crates/maukode-server" }
 
 # Async runtime
 tokio = { version = "1.43", features = ["full"] }
@@ -36,10 +38,12 @@ serde_json = "1.0"
 thiserror = "2.0"
 anyhow = "1.0"
 
-# HTTP client & SSE streaming
+# HTTP server, client & SSE streaming
+axum = { version = "0.8", features = ["json", "tokio", "http1"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 eventsource-stream = "0.2"
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 
 # CLI & Terminal UI
 clap = { version = "4.5", features = ["derive"] }
