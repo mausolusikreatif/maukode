@@ -255,6 +255,9 @@ impl AppConfig {
             // Look for provider.llmkita or other custom providers in opencode
             if let Some(providers_obj) = val.get("provider").and_then(|p| p.as_object()) {
                 for (key, prov_val) in providers_obj {
+                    if key == "chatgpt" {
+                        continue;
+                    }
                     let name = prov_val.get("name").and_then(|n| n.as_str()).unwrap_or(key);
                     let base_url = prov_val
                         .get("options")

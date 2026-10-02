@@ -58,6 +58,8 @@ struct CredentialStore {
     #[serde(default)]
     pending_client_id: Option<String>,
     #[serde(default)]
+    pending_subject: Option<String>,
+    #[serde(default)]
     profiles: Vec<Profile>,
 }
 
@@ -119,6 +121,7 @@ impl ChatGptAuth {
                 host_id: format!("urn:uuid:{}", Uuid::new_v4()),
                 active_client_id: None,
                 pending_client_id: None,
+                pending_subject: None,
                 profiles: Vec::new(),
             });
         }
@@ -158,6 +161,34 @@ impl ChatGptAuth {
         result
     }
 
+    fn lock_store_blocking(&self) -> Result<std::fs::File> {
+        let path = self.path.with_extension("lock");
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow!("Invalid auth lock path"))?;
+        std::fs::create_dir_all(parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(path)?;
+        file.lock()?;
+        Ok(file)
+    }
+
+    async fn lock_store(&self) -> Result<std::fs::File> {
+        let auth = self.clone();
+        tokio::task::spawn_blocking(move || auth.lock_store_blocking()).await?
+    }
+
     pub fn status(&self) -> Result<Option<String>> {
         let credentials = self.load()?;
         Ok(credentials
@@ -182,6 +213,7 @@ impl ChatGptAuth {
     }
 
     pub fn use_account(&self, client_id: &str) -> Result<()> {
+        let _lock = self.lock_store_blocking()?;
         let mut credentials = self.load()?;
         if !credentials
             .profiles
@@ -195,9 +227,13 @@ impl ChatGptAuth {
     }
 
     pub async fn begin_login(&self, new_account: bool) -> Result<LoginAttempt> {
-        let credentials = self.load()?;
-        // Keep the host ID stable even if sign-in is cancelled.
-        self.save(&credentials)?;
+        let credentials = {
+            let _lock = self.lock_store().await?;
+            let credentials = self.load()?;
+            // Keep the host ID stable even if sign-in is cancelled.
+            self.save(&credentials)?;
+            credentials
+        };
         let existing = if new_account {
             None
         } else {
@@ -245,7 +281,13 @@ impl ChatGptAuth {
             verifier,
             redirect_uri,
             existing_client_id: saved_client_id.map(str::to_owned),
-            existing_subject: existing.map(|profile| profile.subject.clone()),
+            existing_subject: existing
+                .map(|profile| profile.subject.clone())
+                .or(if new_account {
+                    None
+                } else {
+                    credentials.pending_subject
+                }),
         })
     }
 
@@ -305,9 +347,12 @@ impl ChatGptAuth {
                 .cloned()
                 .ok_or_else(|| anyhow!("OAuth registration did not return a client ID"))?
         };
-        let mut credentials = self.load()?;
-        credentials.pending_client_id = Some(client_id.clone());
-        self.save(&credentials)?;
+        {
+            let _lock = self.lock_store().await?;
+            let mut credentials = self.load()?;
+            credentials.pending_client_id = Some(client_id.clone());
+            self.save(&credentials)?;
+        }
         let response = self
             .http
             .post(&self.endpoints.token)
@@ -336,6 +381,8 @@ impl ChatGptAuth {
         {
             bail!("Different ChatGPT account returned during reauthorization");
         }
+        let _lock = self.lock_store().await?;
+        let mut credentials = self.load()?;
         let profile = Profile {
             email: identity.email,
             subject: identity.subject,
@@ -353,6 +400,7 @@ impl ChatGptAuth {
         credentials.profiles.push(profile);
         credentials.active_client_id = Some(client_id);
         credentials.pending_client_id = None;
+        credentials.pending_subject = None;
         self.save(&credentials)?;
         Ok(email)
     }
@@ -449,6 +497,7 @@ impl ChatGptAuth {
 
     pub async fn access_token(&self) -> Result<String> {
         let _guard = REFRESH_LOCK.lock().await;
+        let _lock = self.lock_store().await?;
         let mut credentials = self.load()?;
         let profile = credentials.active()?;
         require_plan_scope(&profile.scope)?;
@@ -491,6 +540,7 @@ impl ChatGptAuth {
     }
 
     pub async fn logout(&self) -> Result<()> {
+        let _lock = self.lock_store().await?;
         let mut credentials = self.load()?;
         let profile = credentials.active()?.clone();
         let discovery: Value = self
@@ -521,6 +571,8 @@ impl ChatGptAuth {
             .profiles
             .retain(|saved| saved.client_id != profile.client_id);
         credentials.active_client_id = None;
+        credentials.pending_client_id = Some(profile.client_id);
+        credentials.pending_subject = Some(profile.subject);
         self.save(&credentials)
     }
 }
@@ -619,6 +671,7 @@ mod tests {
             host_id: "urn:uuid:test".into(),
             active_client_id: Some("oaiapp_test".into()),
             pending_client_id: None,
+            pending_subject: None,
             profiles: vec![Profile {
                 email: "test@example.com".into(),
                 subject: "subject".into(),
@@ -710,6 +763,7 @@ mod tests {
             host_id: "urn:uuid:test".into(),
             active_client_id: Some("oaiapp_first".into()),
             pending_client_id: None,
+            pending_subject: None,
             profiles,
         })
         .unwrap();
@@ -720,6 +774,87 @@ mod tests {
         );
         assert_eq!(auth.accounts().unwrap().len(), 2);
         assert!(auth.use_account("missing").is_err());
+    }
+
+    #[tokio::test]
+    async fn credential_lock_serializes_independent_instances() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("auth.json");
+        let first = ChatGptAuth::at_path(path.clone());
+        let second = ChatGptAuth::at_path(path);
+        let guard = first.lock_store().await.unwrap();
+        let waiting = tokio::spawn(async move { second.lock_store().await.unwrap() });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!waiting.is_finished());
+        drop(guard);
+        let next_guard = tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(next_guard);
+    }
+
+    #[tokio::test]
+    async fn logout_revokes_token_and_keeps_registration_for_reauthorization() {
+        let temp = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let issuer = format!("http://{}", listener.local_addr().unwrap());
+        let auth =
+            ChatGptAuth::at_path(temp.path().join("auth.json")).with_endpoints(AuthEndpoints {
+                discovery: format!("{issuer}/discovery"),
+                ..AuthEndpoints::default()
+            });
+        auth.save(&CredentialStore {
+            host_id: "urn:uuid:test".into(),
+            active_client_id: Some("oaiapp_test".into()),
+            pending_client_id: None,
+            pending_subject: None,
+            profiles: vec![Profile {
+                email: "test@example.com".into(),
+                subject: "person".into(),
+                client_id: "oaiapp_test".into(),
+                id_token: "id".into(),
+                access_token: "access".into(),
+                refresh_token: "refresh".into(),
+                scope: SCOPE.into(),
+                expires_at: u64::MAX,
+            }],
+        })
+        .unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = [0; 2048];
+                let count = socket.read(&mut bytes).await.unwrap();
+                let request = String::from_utf8_lossy(&bytes[..count]);
+                let payload = if request.starts_with("GET /discovery ") {
+                    json!({"revocation_endpoint": format!("{issuer}/revoke")}).to_string()
+                } else {
+                    assert!(request.starts_with("POST /revoke "));
+                    String::new()
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                    payload.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        auth.logout().await.unwrap();
+        server.await.unwrap();
+        assert!(auth.status().unwrap().is_none());
+        let saved = auth.load().unwrap();
+        assert_eq!(saved.pending_client_id.as_deref(), Some("oaiapp_test"));
+        assert_eq!(saved.pending_subject.as_deref(), Some("person"));
+        assert!(saved.profiles.is_empty());
+        let attempt = auth.begin_login(false).await.unwrap();
+        let url = Url::parse(&attempt.url).unwrap();
+        let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(params["client_id"], "oaiapp_test");
+        assert_eq!(attempt.existing_subject.as_deref(), Some("person"));
+        let fresh = auth.begin_login(true).await.unwrap();
+        assert!(fresh.url.contains("client_id=dynamic_agent_client"));
+        assert!(fresh.existing_subject.is_none());
     }
 
     #[tokio::test]
