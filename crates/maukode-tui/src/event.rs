@@ -17,6 +17,7 @@ pub enum AppEvent {
     UndoCompleted(Result<String, String>),
     CodebaseMapFetched(Result<String, String>),
     InitProjectCompleted(Result<maukode_protocol::InitProjectResponse, String>),
+    McpStatusFetched(Result<maukode_protocol::McpListResponse, String>),
 }
 
 pub struct EventHandler {

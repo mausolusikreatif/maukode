@@ -13,6 +13,7 @@ pub struct ServerState {
     pub event_broadcasters: Arc<RwLock<HashMap<SessionId, broadcast::Sender<LLMEvent>>>>,
     pub permission_manager: Arc<PermissionManager>,
     pub checkpoint_manager: Arc<maukode_core::CheckpointManager>,
+    pub mcp_manager: Arc<maukode_core::McpManager>,
     pub auth_token: Option<String>,
     pub default_dir: PathBuf,
 }
@@ -31,6 +32,7 @@ impl ServerState {
         );
 
         let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&dir).await?);
+        let mcp_manager = Arc::new(maukode_core::McpManager::new());
 
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
@@ -39,6 +41,7 @@ impl ServerState {
             event_broadcasters: Arc::new(RwLock::new(HashMap::new())),
             permission_manager,
             checkpoint_manager,
+            mcp_manager,
             auth_token,
             default_dir: dir,
         })

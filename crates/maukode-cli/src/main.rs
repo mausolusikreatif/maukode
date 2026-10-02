@@ -346,6 +346,34 @@ async fn main() -> anyhow::Result<()> {
                     }
                     continue;
                 }
+                if trimmed == "/mcp" {
+                    match client.list_mcp_servers(target_session_id).await {
+                        Ok(resp) => {
+                            println!("\x1b[1;36m=== Model Context Protocol (MCP) Servers ===\x1b[0m");
+                            if resp.servers.is_empty() {
+                                println!("No MCP servers configured.");
+                            } else {
+                                for s in resp.servers {
+                                    println!("● \x1b[1;32m{}\x1b[0m ({})", s.name, s.status);
+                                    println!("  Command: \x1b[2m{}\x1b[0m", s.command);
+                                    if let Some(err) = s.error {
+                                        println!("  \x1b[31mError: {err}\x1b[0m");
+                                    }
+                                    if s.tools.is_empty() {
+                                        println!("  Tools: none");
+                                    } else {
+                                        println!("  Tools ({}):", s.tools.len());
+                                        for t in s.tools {
+                                            println!("    - \x1b[1m{}\x1b[0m: {}", t.name, t.description);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("\x1b[31mFailed to query MCP servers: {e}\x1b[0m"),
+                    }
+                    continue;
+                }
                 println!();
                 remote::run_remote_turn(&client, target_session_id, trimmed).await?;
                 println!();
@@ -411,6 +439,8 @@ async fn main() -> anyhow::Result<()> {
         } else {
             create_default_registry(&cwd)
         };
+        let mcp_manager = Arc::new(maukode_core::McpManager::new());
+        mcp_manager.register_tools_into_registry(&mut tool_reg, &cwd, &config).await;
         tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
         let tools = Arc::new(tool_reg);
         let llm_client = config.create_active_llm_client()?;
@@ -447,7 +477,7 @@ async fn main() -> anyhow::Result<()> {
         println!("══════════════════════════════════════════════════════════════════");
         println!("  🤖 \x1b[1;36mMauKode\x1b[0m - AI Coding Agent (CLI Mode)");
         println!("  Provider: \x1b[1;32m{}\x1b[0m | Model: \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
-        println!("  Commands: /diff, /undo, /map, /init, exit");
+        println!("  Commands: /diff, /undo, /map, /init, /mcp, exit");
         println!("══════════════════════════════════════════════════════════════════\n");
 
         let active_sess = if let Some(id) = parsed_session_id {
@@ -472,6 +502,8 @@ async fn main() -> anyhow::Result<()> {
         } else {
             create_default_registry(&cwd)
         };
+        let mcp_manager = Arc::new(maukode_core::McpManager::new());
+        mcp_manager.register_tools_into_registry(&mut tool_reg, &cwd, &config).await;
         tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
         let tools = Arc::new(tool_reg);
         let llm_client = config.create_active_llm_client()?;
@@ -578,6 +610,31 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     Err(e) => eprintln!("\x1b[31mFailed to init AGENTS.md: {e}\x1b[0m"),
+                }
+                continue;
+            }
+            if trimmed == "/mcp" {
+                let mcp = Arc::clone(&mcp_manager);
+                let servers = mcp.list_server_statuses(&cwd, &config).await;
+                println!("\x1b[1;36m=== Model Context Protocol (MCP) Servers ===\x1b[0m");
+                if servers.is_empty() {
+                    println!("No MCP servers configured.");
+                } else {
+                    for s in servers {
+                        println!("● \x1b[1;32m{}\x1b[0m ({})", s.name, s.status);
+                        println!("  Command: \x1b[2m{}\x1b[0m", s.command);
+                        if let Some(err) = s.error {
+                            println!("  \x1b[31mError: {err}\x1b[0m");
+                        }
+                        if s.tools.is_empty() {
+                            println!("  Tools: none");
+                        } else {
+                            println!("  Tools ({}):", s.tools.len());
+                            for t in s.tools {
+                                println!("    - \x1b[1m{}\x1b[0m: {}", t.name, t.description);
+                            }
+                        }
+                    }
                 }
                 continue;
             }

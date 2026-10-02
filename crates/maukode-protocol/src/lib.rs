@@ -4,8 +4,8 @@ pub mod session;
 
 pub use event::{
     Checkpoint, CodebaseMapResponse, DiffResponse, FinishReason, InitProjectRequest,
-    InitProjectResponse, LLMEvent, PermissionDecision, PermissionRequest, TokenUsage,
-    UndoResponse,
+    InitProjectResponse, LLMEvent, McpListResponse, McpServerStatus, McpToolInfo,
+    PermissionDecision, PermissionRequest, TokenUsage, UndoResponse,
 };
 pub use message::{ContentPart, Message, Role, ToolCall, ToolResult};
 pub use session::{SessionId, SessionMetadata, SessionState};

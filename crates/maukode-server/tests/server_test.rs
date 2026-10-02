@@ -126,4 +126,9 @@ async fn test_diff_and_undo_endpoints() {
     assert!(init_resp.created);
     assert!(temp_dir.path().join("AGENTS.md").is_file());
     assert!(init_resp.content.contains("# Project:"));
+
+    // 5. Test MCP servers list endpoint
+    let mcp_resp = client.list_mcp_servers(meta.id).await.unwrap();
+    // Initially empty unless configured
+    assert!(mcp_resp.servers.is_empty());
 }
