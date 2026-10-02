@@ -501,7 +501,7 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::AllowSession);
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::Deny);
                 }
                 _ => {}

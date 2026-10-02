@@ -846,7 +846,13 @@ fn draw_help_modal(f: &mut Frame) {
 }
 
 fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRequest) {
-    let area = centered_rect(65, 45, f.area());
+    let screen = f.area();
+    let area_width = (screen.width * 75 / 100).max(64).min(screen.width.saturating_sub(2));
+    let area_height = 17.min(screen.height.saturating_sub(2)).max(14);
+    let x = (screen.width.saturating_sub(area_width)) / 2;
+    let y = (screen.height.saturating_sub(area_height)) / 2;
+    let area = Rect::new(x, y, area_width, area_height);
+
     f.render_widget(Clear, area);
 
     let border_color = if request.risk_level == "danger" {
@@ -870,12 +876,10 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Subtitle / intro
-            Constraint::Length(1), // Blank
             Constraint::Min(3),    // Command / target box
+            Constraint::Length(1), // Risk description
             Constraint::Length(1), // Blank
-            Constraint::Length(2), // Risk description
-            Constraint::Length(1), // Blank
-            Constraint::Length(1), // Action buttons footer
+            Constraint::Length(3), // Action options list (3 distinct choices)
         ])
         .margin(1)
         .split(block.inner(area));
@@ -898,23 +902,32 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
     let cmd_para = Paragraph::new(format!("  $ {cmd_text}"))
         .style(Style::default().fg(Color::White).bg(Color::Rgb(25, 25, 35)))
         .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
-    f.render_widget(cmd_para, inner[2]);
+    f.render_widget(cmd_para, inner[1]);
 
     // Risk warning text
     let risk_line = Line::from(vec![
         Span::styled("Risk: ", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
         Span::styled(&request.description, theme::text_style()),
     ]);
-    f.render_widget(Paragraph::new(risk_line), inner[4]);
+    f.render_widget(Paragraph::new(risk_line), inner[2]);
 
-    // Keybindings footer
-    let footer = Line::from(vec![
-        Span::styled("[y / Enter] ", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD)),
-        Span::styled("Allow Once    ", theme::dim_style()),
-        Span::styled("[a] ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
-        Span::styled("Always Allow (Session)    ", theme::dim_style()),
-        Span::styled("[n / Esc] ", Style::default().fg(COLOR_RED).add_modifier(Modifier::BOLD)),
-        Span::styled("Reject", theme::dim_style()),
-    ]);
-    f.render_widget(Paragraph::new(footer).alignment(Alignment::Center), inner[6]);
+    // Action options list (explicit, beautifully structured, never cut off)
+    let options = vec![
+        Line::from(vec![
+            Span::styled("  [y] ", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD)),
+            Span::styled("Yes, Allow Once        ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("• Run this command one time", theme::dim_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("  [a] ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled("Always Allow (Session) ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("• Whitelist command for this session", theme::dim_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("  [n] ", Style::default().fg(COLOR_RED).add_modifier(Modifier::BOLD)),
+            Span::styled("No, Reject & Abort     ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("• Disallow execution (or press Esc)", theme::dim_style()),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(options), inner[4]);
 }
