@@ -1,0 +1,55 @@
+[workspace]
+members = [
+    "crates/maukode-protocol",
+    "crates/maukode-llm",
+    "crates/maukode-tools",
+    "crates/maukode-core",
+    "crates/maukode-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["maukode contributors"]
+
+[workspace.dependencies]
+# Internal crates
+maukode-protocol = { path = "crates/maukode-protocol" }
+maukode-llm = { path = "crates/maukode-llm" }
+maukode-tools = { path = "crates/maukode-tools" }
+maukode-core = { path = "crates/maukode-core" }
+
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization & JSON
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# HTTP client & SSE streaming
+reqwest = { version = "0.12", features = ["json", "stream"] }
+eventsource-stream = "0.2"
+tokio-stream = "0.1"
+
+# CLI & Formatting
+clap = { version = "4.5", features = ["derive"] }
+
+# Logging / Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+uuid = { version = "1.12", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.11"
+ignore = "0.4"
+walkdir = "2.5"
+similar = "2.6"
