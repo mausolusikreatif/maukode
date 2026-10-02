@@ -3,7 +3,7 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Scrollbar,
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
     Frame,
@@ -526,10 +526,25 @@ fn draw_model_modal(
         })
         .collect();
 
+    let mut state = ListState::default().with_selected(if filtered_models.is_empty() {
+        None
+    } else {
+        Some(selected_idx.min(filtered_models.len().saturating_sub(1)))
+    });
+
     let list = List::new(items)
         .block(Block::default().borders(Borders::NONE));
 
-    f.render_widget(list, inner[1]);
+    f.render_stateful_widget(list, inner[1], &mut state);
+
+    if filtered_models.len() > inner[1].height as usize {
+        let mut scrollbar_state = ScrollbarState::new(filtered_models.len()).position(selected_idx);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .track_symbol(Some("│"))
+            .thumb_symbol("┃")
+            .style(theme::dim_style());
+        f.render_stateful_widget(scrollbar, inner[1], &mut scrollbar_state);
+    }
 
     // Bottom modal hint
     let count_text = format!("{}/{} models", filtered_models.len(), models.len());
@@ -597,8 +612,23 @@ fn draw_provider_modal(f: &mut Frame, app: &App, selected_idx: usize) {
         })
         .collect();
 
+    let mut state = ListState::default().with_selected(if app.config.providers.is_empty() {
+        None
+    } else {
+        Some(selected_idx.min(app.config.providers.len().saturating_sub(1)))
+    });
+
     let list = List::new(items).block(Block::default().borders(Borders::NONE));
-    f.render_widget(list, inner[0]);
+    f.render_stateful_widget(list, inner[0], &mut state);
+
+    if app.config.providers.len() > inner[0].height as usize {
+        let mut scrollbar_state = ScrollbarState::new(app.config.providers.len()).position(selected_idx);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .track_symbol(Some("│"))
+            .thumb_symbol("┃")
+            .style(theme::dim_style());
+        f.render_stateful_widget(scrollbar, inner[0], &mut scrollbar_state);
+    }
 
     let modal_footer = Line::from(vec![
         Span::styled("a ", theme::brand_style()),
@@ -665,8 +695,23 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
         })
         .collect();
 
+    let mut state = ListState::default().with_selected(if sessions.is_empty() {
+        None
+    } else {
+        Some(selected_idx.min(sessions.len().saturating_sub(1)))
+    });
+
     let list = List::new(items).block(Block::default().borders(Borders::NONE));
-    f.render_widget(list, inner[0]);
+    f.render_stateful_widget(list, inner[0], &mut state);
+
+    if sessions.len() > inner[0].height as usize {
+        let mut scrollbar_state = ScrollbarState::new(sessions.len()).position(selected_idx);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .track_symbol(Some("│"))
+            .thumb_symbol("┃")
+            .style(theme::dim_style());
+        f.render_stateful_widget(scrollbar, inner[0], &mut scrollbar_state);
+    }
 
     let modal_footer = Line::from(vec![
         Span::styled(format!("{} sessions", sessions.len()), theme::dim_style()),

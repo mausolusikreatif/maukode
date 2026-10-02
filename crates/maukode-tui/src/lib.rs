@@ -93,17 +93,52 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
         AppEvent::Input(key) => {
             handle_key(app, key);
         }
-        AppEvent::Mouse(mouse) => {
-            match mouse.kind {
-                crossterm::event::MouseEventKind::ScrollUp => {
-                    app.scroll_up(3);
+        AppEvent::Mouse(mouse) => match mouse.kind {
+            crossterm::event::MouseEventKind::ScrollUp => match &mut app.active_modal {
+                ActiveModal::ModelSelector { selected_idx, .. } => {
+                    *selected_idx = selected_idx.saturating_sub(1);
                 }
-                crossterm::event::MouseEventKind::ScrollDown => {
-                    app.scroll_down(3);
+                ActiveModal::ProviderSelector { selected_idx } => {
+                    *selected_idx = selected_idx.saturating_sub(1);
                 }
-                _ => {}
-            }
-        }
+                ActiveModal::SessionSelector { selected_idx, .. } => {
+                    *selected_idx = selected_idx.saturating_sub(1);
+                }
+                _ => app.scroll_up(3),
+            },
+            crossterm::event::MouseEventKind::ScrollDown => match &mut app.active_modal {
+                ActiveModal::ModelSelector {
+                    models,
+                    selected_idx,
+                    filter,
+                    ..
+                } => {
+                    let total = models
+                        .iter()
+                        .filter(|m| filter.is_empty() || m.to_lowercase().contains(&filter.to_lowercase()))
+                        .count();
+                    if total > 0 && *selected_idx + 1 < total {
+                        *selected_idx += 1;
+                    }
+                }
+                ActiveModal::ProviderSelector { selected_idx } => {
+                    let total = app.config.providers.len();
+                    if total > 0 && *selected_idx + 1 < total {
+                        *selected_idx += 1;
+                    }
+                }
+                ActiveModal::SessionSelector {
+                    sessions,
+                    selected_idx,
+                } => {
+                    if !sessions.is_empty() && *selected_idx + 1 < sessions.len() {
+                        *selected_idx += 1;
+                    }
+                }
+                _ => app.scroll_down(3),
+            },
+            _ => {}
+        },
         AppEvent::Tick => {}
         AppEvent::LLM(llm_event) => {
             app.handle_llm_event(llm_event);
@@ -150,11 +185,33 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 KeyCode::Up => {
                     if *selected_idx > 0 {
                         *selected_idx -= 1;
+                    } else if total > 0 {
+                        *selected_idx = total - 1;
                     }
                 }
                 KeyCode::Down => {
-                    if total > 0 && *selected_idx + 1 < total {
-                        *selected_idx += 1;
+                    if total > 0 {
+                        if *selected_idx + 1 < total {
+                            *selected_idx += 1;
+                        } else {
+                            *selected_idx = 0;
+                        }
+                    }
+                }
+                KeyCode::PageUp => {
+                    *selected_idx = selected_idx.saturating_sub(5);
+                }
+                KeyCode::PageDown => {
+                    if total > 0 {
+                        *selected_idx = (*selected_idx + 5).min(total - 1);
+                    }
+                }
+                KeyCode::Home => {
+                    *selected_idx = 0;
+                }
+                KeyCode::End => {
+                    if total > 0 {
+                        *selected_idx = total - 1;
                     }
                 }
                 KeyCode::Char('a') | KeyCode::Char('A') => {
@@ -269,11 +326,49 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 KeyCode::Up => {
                     if *selected_idx > 0 {
                         *selected_idx -= 1;
+                    } else if total > 0 {
+                        *selected_idx = total - 1;
                     }
                 }
                 KeyCode::Down => {
-                    if total > 0 && *selected_idx + 1 < total {
-                        *selected_idx += 1;
+                    if total > 0 {
+                        if *selected_idx + 1 < total {
+                            *selected_idx += 1;
+                        } else {
+                            *selected_idx = 0;
+                        }
+                    }
+                }
+                KeyCode::PageUp => {
+                    *selected_idx = selected_idx.saturating_sub(5);
+                }
+                KeyCode::PageDown => {
+                    if total > 0 {
+                        *selected_idx = (*selected_idx + 5).min(total - 1);
+                    }
+                }
+                KeyCode::Home => {
+                    *selected_idx = 0;
+                }
+                KeyCode::End => {
+                    if total > 0 {
+                        *selected_idx = total - 1;
+                    }
+                }
+                KeyCode::Tab => {
+                    if total > 0 {
+                        if *selected_idx + 1 < total {
+                            *selected_idx += 1;
+                        } else {
+                            *selected_idx = 0;
+                        }
+                    }
+                }
+                KeyCode::BackTab => {
+                    if *selected_idx > 0 {
+                        *selected_idx -= 1;
+                    } else if total > 0 {
+                        *selected_idx = total - 1;
                     }
                 }
                 KeyCode::Backspace => {
@@ -321,11 +416,33 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
             KeyCode::Up => {
                 if *selected_idx > 0 {
                     *selected_idx -= 1;
+                } else if !sessions.is_empty() {
+                    *selected_idx = sessions.len() - 1;
                 }
             }
             KeyCode::Down => {
-                if !sessions.is_empty() && *selected_idx + 1 < sessions.len() {
-                    *selected_idx += 1;
+                if !sessions.is_empty() {
+                    if *selected_idx + 1 < sessions.len() {
+                        *selected_idx += 1;
+                    } else {
+                        *selected_idx = 0;
+                    }
+                }
+            }
+            KeyCode::PageUp => {
+                *selected_idx = selected_idx.saturating_sub(5);
+            }
+            KeyCode::PageDown => {
+                if !sessions.is_empty() {
+                    *selected_idx = (*selected_idx + 5).min(sessions.len() - 1);
+                }
+            }
+            KeyCode::Home => {
+                *selected_idx = 0;
+            }
+            KeyCode::End => {
+                if !sessions.is_empty() {
+                    *selected_idx = sessions.len() - 1;
                 }
             }
             KeyCode::Enter => {
