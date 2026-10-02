@@ -71,6 +71,12 @@ maukode/
 
 ---
 
+## TUI tests in CI
+
+Run `cargo test --workspace` locally. The TUI tests use Ratatui's in-memory `TestBackend` and deterministic chat chunks; they need no terminal, API key, LLM, or fake HTTP server. They cover word wrapping in chat, the multi-row input and dialogs, top and bottom of a 2,000-message scrollback, and burst streaming (4,000 chunks with 40 redraws). An end-to-end TUI test sends keyboard and LLM events through the app, then inspects a full virtual terminal at narrow and wide sizes, including permission-command scrolling and provider URL entry. Generous time limits in the stream tests catch severe regressions on CI; use a dedicated benchmark runner for precise latency comparisons.
+
+The viewport uses Ratatui's own wrapped-line count to calculate scroll limits. The current `Paragraph` scroll API accepts a `u16` row offset, so histories beyond 65,535 visual rows need a separate windowing implementation to reach the newest rows reliably.
+
 ## 🚀 Installation
 
 ### Prerequisites

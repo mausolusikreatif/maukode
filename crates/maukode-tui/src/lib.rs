@@ -110,6 +110,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 ActiveModal::CodebaseMapViewer { scroll, .. } => {
                     *scroll = scroll.saturating_sub(3);
                 }
+                ActiveModal::PermissionConfirmation { scroll, .. } => {
+                    *scroll = scroll.saturating_sub(3);
+                }
                 _ => app.scroll_up(3),
             },
             crossterm::event::MouseEventKind::ScrollDown => match &mut app.active_modal {
@@ -152,6 +155,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                     scroll, max_scroll, ..
                 } => {
                     *scroll = (*scroll + 3).min(*max_scroll);
+                }
+                ActiveModal::PermissionConfirmation { scroll, .. } => {
+                    *scroll = scroll.saturating_add(3);
                 }
                 _ => app.scroll_down(3),
             },
@@ -731,9 +737,13 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.active_modal = ActiveModal::None;
             }
         }
-        ActiveModal::PermissionConfirmation { request } => {
+        ActiveModal::PermissionConfirmation { request, scroll } => {
             let req = request.clone();
             match key.code {
+                KeyCode::Up | KeyCode::PageUp => *scroll = scroll.saturating_sub(3),
+                KeyCode::Down | KeyCode::PageDown => *scroll = scroll.saturating_add(3),
+                KeyCode::Home => *scroll = 0,
+                KeyCode::End => *scroll = usize::MAX,
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::AllowOnce);
                 }
@@ -753,20 +763,30 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
     }
 }
 
+fn input_byte_index(input: &str, char_index: usize) -> usize {
+    input
+        .char_indices()
+        .nth(char_index)
+        .map(|(byte_index, _)| byte_index)
+        .unwrap_or(input.len())
+}
+
 fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Enter => {
             app.submit_prompt();
         }
         KeyCode::Backspace => {
-            if app.cursor_pos > 0 && app.cursor_pos <= app.input.len() {
-                app.input.remove(app.cursor_pos - 1);
+            if app.cursor_pos > 0 {
+                let index = input_byte_index(&app.input, app.cursor_pos - 1);
+                app.input.remove(index);
                 app.cursor_pos -= 1;
             }
         }
         KeyCode::Delete => {
-            if app.cursor_pos < app.input.len() {
-                app.input.remove(app.cursor_pos);
+            if app.cursor_pos < app.input.chars().count() {
+                let index = input_byte_index(&app.input, app.cursor_pos);
+                app.input.remove(index);
             }
         }
         KeyCode::Left => {
@@ -775,7 +795,7 @@ fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
             }
         }
         KeyCode::Right => {
-            if app.cursor_pos < app.input.len() {
+            if app.cursor_pos < app.input.chars().count() {
                 app.cursor_pos += 1;
             }
         }
@@ -790,7 +810,7 @@ fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
             if app.input.is_empty() {
                 app.scroll_to_bottom();
             } else {
-                app.cursor_pos = app.input.len();
+                app.cursor_pos = app.input.chars().count();
             }
         }
         KeyCode::Up => {
@@ -830,7 +850,8 @@ fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
             app.scroll_down(2);
         }
         KeyCode::Char(c) => {
-            app.input.insert(app.cursor_pos, c);
+            let index = input_byte_index(&app.input, app.cursor_pos);
+            app.input.insert(index, c);
             app.cursor_pos += 1;
         }
         KeyCode::Esc => {
@@ -843,5 +864,173 @@ fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod input_cursor_tests {
+    use super::input_byte_index;
+
+    #[test]
+    fn character_cursor_maps_to_utf8_byte_boundaries() {
+        let input = "a界b";
+        assert_eq!(input_byte_index(input, 0), 0);
+        assert_eq!(input_byte_index(input, 1), 1);
+        assert_eq!(input_byte_index(input, 2), 4);
+        assert_eq!(input_byte_index(input, 3), 5);
+    }
+}
+
+#[cfg(test)]
+mod end_to_end_wrap_tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+    use maukode_protocol::{LLMEvent, PermissionRequest};
+    use ratatui::backend::TestBackend;
+    use tokio::sync::mpsc;
+
+    struct TestDataDir {
+        old_data: Option<std::ffi::OsString>,
+        old_config: Option<std::ffi::OsString>,
+    }
+
+    impl TestDataDir {
+        fn set(path: &std::path::Path) -> Self {
+            let old_data = std::env::var_os("XDG_DATA_HOME");
+            let old_config = std::env::var_os("XDG_CONFIG_HOME");
+            std::env::set_var("XDG_DATA_HOME", path.join("data"));
+            std::env::set_var("XDG_CONFIG_HOME", path.join("config"));
+            Self {
+                old_data,
+                old_config,
+            }
+        }
+    }
+
+    impl Drop for TestDataDir {
+        fn drop(&mut self) {
+            for (name, previous) in [
+                ("XDG_DATA_HOME", &self.old_data),
+                ("XDG_CONFIG_HOME", &self.old_config),
+            ] {
+                if let Some(value) = previous {
+                    std::env::set_var(name, value);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
+    }
+
+    fn screen(terminal: &Terminal<TestBackend>) -> Vec<String> {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn keyboard_stream_and_dialogs_wrap_on_full_screen() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let _data_dir = TestDataDir::set(temp.path());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut app = App::new(temp.path().to_path_buf(), tx, None, false, None).await?;
+        let mut terminal = Terminal::new(TestBackend::new(24, 16))?;
+
+        for ch in "alpha beta gamma delta epsilon".chars() {
+            handle_app_event(
+                &mut app,
+                AppEvent::Input(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+            );
+        }
+        terminal.draw(|frame| ui::draw(frame, &mut app))?;
+        let rows = screen(&terminal);
+        assert!(
+            rows.iter().any(|row| row.contains("alpha beta gamma")),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("❯ alpha beta gamma delta"))
+                && rows.iter().any(|row| row.contains("  epsilon")),
+            "{rows:?}"
+        );
+        assert_eq!(app.cursor_pos, app.input.chars().count());
+
+        handle_app_event(
+            &mut app,
+            AppEvent::LLM(LLMEvent::TextDelta {
+                text: "streamed answer with a long ending".into(),
+            }),
+        );
+        terminal.draw(|frame| ui::draw(frame, &mut app))?;
+        let rows = screen(&terminal);
+        assert!(
+            rows.iter().any(|row| row.contains("long ending")),
+            "{rows:?}"
+        );
+
+        handle_app_event(
+            &mut app,
+            AppEvent::LLM(LLMEvent::PermissionRequest(PermissionRequest {
+                request_id: "test".into(),
+                session_id: "test".into(),
+                tool_name: "bash".into(),
+                command: Some("echo alpha beta gamma delta epsilon final-command".into()),
+                path: None,
+                risk_level: "warning".into(),
+                description: "Review this command before it runs".into(),
+            })),
+        );
+        terminal.draw(|frame| ui::draw(frame, &mut app))?;
+        let rows = screen(&terminal);
+        assert!(rows.iter().any(|row| row.contains("[n]")), "{rows:?}");
+        handle_app_event(
+            &mut app,
+            AppEvent::Input(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE)),
+        );
+        terminal.draw(|frame| ui::draw(frame, &mut app))?;
+        let rows = screen(&terminal);
+        assert!(
+            rows.iter().any(|row| row.contains("final-command")),
+            "{rows:?}"
+        );
+
+        for code in [KeyCode::Esc, KeyCode::Esc] {
+            handle_app_event(
+                &mut app,
+                AppEvent::Input(KeyEvent::new(code, KeyModifiers::NONE)),
+            );
+        }
+        for ch in "/provider".chars() {
+            handle_app_event(
+                &mut app,
+                AppEvent::Input(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+            );
+        }
+        for code in [KeyCode::Enter, KeyCode::Char('a'), KeyCode::Tab] {
+            handle_app_event(
+                &mut app,
+                AppEvent::Input(KeyEvent::new(code, KeyModifiers::NONE)),
+            );
+        }
+        for ch in "https://example.test/providers/a/long/path/final-segment".chars() {
+            handle_app_event(
+                &mut app,
+                AppEvent::Input(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+            );
+        }
+        let mut modal_terminal = Terminal::new(TestBackend::new(80, 30))?;
+        modal_terminal.draw(|frame| ui::draw(frame, &mut app))?;
+        let rows = screen(&modal_terminal);
+        assert!(
+            rows.iter().any(|row| row.contains("final-segment")),
+            "{rows:?}"
+        );
+        Ok(())
     }
 }
