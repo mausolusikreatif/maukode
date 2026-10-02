@@ -2,19 +2,21 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use clap::{Parser, Subcommand};
-use maukode_core::{ContextManager, InMemorySessionStore, RunnerConfig, Session, SessionRunner, SessionStore};
-use maukode_llm::{AnthropicClient, LLMClient, OpenAIClient};
-use maukode_protocol::LLMEvent;
+use maukode_core::{
+    AppConfig, ContextManager, ProviderConfig, ProviderKind, RunnerConfig, Session, SessionRunner,
+    SqliteSessionStore,
+};
+use maukode_protocol::{LLMEvent, SessionId};
 use maukode_tools::create_default_registry;
 use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
 #[command(name = "maukode", author, version, about = "Agentic AI coding assistant in Rust (inspired by OpenCode)")]
 struct Cli {
-    #[arg(short, long, help = "Model provider: 'anthropic' or 'openai' (or compatible)")]
+    #[arg(short, long, help = "Model provider: 'anthropic', 'openai', 'ollama', etc.")]
     provider: Option<String>,
 
-    #[arg(short, long, help = "Model identifier (e.g. claude-3-7-sonnet-20250219, gpt-4o)")]
+    #[arg(short, long, help = "Model identifier (e.g. claude-3-7-sonnet-20250219, gpt-4o, qwen2.5-coder)")]
     model: Option<String>,
 
     #[arg(long, help = "API key (defaults to ANTHROPIC_API_KEY or OPENAI_API_KEY)")]
@@ -26,8 +28,17 @@ struct Cli {
     #[arg(short = 'C', long, help = "Working directory (defaults to current dir)")]
     cwd: Option<PathBuf>,
 
+    #[arg(short = 's', long, help = "Resume a specific session by UUID")]
+    session: Option<String>,
+
+    #[arg(short = 'c', long, help = "Continue the latest session")]
+    continue_session: bool,
+
     #[arg(long, default_value_t = 25, help = "Maximum turns of tool execution loop")]
     max_steps: usize,
+
+    #[arg(long, help = "Run in simple command-line REPL mode instead of full TUI")]
+    cli: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -57,60 +68,40 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let cwd = cli.cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    let provider = cli
-        .provider
-        .unwrap_or_else(|| "anthropic".to_string())
-        .to_lowercase();
+    let mut config = AppConfig::load();
 
-    let (llm_client, default_model): (Arc<dyn LLMClient>, String) = match provider.as_str() {
-        "anthropic" => {
-            let key = cli
-                .api_key
-                .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
-                .unwrap_or_default();
-            let mut client = AnthropicClient::new(key);
-            if let Some(ref base) = cli.base_url {
-                client = client.with_base_url(base);
-            }
-            (Arc::new(client), "claude-3-7-sonnet-20250219".to_string())
+    // Override config with CLI flags if provided
+    if let Some(ref p) = cli.provider {
+        if let Some(prov_id) = config.get_provider(p).map(|pr| pr.id.clone()) {
+            config.set_active_provider(&prov_id)?;
+        } else {
+            // New provider specified on CLI
+            let base = cli.base_url.clone().unwrap_or_else(|| "https://api.openai.com".to_string());
+            let prov = ProviderConfig {
+                id: p.to_lowercase(),
+                name: p.clone(),
+                kind: ProviderKind::OpenAiCompatible,
+                base_url: base,
+                api_key: cli.api_key.clone(),
+                default_model: cli.model.clone(),
+            };
+            config.add_or_update_provider(prov);
+            config.set_active_provider(p)?;
         }
-        "openai" | "ollama" | "openrouter" => {
-            let key = cli
-                .api_key
-                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-                .unwrap_or_default();
-            let mut client = OpenAIClient::new(key);
-            if let Some(ref base) = cli.base_url {
-                client = client.with_base_url(base);
-            }
-            (Arc::new(client), "gpt-4o".to_string())
-        }
-        other => anyhow::bail!("Unsupported provider '{other}'. Supported: 'anthropic', 'openai'"),
+    }
+    if let Some(ref m) = cli.model {
+        config.set_active_model(m);
+    }
+
+    let parsed_session_id = if let Some(ref s) = cli.session {
+        let u = uuid::Uuid::parse_str(s)
+            .map_err(|e| anyhow::anyhow!("Invalid session UUID '{s}': {e}"))?;
+        Some(SessionId(u))
+    } else {
+        None
     };
 
-    let model = cli.model.unwrap_or(default_model);
-
-    let tools = Arc::new(create_default_registry(&cwd));
-    let context = Arc::new(ContextManager::new(&cwd));
-    let store = InMemorySessionStore::new();
-    let session = store.save(Session::new()).await;
-
-    let config = RunnerConfig {
-        model: model.clone(),
-        max_steps: cli.max_steps,
-        max_tokens: Some(4096),
-        temperature: None,
-    };
-
-    let runner = SessionRunner::new(
-        Arc::clone(&session),
-        llm_client,
-        tools,
-        context,
-        config,
-    );
-
-    // Determine initial prompt
+    // Determine direct prompt
     let prompt_to_run = match cli.command {
         Some(Commands::Run { prompt }) => Some(prompt),
         None => {
@@ -122,42 +113,112 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
+
+    // If single prompt is supplied, run headless turn and persist
     if let Some(prompt) = prompt_to_run {
-        println!("🚀 \x1b[1;36mMauKode\x1b[0m running with model \x1b[1;33m{}\x1b[0m", model);
+        println!("🚀 \x1b[1;36mMauKode\x1b[0m running with provider \x1b[1;32m{}\x1b[0m, model \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
         println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
+
+        let active_sess = if let Some(id) = parsed_session_id {
+            store.load_session(id).await?.unwrap_or_else(Session::new)
+        } else if cli.continue_session {
+            store.get_latest_session().await?.unwrap_or_else(Session::new)
+        } else {
+            Session::new()
+        };
+
+        let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
+        let tools = Arc::new(create_default_registry(&cwd));
+        let context = Arc::new(ContextManager::new(&cwd));
+        let llm_client = config.create_active_llm_client()?;
+
+        let runner_config = RunnerConfig {
+            model: config.active_model.clone(),
+            max_steps: cli.max_steps,
+            max_tokens: Some(4096),
+            temperature: None,
+        };
+
+        let runner = SessionRunner::new(
+            Arc::clone(&session_arc),
+            llm_client,
+            tools,
+            context,
+            runner_config,
+        );
+
         execute_turn(&runner, Some(prompt)).await?;
+
+        // Save session to SQLite
+        let guard = session_arc.read().await;
+        store.save_session(&guard, &config.active_provider, &config.active_model).await?;
+        println!("\n\x1b[2m[Session saved to SQLite: {}]\x1b[0m", guard.id);
         return Ok(());
     }
 
-    // Interactive REPL loop
-    println!("══════════════════════════════════════════════════════════════════");
-    println!("  🤖 \x1b[1;36mMauKode\x1b[0m - AI Coding Agent (Rust Edition)");
-    println!("  Model: \x1b[1;33m{}\x1b[0m | Workspace: \x1b[2m{}\x1b[0m", model, cwd.display());
-    println!("  Type 'exit' or 'quit' to end the session.");
-    println!("══════════════════════════════════════════════════════════════════\n");
+    // If CLI fallback mode is requested
+    if cli.cli {
+        println!("══════════════════════════════════════════════════════════════════");
+        println!("  🤖 \x1b[1;36mMauKode\x1b[0m - AI Coding Agent (CLI Mode)");
+        println!("  Provider: \x1b[1;32m{}\x1b[0m | Model: \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
+        println!("  Type 'exit' to quit.");
+        println!("══════════════════════════════════════════════════════════════════\n");
 
-    loop {
-        print!("\x1b[1;32mmaukode>\x1b[0m ");
-        io::stdout().flush()?;
+        let active_sess = if let Some(id) = parsed_session_id {
+            store.load_session(id).await?.unwrap_or_else(Session::new)
+        } else if cli.continue_session {
+            store.get_latest_session().await?.unwrap_or_else(Session::new)
+        } else {
+            Session::new()
+        };
 
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input)? == 0 {
-            break;
+        let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
+        let tools = Arc::new(create_default_registry(&cwd));
+        let context = Arc::new(ContextManager::new(&cwd));
+        let llm_client = config.create_active_llm_client()?;
+
+        let runner = SessionRunner::new(
+            Arc::clone(&session_arc),
+            llm_client,
+            tools,
+            context,
+            RunnerConfig {
+                model: config.active_model.clone(),
+                max_steps: cli.max_steps,
+                max_tokens: Some(4096),
+                temperature: None,
+            },
+        );
+
+        loop {
+            print!("\x1b[1;32mmaukode>\x1b[0m ");
+            io::stdout().flush()?;
+
+            let mut input = String::new();
+            if io::stdin().read_line(&mut input)? == 0 {
+                break;
+            }
+
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed == "exit" || trimmed == "quit" {
+                break;
+            }
+
+            println!();
+            execute_turn(&runner, Some(trimmed.to_string())).await?;
+            let guard = session_arc.read().await;
+            store.save_session(&guard, &config.active_provider, &config.active_model).await?;
+            println!("\n");
         }
-
-        let trimmed = input.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed == "exit" || trimmed == "quit" {
-            println!("Goodbye!");
-            break;
-        }
-
-        println!();
-        execute_turn(&runner, Some(trimmed.to_string())).await?;
-        println!("\n");
+        return Ok(());
     }
+
+    // Default: Launch the full Interactive TUI!
+    maukode_tui::run_tui(cwd, parsed_session_id, cli.continue_session).await?;
 
     Ok(())
 }

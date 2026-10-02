@@ -4,6 +4,7 @@ members = [
     "crates/maukode-llm",
     "crates/maukode-tools",
     "crates/maukode-core",
+    "crates/maukode-tui",
     "crates/maukode-cli",
 ]
 resolver = "2"
@@ -20,6 +21,7 @@ maukode-protocol = { path = "crates/maukode-protocol" }
 maukode-llm = { path = "crates/maukode-llm" }
 maukode-tools = { path = "crates/maukode-tools" }
 maukode-core = { path = "crates/maukode-core" }
+maukode-tui = { path = "crates/maukode-tui" }
 
 # Async runtime
 tokio = { version = "1.43", features = ["full"] }
@@ -39,8 +41,13 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 eventsource-stream = "0.2"
 tokio-stream = "0.1"
 
-# CLI & Formatting
+# CLI & Terminal UI
 clap = { version = "4.5", features = ["derive"] }
+ratatui = "0.30"
+crossterm = "0.29"
+
+# Database & Storage
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Logging / Tracing
 tracing = "0.1"
@@ -53,3 +60,4 @@ regex = "1.11"
 ignore = "0.4"
 walkdir = "2.5"
 similar = "2.6"
+dirs = "7.0"

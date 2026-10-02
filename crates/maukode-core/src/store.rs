@@ -1,7 +1,10 @@
+pub mod sqlite;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
 use maukode_protocol::SessionId;
+pub use sqlite::{SessionSummary, SqliteSessionStore};
 use tokio::sync::RwLock;
 use crate::session::Session;
 
