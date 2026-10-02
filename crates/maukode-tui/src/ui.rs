@@ -1,33 +1,34 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap,
+        Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
     },
     Frame,
 };
 use crate::app::{ActiveModal, App, ChatRole};
+use crate::theme::{self, *};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.area();
 
+    // 1-line Telemetry Header, Maximum Chat Viewport, 3-line Input & Hint Area
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(5),    // Messages viewport
-            Constraint::Length(3), // Input box
-            Constraint::Length(1), // Footer / Status bar
+            Constraint::Length(1), // Minimalist telemetry status bar
+            Constraint::Min(4),    // Chat viewport
+            Constraint::Length(3), // Input: hairline border, prompt line, contextual hints
         ])
         .split(size);
 
     draw_header(f, app, chunks[0]);
     draw_messages(f, app, chunks[1]);
     draw_input(f, app, chunks[2]);
-    draw_footer(f, app, chunks[3]);
 
-    // Draw active modal overlay if any
+    // Active modal overlays
     match &app.active_modal {
         ActiveModal::None => {}
         ActiveModal::ProviderSelector { selected_idx } => {
@@ -69,6 +70,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 }
 
+// -------------------------------------------------------------
+// Header: Sleek 1-line Telemetry
+// -------------------------------------------------------------
+
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let active_prov = &app.config.active_provider;
     let active_model = &app.config.active_model;
@@ -78,41 +83,53 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         Err(_) => "....".to_string(),
     };
 
-    let (mode_label, mode_color) = if let Some(ref client) = app.server_client {
+    let (mode_badge, mode_color) = if let Some(ref client) = app.server_client {
         if client.base_url().contains("127.0.0.1") || client.base_url().contains("localhost") {
-            ("daemon", Color::Green)
+            ("● daemon:4096", COLOR_MINT)
         } else {
-            ("remote", Color::LightCyan)
+            ("● remote:vps", COLOR_CYAN)
         }
     } else {
-        ("standalone", Color::DarkGray)
+        ("○ standalone", COLOR_MUTED)
     };
 
-    let title_spans = vec![
-        Span::styled(" 🤖 MauKode ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::raw(" │ Mode: "),
-        Span::styled(mode_label, Style::default().fg(mode_color).add_modifier(Modifier::BOLD)),
-        Span::raw(" │ Provider: "),
-        Span::styled(active_prov, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::raw(" │ Model: "),
-        Span::styled(active_model, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-        Span::raw(" │ Session: "),
-        Span::styled(session_id_str, Style::default().fg(Color::Blue)),
-        Span::raw(" │ CWD: "),
-        Span::styled(app.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("."), Style::default().fg(Color::DarkGray)),
+    let cwd_name = app
+        .cwd
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(".");
+
+    let mut left_spans = vec![
+        Span::styled(" maukode ", theme::brand_style()),
+        Span::styled(mode_badge, Style::default().fg(mode_color)),
+        Span::styled(" │ ", theme::border_style()),
+        Span::styled(format!("📁 {cwd_name}"), theme::text_style()),
+        Span::styled(" │ ", theme::border_style()),
+        Span::styled(format!("{active_prov}/{active_model}"), theme::muted_style()),
+        Span::styled(" │ ", theme::border_style()),
+        Span::styled(format!("#{session_id_str}"), Style::default().fg(COLOR_BLUE)),
     ];
 
-    let header_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::DarkGray));
+    if let Some(ref usage) = app.token_usage {
+        left_spans.push(Span::styled(" │ ", theme::border_style()));
+        left_spans.push(Span::styled(
+            format!("{} tok", usage.input_tokens + usage.output_tokens),
+            theme::dim_style(),
+        ));
+    }
 
-    let header = Paragraph::new(Line::from(title_spans))
-        .block(header_block)
-        .alignment(Alignment::Left);
+    if let Some((ref status, _)) = app.status_message {
+        left_spans.push(Span::styled(" │ ", theme::border_style()));
+        left_spans.push(Span::styled(status, Style::default().fg(COLOR_AMBER)));
+    }
 
-    f.render_widget(header, area);
+    let header_line = Paragraph::new(Line::from(left_spans)).alignment(Alignment::Left);
+    f.render_widget(header_line, area);
 }
+
+// -------------------------------------------------------------
+// Messages Viewport: Clean Typography, Cards, Diff Highlighting
+// -------------------------------------------------------------
 
 fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let mut lines = Vec::new();
@@ -121,82 +138,137 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         match &item.role {
             ChatRole::User => {
                 lines.push(Line::from(vec![
-                    Span::styled("❯ You: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                    Span::styled(&item.content, Style::default().fg(Color::White)),
-                ]));
-                lines.push(Line::from(""));
-            }
-            ChatRole::Assistant => {
-                lines.push(Line::from(vec![
-                    Span::styled("● MauKode: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled("❯ You", theme::brand_style()),
                 ]));
                 for l in item.content.lines() {
                     lines.push(Line::from(vec![
                         Span::raw("  "),
-                        Span::styled(l, Style::default().fg(Color::White)),
+                        Span::styled(l, theme::text_style()),
                     ]));
+                }
+                lines.push(Line::from(""));
+            }
+            ChatRole::Assistant => {
+                lines.push(Line::from(vec![
+                    Span::styled("● MauKode", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
+                ]));
+
+                let mut in_code_block = false;
+                for l in item.content.lines() {
+                    if l.trim_start().starts_with("```") {
+                        in_code_block = !in_code_block;
+                        lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(l, theme::dim_style()),
+                        ]));
+                        continue;
+                    }
+
+                    if in_code_block {
+                        let line_style = if l.starts_with('+') {
+                            theme::diff_add_style()
+                        } else if l.starts_with('-') {
+                            theme::diff_del_style()
+                        } else if l.starts_with("@@") {
+                            theme::diff_hunk_style()
+                        } else {
+                            Style::default().fg(COLOR_FG)
+                        };
+                        lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(l, line_style),
+                        ]));
+                    } else if l.starts_with("# ") || l.starts_with("## ") || l.starts_with("### ") {
+                        lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(l, Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD)),
+                        ]));
+                    } else if l.starts_with("- ") || l.starts_with("* ") {
+                        lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled("• ", Style::default().fg(COLOR_CYAN)),
+                            Span::styled(&l[2..], theme::text_style()),
+                        ]));
+                    } else {
+                        lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(l, theme::text_style()),
+                        ]));
+                    }
                 }
                 lines.push(Line::from(""));
             }
             ChatRole::Reasoning => {
                 lines.push(Line::from(vec![
-                    Span::styled("💭 Thinking: ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
+                    Span::styled("💭 Thinking", theme::thinking_style()),
                 ]));
                 for l in item.content.lines() {
                     lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(l, Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
+                        Span::styled("  │ ", theme::border_style()),
+                        Span::styled(l, Style::default().fg(COLOR_MUTED).add_modifier(Modifier::ITALIC)),
                     ]));
                 }
                 lines.push(Line::from(""));
             }
             ChatRole::ToolCall { name, id, args } => {
                 lines.push(Line::from(vec![
-                    Span::styled("⚡ Tool Call: ", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD)),
-                    Span::styled(name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" ({id})"), Style::default().fg(Color::DarkGray)),
+                    Span::styled("╭─ ⚡ ", theme::tool_style()),
+                    Span::styled(name, Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" ({id})"), theme::dim_style()),
                 ]));
                 if !args.is_empty() {
                     lines.push(Line::from(vec![
-                        Span::styled(format!("  Args: {args}"), Style::default().fg(Color::DarkGray)),
+                        Span::styled("│  ", theme::tool_style()),
+                        Span::styled(format!("Args: {args}"), theme::muted_style()),
                     ]));
                 }
-                lines.push(Line::from(""));
             }
             ChatRole::ToolResult { name, is_error, .. } => {
-                let badge = if *is_error {
-                    Span::styled("✗ Tool Error: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                let (prefix, badge_style) = if *is_error {
+                    ("╰─ ✗ Error: ", theme::error_style())
                 } else {
-                    Span::styled("✓ Tool Result: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                    ("╰─ ✓ Result: ", theme::success_style())
                 };
+
                 lines.push(Line::from(vec![
-                    badge,
-                    Span::styled(name, Style::default().fg(Color::White)),
+                    Span::styled(prefix, badge_style),
+                    Span::styled(name, theme::text_style()),
                 ]));
+
                 let (content_preview, is_truncated) = if item.content.len() > 600 {
                     let end = item.content.floor_char_boundary(600);
                     (&item.content[..end], true)
                 } else {
                     (item.content.as_str(), false)
                 };
+
                 for l in content_preview.lines() {
+                    let style = if l.starts_with('+') {
+                        theme::diff_add_style()
+                    } else if l.starts_with('-') {
+                        theme::diff_del_style()
+                    } else if l.starts_with("@@") {
+                        theme::diff_hunk_style()
+                    } else {
+                        theme::dim_style()
+                    };
                     lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(l, Style::default().fg(Color::DarkGray)),
+                        Span::raw("   "),
+                        Span::styled(l, style),
                     ]));
                 }
                 if is_truncated {
                     lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled("... (output preview truncated)", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
+                        Span::raw("   "),
+                        Span::styled("... (preview truncated)", theme::dim_style()),
                     ]));
                 }
                 lines.push(Line::from(""));
             }
             ChatRole::System => {
                 lines.push(Line::from(vec![
-                    Span::styled("ℹ ", Style::default().fg(Color::Yellow)),
-                    Span::styled(&item.content, Style::default().fg(Color::DarkGray)),
+                    Span::styled("ℹ ", Style::default().fg(COLOR_AMBER)),
+                    Span::styled(&item.content, theme::muted_style()),
                 ]));
                 lines.push(Line::from(""));
             }
@@ -221,24 +293,24 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let title = if app.auto_scroll {
-        " Conversation (Live) ".to_string()
+        " Live Session ".to_string()
     } else {
         format!(
-            " Conversation [Scrolled {}/{} - Press End/PageDown to resume] ",
+            " Scrolled [{}/{}] ── Press End to resume ",
             app.scroll, app.max_scroll
         )
     };
 
     let title_style = if app.auto_scroll {
-        Style::default().fg(Color::DarkGray)
+        theme::dim_style()
     } else {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)
     };
 
     let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .borders(Borders::TOP)
+        .border_type(BorderType::Plain)
+        .border_style(theme::border_style())
         .title(Span::styled(title, title_style));
 
     let paragraph = Paragraph::new(lines)
@@ -248,15 +320,15 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
 
     f.render_widget(paragraph, area);
 
-    // Render scrollbar on the right border
+    // Render subtle scrollbar
     if app.max_scroll > 0 {
-        use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
         let mut scrollbar_state = ScrollbarState::new(app.max_scroll).position(app.scroll);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(Some("▲"))
-            .end_symbol(Some("▼"))
+            .begin_symbol(None)
+            .end_symbol(None)
             .track_symbol(Some("│"))
-            .thumb_symbol("█");
+            .thumb_symbol("┃")
+            .style(theme::dim_style());
 
         f.render_stateful_widget(
             scrollbar,
@@ -266,80 +338,89 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+// -------------------------------------------------------------
+// Input & Contextual Hint Bar
+// -------------------------------------------------------------
+
 fn draw_input(f: &mut Frame, app: &App, area: Rect) {
+    let input_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Top divider hairline
+            Constraint::Length(1), // Prompt line
+            Constraint::Length(1), // Contextual hotkey bar
+        ])
+        .split(area);
+
     let is_busy = app.is_running;
-    let border_color = if is_busy {
-        Color::Yellow
-    } else {
-        Color::Green
-    };
 
+    // Row 0: Top divider with status title
     let title = if is_busy {
-        " MauKode is thinking... (press Esc to cancel) "
+        Span::styled(" ⠋ MauKode is thinking... (press Esc to cancel) ", Style::default().fg(COLOR_AMBER))
     } else {
-        " Prompt (type /provider, /model, /new, /help) "
+        Span::styled(" Prompt ", theme::dim_style())
     };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border_color))
-        .title(title);
+    let divider = Paragraph::new(Line::from(vec![
+        Span::styled("─", theme::border_style()),
+        title,
+        Span::styled("─".repeat(area.width.saturating_sub(40) as usize), theme::border_style()),
+    ]));
+    f.render_widget(divider, input_layout[0]);
 
-    let input_line = Line::from(vec![
-        Span::styled("❯ ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        Span::raw(&app.input),
+    // Row 1: Prompt line
+    let prompt_symbol = if is_busy {
+        Span::styled("⏳ ", Style::default().fg(COLOR_AMBER))
+    } else {
+        Span::styled("❯ ", theme::brand_style())
+    };
+
+    let prompt_line = Line::from(vec![
+        prompt_symbol,
+        Span::styled(&app.input, theme::text_style()),
     ]);
+    let paragraph = Paragraph::new(prompt_line);
+    f.render_widget(paragraph, input_layout[1]);
 
-    let paragraph = Paragraph::new(input_line).block(block);
-    f.render_widget(paragraph, area);
-
-    // Render blinking cursor if active
+    // Cursor positioning
     if !is_busy {
         f.set_cursor_position((
-            area.x + 3 + app.cursor_pos as u16,
-            area.y + 1,
-        ));
-    }
-}
-
-fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let mut spans = vec![
-        Span::styled(" [Enter] ", Style::default().fg(Color::Cyan)),
-        Span::raw("Send  "),
-        Span::styled("[/provider] ", Style::default().fg(Color::Yellow)),
-        Span::raw("Switch/Add  "),
-        Span::styled("[/model] ", Style::default().fg(Color::Magenta)),
-        Span::raw("Change Model  "),
-        Span::styled("[/new] ", Style::default().fg(Color::Green)),
-        Span::raw("New Session  "),
-        Span::styled("[/help] ", Style::default().fg(Color::White)),
-        Span::raw("Help  "),
-        Span::styled("[Scroll: ", Style::default().fg(Color::Blue)),
-        Span::raw("Wheel/PageUp/Dn]  "),
-        Span::styled("[Ctrl+C] ", Style::default().fg(Color::Red)),
-        Span::raw("Quit"),
-    ];
-
-    if let Some(ref usage) = app.token_usage {
-        spans.push(Span::raw(" │ "));
-        spans.push(Span::styled(
-            format!("In: {} | Out: {}", usage.input_tokens, usage.output_tokens),
-            Style::default().fg(Color::DarkGray),
+            input_layout[1].x + 2 + app.cursor_pos as u16,
+            input_layout[1].y,
         ));
     }
 
-    if let Some((ref status, _)) = app.status_message {
-        spans.push(Span::raw(" │ "));
-        spans.push(Span::styled(status, Style::default().fg(Color::Yellow)));
-    }
+    // Row 2: Contextual hotkey bar
+    let hints = if is_busy {
+        vec![
+            Span::styled("Esc ", Style::default().fg(COLOR_AMBER)),
+            Span::styled("Cancel  ", theme::dim_style()),
+            Span::styled("^C ", Style::default().fg(COLOR_RED)),
+            Span::styled("Quit", theme::dim_style()),
+        ]
+    } else {
+        vec![
+            Span::styled("Tab ", theme::brand_style()),
+            Span::styled("Autocomplete  ", theme::dim_style()),
+            Span::styled("/model ", Style::default().fg(COLOR_TOOL)),
+            Span::styled("Model  ", theme::dim_style()),
+            Span::styled("/provider ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Provider  ", theme::dim_style()),
+            Span::styled("/sessions ", Style::default().fg(COLOR_BLUE)),
+            Span::styled("History  ", theme::dim_style()),
+            Span::styled("/help ", theme::muted_style()),
+            Span::styled("Commands  ", theme::dim_style()),
+            Span::styled("^C ", Style::default().fg(COLOR_RED)),
+            Span::styled("Quit", theme::dim_style()),
+        ]
+    };
 
-    let footer = Paragraph::new(Line::from(spans)).alignment(Alignment::Left);
-    f.render_widget(footer, area);
+    let hint_bar = Paragraph::new(Line::from(hints)).alignment(Alignment::Left);
+    f.render_widget(hint_bar, input_layout[2]);
 }
 
 // -------------------------------------------------------------
-// Modals
+// Modals: Floating Telescope Style
 // -------------------------------------------------------------
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -362,117 +443,6 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn draw_provider_modal(f: &mut Frame, app: &App, selected_idx: usize) {
-    let area = centered_rect(65, 60, f.area());
-    f.render_widget(Clear, area);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Yellow))
-        .title(" Select AI Provider (Press 'a' to add OpenAI-compatible provider) ");
-
-    let items: Vec<ListItem> = app
-        .config
-        .providers
-        .iter()
-        .enumerate()
-        .map(|(idx, p)| {
-            let is_active = p.id == app.config.active_provider;
-            let is_selected = idx == selected_idx;
-
-            let prefix = if is_selected { "▶ " } else { "  " };
-            let active_badge = if is_active {
-                Span::styled(" [ACTIVE]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-            } else {
-                Span::raw("")
-            };
-
-            let style = if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            ListItem::new(Line::from(vec![
-                Span::styled(prefix, style),
-                Span::styled(&p.name, style),
-                Span::styled(format!(" ({})", p.base_url), Style::default().fg(Color::DarkGray)),
-                active_badge,
-            ]))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-
-    f.render_widget(list, area);
-}
-
-fn draw_add_provider_modal(
-    f: &mut Frame,
-    name: &str,
-    base_url: &str,
-    api_key: &str,
-    default_model: &str,
-    active_field: usize,
-) {
-    let area = centered_rect(65, 55, f.area());
-    f.render_widget(Clear, area);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Cyan))
-        .title(" Add OpenAI-Compatible Provider (Tab to switch fields, Enter to save) ");
-
-    let inner = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Name
-            Constraint::Length(3), // Base URL
-            Constraint::Length(3), // API Key
-            Constraint::Length(3), // Default Model
-            Constraint::Length(2), // Hint
-        ])
-        .margin(1)
-        .split(area);
-
-    f.render_widget(block, area);
-
-    let fields = [
-        ("Provider Name (e.g. DeepSeek, Local vLLM, Ollama):", name),
-        ("Base URL (e.g. http://localhost:11434 or https://api.deepseek.com):", base_url),
-        ("API Key (optional for local models):", api_key),
-        ("Default Model (e.g. deepseek-chat, qwen2.5-coder):", default_model),
-    ];
-
-    for (idx, (label, val)) in fields.iter().enumerate() {
-        let is_active = idx == active_field;
-        let border_color = if is_active { Color::Green } else { Color::DarkGray };
-
-        let field_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color))
-            .title(*label);
-
-        let p = Paragraph::new(*val).block(field_block);
-        f.render_widget(p, inner[idx]);
-    }
-
-    let hint = Paragraph::new(Line::from(vec![
-        Span::styled("[Tab] ", Style::default().fg(Color::Yellow)),
-        Span::raw("Next Field  "),
-        Span::styled("[Enter] ", Style::default().fg(Color::Green)),
-        Span::raw("Save & Activate  "),
-        Span::styled("[Esc] ", Style::default().fg(Color::Red)),
-        Span::raw("Cancel"),
-    ])).alignment(Alignment::Center);
-
-    f.render_widget(hint, inner[4]);
-}
-
 fn draw_model_modal(
     f: &mut Frame,
     app: &App,
@@ -484,18 +454,19 @@ fn draw_model_modal(
     let area = centered_rect(65, 70, f.area());
     f.render_widget(Clear, area);
 
-    let title = format!(" Select Model for Provider '{}' ", app.config.active_provider);
+    let title = format!(" Select Model ─ Provider: '{}' ", app.config.active_provider);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Magenta))
-        .title(title);
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_MINT))
+        .title(Span::styled(title, theme::brand_style()));
 
     let inner = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Filter box
-            Constraint::Min(5),    // Model list
+            Constraint::Length(3), // Filter search box
+            Constraint::Min(4),    // Model list
+            Constraint::Length(1), // Bottom hints
         ])
         .margin(1)
         .split(area);
@@ -505,13 +476,19 @@ fn draw_model_modal(
     // Filter box
     let filter_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
-        .title(" Type to filter or enter custom model: ");
-    let filter_p = Paragraph::new(filter).block(filter_block);
+        .border_type(BorderType::Rounded)
+        .border_style(theme::border_style())
+        .title(Span::styled(" Search / Filter: ", theme::muted_style()));
+    let filter_line = Line::from(vec![
+        Span::styled("> ", theme::brand_style()),
+        Span::styled(filter, theme::text_style()),
+    ]);
+    let filter_p = Paragraph::new(filter_line).block(filter_block);
     f.render_widget(filter_p, inner[0]);
 
     if is_loading {
         let loading_p = Paragraph::new("\n  ⏳ Fetching models from provider API...")
+            .style(theme::thinking_style())
             .alignment(Alignment::Center);
         f.render_widget(loading_p, inner[1]);
         return;
@@ -529,17 +506,16 @@ fn draw_model_modal(
             let is_active = *m == &app.config.active_model;
             let is_selected = idx == selected_idx;
 
-            let prefix = if is_selected { "▶ " } else { "  " };
-            let active_badge = if is_active {
-                Span::styled(" [ACTIVE]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            let (prefix, style) = if is_selected {
+                ("❯ ", theme::selected_style())
             } else {
-                Span::raw("")
+                ("  ", theme::text_style())
             };
 
-            let style = if is_selected {
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            let active_badge = if is_active {
+                Span::styled(" [ACTIVE]", theme::success_style())
             } else {
-                Style::default().fg(Color::White)
+                Span::raw("")
             };
 
             ListItem::new(Line::from(vec![
@@ -551,10 +527,90 @@ fn draw_model_modal(
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::NONE))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        .block(Block::default().borders(Borders::NONE));
 
     f.render_widget(list, inner[1]);
+
+    // Bottom modal hint
+    let count_text = format!("{}/{} models", filtered_models.len(), models.len());
+    let modal_footer = Line::from(vec![
+        Span::styled(count_text, theme::dim_style()),
+        Span::styled(" │ ", theme::border_style()),
+        Span::styled("↑↓ ", theme::brand_style()),
+        Span::styled("navigate  ", theme::dim_style()),
+        Span::styled("Enter ", theme::brand_style()),
+        Span::styled("select  ", theme::dim_style()),
+        Span::styled("Esc ", Style::default().fg(COLOR_RED)),
+        Span::styled("cancel", theme::dim_style()),
+    ]);
+    f.render_widget(Paragraph::new(modal_footer).alignment(Alignment::Center), inner[2]);
+}
+
+fn draw_provider_modal(f: &mut Frame, app: &App, selected_idx: usize) {
+    let area = centered_rect(65, 60, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_TOOL))
+        .title(Span::styled(" Select AI Provider ", theme::tool_style()));
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(4),
+            Constraint::Length(1),
+        ])
+        .margin(1)
+        .split(area);
+
+    f.render_widget(block, area);
+
+    let items: Vec<ListItem> = app
+        .config
+        .providers
+        .iter()
+        .enumerate()
+        .map(|(idx, p)| {
+            let is_active = p.id == app.config.active_provider;
+            let is_selected = idx == selected_idx;
+
+            let (prefix, style) = if is_selected {
+                ("❯ ", theme::selected_style())
+            } else {
+                ("  ", theme::text_style())
+            };
+
+            let active_badge = if is_active {
+                Span::styled(" [ACTIVE]", theme::success_style())
+            } else {
+                Span::raw("")
+            };
+
+            ListItem::new(Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(&p.name, style),
+                Span::styled(format!(" ({})", p.base_url), theme::dim_style()),
+                active_badge,
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items).block(Block::default().borders(Borders::NONE));
+    f.render_widget(list, inner[0]);
+
+    let modal_footer = Line::from(vec![
+        Span::styled("a ", theme::brand_style()),
+        Span::styled("add new  ", theme::dim_style()),
+        Span::styled("↑↓ ", theme::brand_style()),
+        Span::styled("navigate  ", theme::dim_style()),
+        Span::styled("Enter ", theme::brand_style()),
+        Span::styled("select  ", theme::dim_style()),
+        Span::styled("Esc ", Style::default().fg(COLOR_RED)),
+        Span::styled("cancel", theme::dim_style()),
+    ]);
+    f.render_widget(Paragraph::new(modal_footer).alignment(Alignment::Center), inner[1]);
 }
 
 fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary], selected_idx: usize) {
@@ -563,23 +619,33 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Blue))
-        .title(" Resume Session History (Enter to load, Esc to close) ");
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_BLUE))
+        .title(Span::styled(" Resume Session History ", Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)));
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(4),
+            Constraint::Length(1),
+        ])
+        .margin(1)
+        .split(area);
+
+    f.render_widget(block, area);
 
     let items: Vec<ListItem> = sessions
         .iter()
         .enumerate()
         .map(|(idx, s)| {
             let is_selected = idx == selected_idx;
-            let prefix = if is_selected { "▶ " } else { "  " };
-            let style = if is_selected {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            let (prefix, style) = if is_selected {
+                ("❯ ", theme::selected_style())
             } else {
-                Style::default().fg(Color::White)
+                ("  ", theme::text_style())
             };
 
-            let time_str = s.updated_at.format("%Y-%m-%d %H:%M").to_string();
+            let time_str = s.updated_at.format("%m-%d %H:%M").to_string();
 
             let dir_label = if s.directory.is_empty() {
                 String::new()
@@ -592,15 +658,91 @@ fn draw_sessions_modal(f: &mut Frame, sessions: &[maukode_core::SessionSummary],
             ListItem::new(Line::from(vec![
                 Span::styled(prefix, style),
                 Span::styled(&s.title, style),
-                Span::styled(dir_label, Style::default().fg(Color::Yellow)),
-                Span::styled(format!(" [{}]", s.model), Style::default().fg(Color::DarkGray)),
-                Span::styled(format!(" ({time_str}, {} msgs)", s.message_count), Style::default().fg(Color::Blue)),
+                Span::styled(dir_label, Style::default().fg(COLOR_CYAN)),
+                Span::styled(format!(" [{}]", s.model), theme::dim_style()),
+                Span::styled(format!(" ({time_str}, {} msgs)", s.message_count), theme::dim_style()),
             ]))
         })
         .collect();
 
-    let list = List::new(items).block(block);
-    f.render_widget(list, area);
+    let list = List::new(items).block(Block::default().borders(Borders::NONE));
+    f.render_widget(list, inner[0]);
+
+    let modal_footer = Line::from(vec![
+        Span::styled(format!("{} sessions", sessions.len()), theme::dim_style()),
+        Span::styled(" │ ", theme::border_style()),
+        Span::styled("↑↓ ", theme::brand_style()),
+        Span::styled("navigate  ", theme::dim_style()),
+        Span::styled("Enter ", theme::brand_style()),
+        Span::styled("resume  ", theme::dim_style()),
+        Span::styled("Esc ", Style::default().fg(COLOR_RED)),
+        Span::styled("cancel", theme::dim_style()),
+    ]);
+    f.render_widget(Paragraph::new(modal_footer).alignment(Alignment::Center), inner[1]);
+}
+
+fn draw_add_provider_modal(
+    f: &mut Frame,
+    name: &str,
+    base_url: &str,
+    api_key: &str,
+    default_model: &str,
+    active_field: usize,
+) {
+    let area = centered_rect(65, 55, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_CYAN))
+        .title(Span::styled(" Add Custom AI Provider ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)));
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Name
+            Constraint::Length(3), // Base URL
+            Constraint::Length(3), // API Key
+            Constraint::Length(3), // Default Model
+            Constraint::Length(1), // Hint
+        ])
+        .margin(1)
+        .split(area);
+
+    f.render_widget(block, area);
+
+    let fields = [
+        ("Provider Name (e.g. DeepSeek, Local Ollama, vLLM):", name),
+        ("Base URL (e.g. http://localhost:11434 or https://api.deepseek.com):", base_url),
+        ("API Key (optional for local models):", api_key),
+        ("Default Model (e.g. deepseek-chat, qwen2.5-coder):", default_model),
+    ];
+
+    for (idx, (label, val)) in fields.iter().enumerate() {
+        let is_active = idx == active_field;
+        let border_color = if is_active { COLOR_MINT } else { COLOR_BORDER };
+
+        let field_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color))
+            .title(Span::styled(*label, if is_active { theme::brand_style() } else { theme::dim_style() }));
+
+        let p = Paragraph::new(*val).block(field_block);
+        f.render_widget(p, inner[idx]);
+    }
+
+    let hint = Paragraph::new(Line::from(vec![
+        Span::styled("Tab ", theme::brand_style()),
+        Span::styled("next  ", theme::dim_style()),
+        Span::styled("Enter ", theme::brand_style()),
+        Span::styled("save & activate  ", theme::dim_style()),
+        Span::styled("Esc ", Style::default().fg(COLOR_RED)),
+        Span::styled("cancel", theme::dim_style()),
+    ])).alignment(Alignment::Center);
+
+    f.render_widget(hint, inner[4]);
 }
 
 fn draw_help_modal(f: &mut Frame) {
@@ -609,50 +751,48 @@ fn draw_help_modal(f: &mut Frame) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Green))
-        .title(" MauKode Help & Slash Commands ");
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_MINT))
+        .title(Span::styled(" MauKode Quick Reference ", theme::brand_style()));
 
     let help_text = vec![
         Line::from(vec![
-            Span::styled("/provider       ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Open provider menu to switch or add OpenAI-compatible providers"),
+            Span::styled("/model          ", Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD)),
+            Span::styled("Search and switch active LLM model", theme::text_style()),
         ]),
         Line::from(vec![
-            Span::styled("/model          ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-            Span::raw("Open model menu to fetch & choose model from current provider"),
+            Span::styled("/provider       ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled("Switch or register an AI provider", theme::text_style()),
         ]),
         Line::from(vec![
-            Span::styled("/cd <path>      ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw("Switch project/workspace directory on the fly"),
+            Span::styled("/sessions       ", Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled("Browse and resume saved sessions from SQLite", theme::text_style()),
         ]),
         Line::from(vec![
-            Span::styled("/dir            ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw("Print the active project working directory"),
+            Span::styled("/new            ", theme::brand_style()),
+            Span::styled("Start a fresh session in the current directory", theme::text_style()),
         ]),
         Line::from(vec![
-            Span::styled("/new            ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw("Start a new clean session in current directory"),
+            Span::styled("/cd <path>      ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Switch working directory on the fly", theme::text_style()),
         ]),
         Line::from(vec![
-            Span::styled("/sessions       ", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
-            Span::raw("View and resume previous saved sessions from SQLite"),
+            Span::styled("/clear          ", theme::dim_style()),
+            Span::styled("Clear the current conversation viewport", theme::text_style()),
         ]),
         Line::from(vec![
-            Span::styled("/clear          ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
-            Span::raw("Clear the current conversation view"),
-        ]),
-        Line::from(vec![
-            Span::styled("/exit, /quit    ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw("Exit MauKode"),
+            Span::styled("/exit, /quit    ", Style::default().fg(COLOR_RED)),
+            Span::styled("Exit MauKode", theme::text_style()),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Keys: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw("PageUp/PageDown/Arrows to scroll, Esc to dismiss dialogs, Ctrl+C to quit."),
+            Span::styled("Navigation: ", theme::brand_style()),
+            Span::styled("PageUp / PageDn / Wheel to scroll history. Press End to resume live stream.", theme::muted_style()),
         ]),
     ];
 
-    let p = Paragraph::new(help_text).block(block);
+    let p = Paragraph::new(help_text)
+        .block(block)
+        .alignment(Alignment::Left);
     f.render_widget(p, area);
 }
