@@ -24,7 +24,11 @@ pub async fn run_tui(
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -35,7 +39,11 @@ pub async fn run_tui(
 
     // Restore terminal safely
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     if let Err(e) = res {
@@ -59,6 +67,17 @@ async fn run_loop<B: ratatui::backend::Backend>(
             match event {
                 AppEvent::Input(key) => {
                     handle_key(app, key);
+                }
+                AppEvent::Mouse(mouse) => {
+                    match mouse.kind {
+                        crossterm::event::MouseEventKind::ScrollUp => {
+                            app.scroll_up(3);
+                        }
+                        crossterm::event::MouseEventKind::ScrollDown => {
+                            app.scroll_down(3);
+                        }
+                        _ => {}
+                    }
                 }
                 AppEvent::Tick => {}
                 AppEvent::LLM(llm_event) => {
@@ -338,26 +357,66 @@ fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
             }
         }
         KeyCode::Home => {
-            app.cursor_pos = 0;
+            if app.input.is_empty() {
+                app.scroll_to_top();
+            } else {
+                app.cursor_pos = 0;
+            }
         }
         KeyCode::End => {
-            app.cursor_pos = app.input.len();
+            if app.input.is_empty() {
+                app.scroll_to_bottom();
+            } else {
+                app.cursor_pos = app.input.len();
+            }
+        }
+        KeyCode::Up => {
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT)
+                || key.modifiers.contains(KeyModifiers::SHIFT)
+                || app.input.is_empty()
+            {
+                app.scroll_up(2);
+            }
+        }
+        KeyCode::Down => {
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT)
+                || key.modifiers.contains(KeyModifiers::SHIFT)
+                || app.input.is_empty()
+            {
+                app.scroll_down(2);
+            }
+        }
+        KeyCode::PageUp => {
+            app.scroll_up(10);
+        }
+        KeyCode::PageDown => {
+            app.scroll_down(10);
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.scroll_up(10);
+        }
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.scroll_down(10);
+        }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.scroll_up(2);
+        }
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.scroll_down(2);
         }
         KeyCode::Char(c) => {
             app.input.insert(app.cursor_pos, c);
             app.cursor_pos += 1;
         }
-        KeyCode::PageUp => {
-            app.auto_scroll = false;
-            app.scroll = app.scroll.saturating_sub(10);
-        }
-        KeyCode::PageDown => {
-            app.scroll = app.scroll.saturating_add(10);
-        }
         KeyCode::Esc => {
             if !app.input.is_empty() {
                 app.input.clear();
                 app.cursor_pos = 0;
+            } else {
+                // If input is already empty, reset scroll to bottom
+                app.scroll_to_bottom();
             }
         }
         _ => {}

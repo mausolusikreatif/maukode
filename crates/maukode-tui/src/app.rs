@@ -64,6 +64,7 @@ pub struct App {
     pub input: String,
     pub cursor_pos: usize,
     pub scroll: usize,
+    pub max_scroll: usize,
     pub auto_scroll: bool,
     pub active_modal: ActiveModal,
     pub token_usage: Option<TokenUsage>,
@@ -183,6 +184,7 @@ impl App {
             input: String::new(),
             cursor_pos: 0,
             scroll: 0,
+            max_scroll: 0,
             auto_scroll: true,
             active_modal: ActiveModal::None,
             token_usage: None,
@@ -190,6 +192,28 @@ impl App {
             should_quit: false,
             event_tx,
         })
+    }
+
+    pub fn scroll_up(&mut self, amount: usize) {
+        self.auto_scroll = false;
+        self.scroll = self.scroll.saturating_sub(amount);
+    }
+
+    pub fn scroll_down(&mut self, amount: usize) {
+        self.scroll = (self.scroll + amount).min(self.max_scroll);
+        if self.scroll >= self.max_scroll {
+            self.auto_scroll = true;
+        }
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.auto_scroll = false;
+        self.scroll = 0;
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.auto_scroll = true;
+        self.scroll = self.max_scroll;
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>) {

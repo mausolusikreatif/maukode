@@ -179,22 +179,43 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    let total_lines = lines.len();
+    let inner_width = area.width.saturating_sub(4).max(1) as usize;
+    let mut total_visual_lines = 0;
+    for line in &lines {
+        let line_len: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+        let wrapped = (line_len + inner_width - 1) / inner_width;
+        total_visual_lines += wrapped.max(1);
+    }
+
     let viewport_height = area.height.saturating_sub(2) as usize;
+    app.max_scroll = total_visual_lines.saturating_sub(viewport_height);
 
     if app.auto_scroll {
-        if total_lines > viewport_height {
-            app.scroll = total_lines - viewport_height;
-        } else {
-            app.scroll = 0;
-        }
+        app.scroll = app.max_scroll;
+    } else {
+        app.scroll = app.scroll.min(app.max_scroll);
     }
+
+    let title = if app.auto_scroll {
+        " Conversation (Live) ".to_string()
+    } else {
+        format!(
+            " Conversation [Scrolled {}/{} - Press End/PageDown to resume] ",
+            app.scroll, app.max_scroll
+        )
+    };
+
+    let title_style = if app.auto_scroll {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray))
-        .title(" Conversation ");
+        .title(Span::styled(title, title_style));
 
     let paragraph = Paragraph::new(lines)
         .block(block)
@@ -202,6 +223,23 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         .scroll((app.scroll as u16, 0));
 
     f.render_widget(paragraph, area);
+
+    // Render scrollbar on the right border
+    if app.max_scroll > 0 {
+        use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+        let mut scrollbar_state = ScrollbarState::new(app.max_scroll).position(app.scroll);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"))
+            .track_symbol(Some("│"))
+            .thumb_symbol("█");
+
+        f.render_stateful_widget(
+            scrollbar,
+            area.inner(ratatui::layout::Margin { vertical: 1, horizontal: 0 }),
+            &mut scrollbar_state,
+        );
+    }
 }
 
 fn draw_input(f: &mut Frame, app: &App, area: Rect) {
@@ -253,6 +291,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         Span::raw("New Session  "),
         Span::styled("[/help] ", Style::default().fg(Color::White)),
         Span::raw("Help  "),
+        Span::styled("[Scroll: ", Style::default().fg(Color::Blue)),
+        Span::raw("Wheel/PageUp/Dn]  "),
         Span::styled("[Ctrl+C] ", Style::default().fg(Color::Red)),
         Span::raw("Quit"),
     ];

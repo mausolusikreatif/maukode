@@ -1,10 +1,11 @@
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
 use maukode_protocol::LLMEvent;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 pub enum AppEvent {
     Input(KeyEvent),
+    Mouse(MouseEvent),
     Tick,
     LLM(LLMEvent),
     TurnFinished(Result<(), String>),
@@ -28,8 +29,14 @@ impl EventHandler {
         tokio::spawn(async move {
             loop {
                 if event::poll(tick_rate).unwrap_or(false) {
-                    if let Ok(CrosstermEvent::Key(key)) = event::read() {
-                        let _ = event_tx.send(AppEvent::Input(key));
+                    match event::read() {
+                        Ok(CrosstermEvent::Key(key)) => {
+                            let _ = event_tx.send(AppEvent::Input(key));
+                        }
+                        Ok(CrosstermEvent::Mouse(mouse)) => {
+                            let _ = event_tx.send(AppEvent::Mouse(mouse));
+                        }
+                        _ => {}
                     }
                 }
                 let _ = event_tx.send(AppEvent::Tick);
