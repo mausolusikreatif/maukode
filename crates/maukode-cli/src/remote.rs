@@ -71,13 +71,24 @@ pub async fn run_remote_turn(
                     }
                 }
                 LLMEvent::Usage(usage) => {
-                    println!("\n\x1b[2m[Tokens: in={}, out={}]\x1b[0m", usage.input_tokens, usage.output_tokens);
+                    println!(
+                        "\n\x1b[2m[Tokens: in={}, out={}]\x1b[0m",
+                        usage.input_tokens, usage.output_tokens
+                    );
                 }
-                LLMEvent::ContextWarning { current_tokens, max_tokens, percent, message } => {
+                LLMEvent::ContextWarning {
+                    current_tokens,
+                    max_tokens,
+                    percent,
+                    message,
+                } => {
                     println!("\n\x1b[1;33m⚠️  [CONTEXT WARNING]\x1b[0m {message} ({current_tokens}/{max_tokens} tokens, {percent}%)");
                 }
                 LLMEvent::PermissionRequest(req) => {
-                    let cmd = req.command.as_deref().unwrap_or(req.path.as_deref().unwrap_or(&req.description));
+                    let cmd = req
+                        .command
+                        .as_deref()
+                        .unwrap_or(req.path.as_deref().unwrap_or(&req.description));
                     println!("\n\x1b[1;33m⚠️  [CONFIRMATION REQUIRED]\x1b[0m");
                     println!("  Tool: \x1b[1m{}\x1b[0m", req.tool_name);
                     println!("  Command: \x1b[1;37m{}\x1b[0m", cmd);
@@ -96,7 +107,9 @@ pub async fn run_remote_turn(
                         maukode_protocol::PermissionDecision::Deny
                     };
 
-                    let _ = client.respond_permission(session_id, &req.request_id, decision).await;
+                    let _ = client
+                        .respond_permission(session_id, &req.request_id, decision)
+                        .await;
                 }
                 LLMEvent::Finish { .. } => {
                     break;

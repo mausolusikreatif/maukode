@@ -1,12 +1,12 @@
 pub mod sqlite;
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use crate::session::Session;
 use async_trait::async_trait;
 use maukode_protocol::SessionId;
 pub use sqlite::{SessionSummary, SqliteSessionStore};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::session::Session;
 
 #[async_trait]
 pub trait SessionStore: Send + Sync {

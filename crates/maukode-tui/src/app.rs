@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Instant;
+use crate::event::AppEvent;
 use maukode_core::{
     AppConfig, CheckpointManager, ContextManager, PermissionManager, ProviderConfig, ProviderKind,
     RunnerConfig, Session, SessionRunner, SessionSummary, SqliteSessionStore,
@@ -9,17 +7,29 @@ use maukode_protocol::{
     ContentPart, LLMEvent, PermissionDecision, PermissionRequest, Role, SessionId, TokenUsage,
 };
 use maukode_server::ServerClient;
-use maukode_tools::{create_default_registry, create_default_registry_with_jail, PathJail, ToolRegistry};
+use maukode_tools::{
+    create_default_registry, create_default_registry_with_jail, PathJail, ToolRegistry,
+};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
-use crate::event::AppEvent;
 
 #[derive(Debug, Clone)]
 pub enum ChatRole {
     User,
     Assistant,
     System,
-    ToolCall { name: String, id: String, args: String },
-    ToolResult { name: String, id: String, is_error: bool },
+    ToolCall {
+        name: String,
+        id: String,
+        args: String,
+    },
+    ToolResult {
+        name: String,
+        id: String,
+        is_error: bool,
+    },
     Reasoning,
 }
 
@@ -111,10 +121,15 @@ impl App {
         } else {
             create_default_registry(&cwd)
         };
+        config.configure_web_search_in_registry(&mut tool_registry);
         let mcp_manager = Arc::new(maukode_core::McpManager::new());
-        mcp_manager.register_tools_into_registry(&mut tool_registry, &cwd, &config).await;
+        mcp_manager
+            .register_tools_into_registry(&mut tool_registry, &cwd, &config)
+            .await;
         let context = Arc::new(ContextManager::new(&cwd));
-        tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+        tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
+            context.repo_map(),
+        ))));
         let tools = Arc::new(tool_registry);
         let permission_manager = Arc::new(
             PermissionManager::new(config.security.permission_mode)
@@ -339,7 +354,11 @@ impl App {
         let cwd = self.cwd.clone();
         let sessions = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let current_dir_sessions = self.store.list_sessions_by_directory(&cwd).await.unwrap_or_default();
+                let current_dir_sessions = self
+                    .store
+                    .list_sessions_by_directory(&cwd)
+                    .await
+                    .unwrap_or_default();
                 if !current_dir_sessions.is_empty() {
                     current_dir_sessions
                 } else {
@@ -403,18 +422,28 @@ impl App {
                     match std::fs::canonicalize(&expanded) {
                         Ok(canonical) => {
                             let mut tool_reg = create_default_registry(&canonical);
+                            self.config.configure_web_search_in_registry(&mut tool_reg);
                             let mcp = Arc::clone(&self.mcp_manager);
                             let cfg = self.config.clone();
                             let can_clone = canonical.clone();
                             tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(mcp.register_tools_into_registry(&mut tool_reg, &can_clone, &cfg))
+                                tokio::runtime::Handle::current().block_on(
+                                    mcp.register_tools_into_registry(
+                                        &mut tool_reg,
+                                        &can_clone,
+                                        &cfg,
+                                    ),
+                                )
                             });
                             let context = Arc::new(ContextManager::new(&canonical));
-                            tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+                            tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(
+                                Arc::clone(context.repo_map()),
+                            )));
                             self.tools = Arc::new(tool_reg);
                             self.context = context;
                             if let Ok(cm) = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(CheckpointManager::new(&canonical))
+                                tokio::runtime::Handle::current()
+                                    .block_on(CheckpointManager::new(&canonical))
                             }) {
                                 self.checkpoint_manager = Arc::new(cm);
                             }
@@ -431,7 +460,9 @@ impl App {
                             self.set_status(format!("Cannot change dir: {e}"));
                             self.items.push(ChatItem {
                                 role: ChatRole::System,
-                                content: format!("Failed to change directory to '{target_str}': {e}"),
+                                content: format!(
+                                    "Failed to change directory to '{target_str}': {e}"
+                                ),
                             });
                         }
                     }
@@ -452,7 +483,10 @@ impl App {
                         self.set_status(format!("Active provider switched to {id}"));
                         self.items.push(ChatItem {
                             role: ChatRole::System,
-                            content: format!("Switched active provider to '{}'. Active model: '{}'", id, self.config.active_model),
+                            content: format!(
+                                "Switched active provider to '{}'. Active model: '{}'",
+                                id, self.config.active_model
+                            ),
                         });
                     } else {
                         self.set_status(format!("Provider '{id}' not found"));
@@ -481,7 +515,10 @@ impl App {
                     self.set_status(format!("Added and activated provider '{name}'"));
                     self.items.push(ChatItem {
                         role: ChatRole::System,
-                        content: format!("Added provider '{}' ({base_url}) and set as active.", name),
+                        content: format!(
+                            "Added provider '{}' ({base_url}) and set as active.",
+                            name
+                        ),
                     });
                 } else {
                     self.open_provider_modal();
@@ -502,7 +539,10 @@ impl App {
                     self.set_status(format!("Model switched to {model}"));
                     self.items.push(ChatItem {
                         role: ChatRole::System,
-                        content: format!("Switched model to '{}' for provider '{}'", model, self.config.active_provider),
+                        content: format!(
+                            "Switched model to '{}' for provider '{}'",
+                            model, self.config.active_provider
+                        ),
                     });
                 }
             }
@@ -550,7 +590,9 @@ impl App {
             unknown => {
                 self.items.push(ChatItem {
                     role: ChatRole::System,
-                    content: format!("Unknown slash command: {unknown}. Type '/help' for available commands."),
+                    content: format!(
+                        "Unknown slash command: {unknown}. Type '/help' for available commands."
+                    ),
                 });
             }
         }
@@ -600,14 +642,16 @@ impl App {
                 let mut stream = match client.subscribe_events(session_id).await {
                     Ok(s) => s,
                     Err(e) => {
-                        let _ = app_event_tx.send(AppEvent::TurnFinished(Err(format!("Stream error: {e}"))));
+                        let _ = app_event_tx
+                            .send(AppEvent::TurnFinished(Err(format!("Stream error: {e}"))));
                         return;
                     }
                 };
 
                 // 2. Submit prompt to initiate turn on server
                 if let Err(e) = client.submit_prompt(session_id, &input_clone).await {
-                    let _ = app_event_tx.send(AppEvent::TurnFinished(Err(format!("Server error: {e}"))));
+                    let _ = app_event_tx
+                        .send(AppEvent::TurnFinished(Err(format!("Server error: {e}"))));
                     return;
                 }
 
@@ -666,9 +710,7 @@ impl App {
 
         // Forward LLM stream events to AppEvent
         tokio::spawn(async move {
-            let run_handle = tokio::spawn(async move {
-                runner.run(Some(input), llm_tx).await
-            });
+            let run_handle = tokio::spawn(async move { runner.run(Some(input), llm_tx).await });
 
             while let Some(event) = llm_rx.recv().await {
                 let _ = app_event_tx.send(AppEvent::LLM(event));
@@ -749,7 +791,12 @@ impl App {
             LLMEvent::Usage(usage) => {
                 self.token_usage = Some(usage);
             }
-            LLMEvent::ContextWarning { current_tokens, max_tokens, percent, message } => {
+            LLMEvent::ContextWarning {
+                current_tokens,
+                max_tokens,
+                percent,
+                message,
+            } => {
                 self.set_status(format!("⚠️ Context {percent}% full ({current_tokens}/{max_tokens} tokens). Use /compact"));
                 self.items.push(ChatItem {
                     role: ChatRole::System,
@@ -786,7 +833,10 @@ impl App {
         if let Some(client) = self.server_client.clone() {
             let session_arc = Arc::clone(&self.session);
             let session_id = {
-                session_arc.try_read().map(|s| s.id).unwrap_or_else(|_| SessionId::new())
+                session_arc
+                    .try_read()
+                    .map(|s| s.id)
+                    .unwrap_or_else(|_| SessionId::new())
             };
             tokio::spawn(async move {
                 if let Ok(detail) = client.get_session(session_id).await {
@@ -813,11 +863,7 @@ impl App {
         });
     }
 
-    pub fn respond_permission(
-        &mut self,
-        request: PermissionRequest,
-        decision: PermissionDecision,
-    ) {
+    pub fn respond_permission(&mut self, request: PermissionRequest, decision: PermissionDecision) {
         self.active_modal = ActiveModal::None;
         let action_str = match decision {
             PermissionDecision::AllowOnce => "allowed (once)",
@@ -830,7 +876,11 @@ impl App {
             let client = Arc::clone(client);
             let sid = match uuid::Uuid::parse_str(&request.session_id) {
                 Ok(u) => SessionId(u),
-                Err(_) => self.session.try_read().map(|s| s.id).unwrap_or_else(|_| SessionId::new()),
+                Err(_) => self
+                    .session
+                    .try_read()
+                    .map(|s| s.id)
+                    .unwrap_or_else(|_| SessionId::new()),
             };
             let req_id = request.request_id.clone();
             tokio::spawn(async move {
@@ -879,16 +929,17 @@ impl App {
         } else {
             let cm = Arc::clone(&self.checkpoint_manager);
             tokio::spawn(async move {
-                let diff_resp = cm.get_diff(&session_id.to_string(), None).await.unwrap_or_else(|e| {
-                    maukode_protocol::DiffResponse {
+                let diff_resp = cm
+                    .get_diff(&session_id.to_string(), None)
+                    .await
+                    .unwrap_or_else(|e| maukode_protocol::DiffResponse {
                         session_id: session_id.to_string(),
                         files_changed: 0,
                         insertions: 0,
                         deletions: 0,
                         stat_summary: format!("Error fetching diff: {e}"),
                         diff_content: String::new(),
-                    }
-                });
+                    });
                 let _ = tx.send(AppEvent::DiffFetched(diff_resp));
             });
         }
@@ -945,7 +996,10 @@ impl App {
 
         if let Some(client) = self.server_client.clone() {
             tokio::spawn(async move {
-                match client.get_codebase_map(session_id, None, None, Some(1000)).await {
+                match client
+                    .get_codebase_map(session_id, None, None, Some(1000))
+                    .await
+                {
                     Ok(resp) => {
                         let _ = tx.send(AppEvent::CodebaseMapFetched(Ok(resp.map)));
                     }
@@ -982,7 +1036,10 @@ impl App {
 
         if let Some(client) = self.server_client.clone() {
             tokio::spawn(async move {
-                let res = client.init_project(sid, force).await.map_err(|e| e.to_string());
+                let res = client
+                    .init_project(sid, force)
+                    .await
+                    .map_err(|e| e.to_string());
                 let _ = tx.send(AppEvent::InitProjectCompleted(res));
             });
         } else {
@@ -1018,7 +1075,10 @@ impl App {
 
         if let Some(client) = self.server_client.clone() {
             tokio::spawn(async move {
-                let res = client.list_mcp_servers(sid).await.map_err(|e| e.to_string());
+                let res = client
+                    .list_mcp_servers(sid)
+                    .await
+                    .map_err(|e| e.to_string());
                 let _ = tx.send(AppEvent::McpStatusFetched(res));
             });
         } else {
@@ -1027,7 +1087,9 @@ impl App {
             let config = self.config.clone();
             tokio::spawn(async move {
                 let servers = mcp.list_server_statuses(&cwd, &config).await;
-                let _ = tx.send(AppEvent::McpStatusFetched(Ok(maukode_protocol::McpListResponse { servers })));
+                let _ = tx.send(AppEvent::McpStatusFetched(Ok(
+                    maukode_protocol::McpListResponse { servers },
+                )));
             });
         }
     }
@@ -1045,7 +1107,10 @@ impl App {
 
         if let Some(client) = self.server_client.clone() {
             tokio::spawn(async move {
-                let res = client.compact_session(sid, focus.as_deref()).await.map_err(|e| e.to_string());
+                let res = client
+                    .compact_session(sid, focus.as_deref())
+                    .await
+                    .map_err(|e| e.to_string());
                 let _ = tx.send(AppEvent::SessionCompacted(res));
             });
         } else {
@@ -1060,7 +1125,9 @@ impl App {
                     llm_client.as_deref(),
                     &config.active_model,
                     focus.as_deref(),
-                ).await {
+                )
+                .await
+                {
                     Ok(cr) => Ok(maukode_protocol::CompactResponse {
                         session_id: sid.to_string(),
                         original_messages: cr.original_message_count,

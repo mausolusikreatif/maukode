@@ -1,15 +1,13 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use async_trait::async_trait;
-use eventsource_stream::Eventsource;
-use futures::{StreamExt, TryStreamExt};
-use maukode_protocol::{
-    ContentPart, FinishReason, LLMEvent, Role, TokenUsage, ToolCall,
-};
-use serde_json::json;
 use crate::client::{LLMClient, LLMStream};
 use crate::error::LLMError;
 use crate::request::LLMRequest;
+use async_trait::async_trait;
+use eventsource_stream::Eventsource;
+use futures::{StreamExt, TryStreamExt};
+use maukode_protocol::{ContentPart, FinishReason, LLMEvent, Role, TokenUsage, ToolCall};
+use serde_json::json;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct OpenAIClient {
     api_key: String,
@@ -164,8 +162,9 @@ impl LLMClient for OpenAIClient {
             tools: HashMap::new(),
         }));
 
-        let stream = event_source.map_err(|e| LLMError::Stream(e.to_string())).filter_map(
-            move |event_res| {
+        let stream = event_source
+            .map_err(|e| LLMError::Stream(e.to_string()))
+            .filter_map(move |event_res| {
                 let state = Arc::clone(&state);
                 async move {
                     let event = match event_res {
@@ -188,7 +187,10 @@ impl LLMClient for OpenAIClient {
                         let delta = choice.get("delta");
 
                         // Text content delta
-                        if let Some(text) = delta.and_then(|d| d.get("content")).and_then(|t| t.as_str()) {
+                        if let Some(text) = delta
+                            .and_then(|d| d.get("content"))
+                            .and_then(|t| t.as_str())
+                        {
                             if !text.is_empty() {
                                 return Some(Ok(LLMEvent::TextDelta {
                                     text: text.to_string(),
@@ -197,7 +199,10 @@ impl LLMClient for OpenAIClient {
                         }
 
                         // Reasoning delta (DeepSeek / OpenAI reasoning)
-                        if let Some(reasoning) = delta.and_then(|d| d.get("reasoning_content")).and_then(|t| t.as_str()) {
+                        if let Some(reasoning) = delta
+                            .and_then(|d| d.get("reasoning_content"))
+                            .and_then(|t| t.as_str())
+                        {
                             if !reasoning.is_empty() {
                                 return Some(Ok(LLMEvent::ReasoningDelta {
                                     text: reasoning.to_string(),
@@ -206,15 +211,20 @@ impl LLMClient for OpenAIClient {
                         }
 
                         // Tool calls
-                        if let Some(tool_calls) = delta.and_then(|d| d.get("tool_calls")).and_then(|tc| tc.as_array()) {
+                        if let Some(tool_calls) = delta
+                            .and_then(|d| d.get("tool_calls"))
+                            .and_then(|tc| tc.as_array())
+                        {
                             let mut lock = state.lock().await;
                             for tc in tool_calls {
-                                let index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
-                                let entry = lock.tools.entry(index).or_insert_with(|| ToolAccumulator {
-                                    id: String::new(),
-                                    name: String::new(),
-                                    args: String::new(),
-                                });
+                                let index =
+                                    tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                                let entry =
+                                    lock.tools.entry(index).or_insert_with(|| ToolAccumulator {
+                                        id: String::new(),
+                                        name: String::new(),
+                                        args: String::new(),
+                                    });
 
                                 if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
                                     entry.id = id.to_string();
@@ -229,7 +239,9 @@ impl LLMClient for OpenAIClient {
                                             }));
                                         }
                                     }
-                                    if let Some(args_chunk) = func.get("arguments").and_then(|a| a.as_str()) {
+                                    if let Some(args_chunk) =
+                                        func.get("arguments").and_then(|a| a.as_str())
+                                    {
                                         entry.args.push_str(args_chunk);
                                         return Some(Ok(LLMEvent::ToolCallDelta {
                                             id: entry.id.clone(),
@@ -241,7 +253,9 @@ impl LLMClient for OpenAIClient {
                         }
 
                         // Finish reason
-                        if let Some(finish_reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                        if let Some(finish_reason) =
+                            choice.get("finish_reason").and_then(|f| f.as_str())
+                        {
                             let mut lock = state.lock().await;
                             // If tools were accumulated, emit finish for them
                             if !lock.tools.is_empty() {
@@ -277,8 +291,14 @@ impl LLMClient for OpenAIClient {
 
                     // Check for usage in stream
                     if let Some(usage) = val.get("usage").and_then(|u| u.as_object()) {
-                        let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let prompt_tokens = usage
+                            .get("prompt_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let completion_tokens = usage
+                            .get("completion_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
                         if prompt_tokens > 0 || completion_tokens > 0 {
                             return Some(Ok(LLMEvent::Usage(TokenUsage {
                                 input_tokens: prompt_tokens,
@@ -291,8 +311,7 @@ impl LLMClient for OpenAIClient {
 
                     None
                 }
-            },
-        );
+            });
 
         Ok(Box::pin(stream))
     }

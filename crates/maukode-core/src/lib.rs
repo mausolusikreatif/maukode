@@ -11,14 +11,20 @@ pub mod session;
 pub mod store;
 
 pub use checkpoint::CheckpointManager;
-pub use compaction::{CompactionResult, ContextPruner, ContextUsage, ConversationCompactor, TokenEstimator};
-pub use config::{AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig};
+pub use compaction::{
+    CompactionResult, ContextPruner, ContextUsage, ConversationCompactor, TokenEstimator,
+};
+pub use config::{
+    AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig, WebSearchConfig,
+};
 pub use context::ContextManager;
 pub use mcp::{McpClient, McpManager, McpTool};
-pub use memory::{init_project, DetectedStack, DiscoveredRule, InitResult, ProjectDetector, ProjectMemory, RuleSource};
+pub use memory::{
+    init_project, DetectedStack, DiscoveredRule, InitResult, ProjectDetector, ProjectMemory,
+    RuleSource,
+};
 pub use permission::{PermissionManager, PermissionMode};
 pub use repo_map::{CodebaseMapTool, RepoMapGenerator};
 pub use runner::{RunnerConfig, SessionRunner};
 pub use session::Session;
 pub use store::{InMemorySessionStore, SessionStore, SessionSummary, SqliteSessionStore};
-

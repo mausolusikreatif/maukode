@@ -3,12 +3,12 @@ pub mod graph;
 pub mod parser;
 pub mod tool;
 
+use anyhow::Result;
+use ignore::WalkBuilder;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
-use anyhow::Result;
-use ignore::WalkBuilder;
 use tokio::sync::RwLock;
 
 pub use formatter::RepoMapFormatter;
@@ -67,7 +67,14 @@ impl RepoMapGenerator {
                     // Skip bulky folders
                     !matches!(
                         file_name.as_ref(),
-                        "target" | "node_modules" | ".git" | ".cargo" | "dist" | "build" | "vendor" | "__pycache__"
+                        "target"
+                            | "node_modules"
+                            | ".git"
+                            | ".cargo"
+                            | "dist"
+                            | "build"
+                            | "vendor"
+                            | "__pycache__"
                     )
                 })
                 .build();
@@ -189,10 +196,22 @@ mod tests {
         "#;
 
         let parsed = parser.parse_file(Path::new("runner.rs"), code).unwrap();
-        assert!(parsed.definitions.iter().any(|d| d.name == "SessionRunner" && d.kind == SymbolKind::Struct));
-        assert!(parsed.definitions.iter().any(|d| d.name == "Status" && d.kind == SymbolKind::Enum));
-        assert!(parsed.definitions.iter().any(|d| d.name == "new" && d.kind == SymbolKind::Method));
-        assert!(parsed.definitions.iter().any(|d| d.name == "run" && d.kind == SymbolKind::Method));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "SessionRunner" && d.kind == SymbolKind::Struct));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "Status" && d.kind == SymbolKind::Enum));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "new" && d.kind == SymbolKind::Method));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "run" && d.kind == SymbolKind::Method));
     }
 
     #[test]
@@ -214,9 +233,18 @@ mod tests {
         "#;
 
         let parsed = parser.parse_file(Path::new("client.ts"), code).unwrap();
-        assert!(parsed.definitions.iter().any(|d| d.name == "UserConfig" && d.kind == SymbolKind::Interface));
-        assert!(parsed.definitions.iter().any(|d| d.name == "ApiClient" && d.kind == SymbolKind::Class));
-        assert!(parsed.definitions.iter().any(|d| d.name == "fetchData" && d.kind == SymbolKind::Method));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "UserConfig" && d.kind == SymbolKind::Interface));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "ApiClient" && d.kind == SymbolKind::Class));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "fetchData" && d.kind == SymbolKind::Method));
     }
 
     #[test]
@@ -235,9 +263,18 @@ def main():
 "#;
 
         let parsed = parser.parse_file(Path::new("processor.py"), code).unwrap();
-        assert!(parsed.definitions.iter().any(|d| d.name == "DataProcessor" && d.kind == SymbolKind::Class));
-        assert!(parsed.definitions.iter().any(|d| d.name == "process" && d.kind == SymbolKind::Method));
-        assert!(parsed.definitions.iter().any(|d| d.name == "main" && d.kind == SymbolKind::Function));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "DataProcessor" && d.kind == SymbolKind::Class));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "process" && d.kind == SymbolKind::Method));
+        assert!(parsed
+            .definitions
+            .iter()
+            .any(|d| d.name == "main" && d.kind == SymbolKind::Function));
     }
 
     #[test]

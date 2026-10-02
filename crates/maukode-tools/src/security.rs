@@ -1,5 +1,5 @@
-use std::path::{Component, Path, PathBuf};
 use crate::tool::ToolError;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct PathJail {
@@ -11,9 +11,9 @@ pub struct PathJail {
 impl PathJail {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         let root = workspace_root.into();
-        let canonical_root = root.canonicalize().unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+        let canonical_root = root
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         Self {
             workspace_root: root,
             canonical_root,
@@ -82,9 +82,9 @@ impl PathJail {
             }
 
             let canonical_ancestor = if ancestor.exists() {
-                ancestor
-                    .canonicalize()
-                    .map_err(|e| ToolError::Execution(format!("Cannot resolve ancestor path: {e}")))?
+                ancestor.canonicalize().map_err(|e| {
+                    ToolError::Execution(format!("Cannot resolve ancestor path: {e}"))
+                })?
             } else {
                 self.canonical_root.clone()
             };
@@ -338,7 +338,11 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
             if tok.contains('=')
                 && !tok.starts_with('-')
                 && !tok.starts_with('/')
-                && tok.chars().next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false)
+                && tok
+                    .chars()
+                    .next()
+                    .map(|c| c.is_alphabetic() || c == '_')
+                    .unwrap_or(false)
             {
                 idx += 1;
             } else {
@@ -383,22 +387,27 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
         let bin_name = raw_bin
             .trim_start_matches('\\')
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or(raw_bin)
             .to_lowercase();
         let remaining_tokens = &tokens[idx + 1..];
 
         // Batch deletion via xargs
-        if bin_name == "xargs" {
-            if remaining_tokens.iter().any(|t| {
-                let name = t.trim_start_matches('\\').split('/').last().unwrap_or(t).to_lowercase();
+        if bin_name == "xargs"
+            && remaining_tokens.iter().any(|t| {
+                let name = t
+                    .trim_start_matches('\\')
+                    .split('/')
+                    .next_back()
+                    .unwrap_or(t)
+                    .to_lowercase();
                 ["rm", "rmdir", "unlink", "shred", "wipe", "srm"].contains(&name.as_str())
-            }) {
-                return RiskAssessment {
-                    level: RiskLevel::Danger,
-                    reason: "Batch deletion via xargs".to_string(),
-                };
-            }
+            })
+        {
+            return RiskAssessment {
+                level: RiskLevel::Danger,
+                reason: "Batch deletion via xargs".to_string(),
+            };
         }
 
         // Deletions: rm, rmdir, unlink, shred, wipe, srm
@@ -462,16 +471,23 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
                     reason: "Batch file deletion (find -delete)".to_string(),
                 };
             }
-            if remaining_tokens.iter().any(|t| t == "-exec" || t == "-execdir") {
-                if remaining_tokens.iter().any(|t| {
-                    let name = t.trim_start_matches('\\').split('/').last().unwrap_or(t).to_lowercase();
+            if remaining_tokens
+                .iter()
+                .any(|t| t == "-exec" || t == "-execdir")
+                && remaining_tokens.iter().any(|t| {
+                    let name = t
+                        .trim_start_matches('\\')
+                        .split('/')
+                        .next_back()
+                        .unwrap_or(t)
+                        .to_lowercase();
                     name == "rm"
-                }) {
-                    return RiskAssessment {
-                        level: RiskLevel::Danger,
-                        reason: "Batch file deletion (find -exec rm)".to_string(),
-                    };
-                }
+                })
+            {
+                return RiskAssessment {
+                    level: RiskLevel::Danger,
+                    reason: "Batch file deletion (find -exec rm)".to_string(),
+                };
             }
         }
 
@@ -491,7 +507,8 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
                 }
                 Some("clean") => {
                     if remaining_tokens.iter().any(|t| {
-                        t == "--force" || (t.starts_with('-') && !t.starts_with("--") && t.contains('f'))
+                        t == "--force"
+                            || (t.starts_with('-') && !t.starts_with("--") && t.contains('f'))
                     }) {
                         return RiskAssessment {
                             level: RiskLevel::Danger,
@@ -526,24 +543,25 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
                             reason: "Force deleting git branch (git branch -D)".to_string(),
                         };
                     }
-                    if remaining_tokens.iter().any(|t| t == "-d" || t == "--delete") {
-                        if warning_candidate.is_none() {
-                            warning_candidate = Some(RiskAssessment {
-                                level: RiskLevel::Warning,
-                                reason: "Deleting git branch".to_string(),
-                            });
-                        }
+                    if remaining_tokens
+                        .iter()
+                        .any(|t| t == "-d" || t == "--delete")
+                        && warning_candidate.is_none()
+                    {
+                        warning_candidate = Some(RiskAssessment {
+                            level: RiskLevel::Warning,
+                            reason: "Deleting git branch".to_string(),
+                        });
                     }
                 }
-                Some("stash") => {
-                    if remaining_tokens.iter().any(|t| t == "drop" || t == "clear") {
-                        if warning_candidate.is_none() {
-                            warning_candidate = Some(RiskAssessment {
-                                level: RiskLevel::Warning,
-                                reason: "Discarding git stash".to_string(),
-                            });
-                        }
-                    }
+                Some("stash")
+                    if remaining_tokens.iter().any(|t| t == "drop" || t == "clear")
+                        && warning_candidate.is_none() =>
+                {
+                    warning_candidate = Some(RiskAssessment {
+                        level: RiskLevel::Warning,
+                        reason: "Discarding git stash".to_string(),
+                    });
                 }
                 _ => {}
             }
@@ -562,17 +580,23 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
             };
         }
 
-        if bin_name == "dd" {
-            if remaining_tokens.iter().any(|t| t.starts_with("if=") || t.starts_with("of=")) {
-                return RiskAssessment {
-                    level: RiskLevel::Danger,
-                    reason: "Direct disk write / raw image manipulation (dd)".to_string(),
-                };
-            }
+        if bin_name == "dd"
+            && remaining_tokens
+                .iter()
+                .any(|t| t.starts_with("if=") || t.starts_with("of="))
+        {
+            return RiskAssessment {
+                level: RiskLevel::Danger,
+                reason: "Direct disk write / raw image manipulation (dd)".to_string(),
+            };
         }
 
         // System shutdown / reboot
-        if bin_name == "reboot" || bin_name == "shutdown" || bin_name == "poweroff" || bin_name == "init" {
+        if bin_name == "reboot"
+            || bin_name == "shutdown"
+            || bin_name == "poweroff"
+            || bin_name == "init"
+        {
             return RiskAssessment {
                 level: RiskLevel::Danger,
                 reason: "System shutdown / reboot command".to_string(),
@@ -586,15 +610,15 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
                 reason: "Process termination command".to_string(),
             };
         }
-        if bin_name == "kill" {
-            if remaining_tokens.iter().any(|t| {
-                t == "-9" || t == "-KILL" || t == "-kill" || t == "-s 9"
-            }) {
-                return RiskAssessment {
-                    level: RiskLevel::Danger,
-                    reason: "Force process termination (kill -9)".to_string(),
-                };
-            }
+        if bin_name == "kill"
+            && remaining_tokens
+                .iter()
+                .any(|t| t == "-9" || t == "-KILL" || t == "-kill" || t == "-s 9")
+        {
+            return RiskAssessment {
+                level: RiskLevel::Danger,
+                reason: "Force process termination (kill -9)".to_string(),
+            };
         }
 
         // Permissions & Firewall
@@ -624,7 +648,11 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
             }
         }
 
-        if bin_name == "iptables" || bin_name == "ufw" || bin_name == "nft" || bin_name == "firewalld" {
+        if bin_name == "iptables"
+            || bin_name == "ufw"
+            || bin_name == "nft"
+            || bin_name == "firewalld"
+        {
             return RiskAssessment {
                 level: RiskLevel::Danger,
                 reason: "Firewall / network routing modification".to_string(),
@@ -634,13 +662,12 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
         // Registry publish warnings
         if (["cargo", "npm", "pnpm", "yarn"].contains(&bin_name.as_str()))
             && remaining_tokens.iter().any(|t| t == "publish")
+            && warning_candidate.is_none()
         {
-            if warning_candidate.is_none() {
-                warning_candidate = Some(RiskAssessment {
-                    level: RiskLevel::Warning,
-                    reason: "Publishing package to public registry".to_string(),
-                });
-            }
+            warning_candidate = Some(RiskAssessment {
+                level: RiskLevel::Warning,
+                reason: "Publishing package to public registry".to_string(),
+            });
         }
     }
 
@@ -675,10 +702,7 @@ mod tests {
         );
 
         // Single file / non-recursive deletions
-        assert_eq!(
-            assess_bash_command("rm file.txt").level,
-            RiskLevel::Danger
-        );
+        assert_eq!(assess_bash_command("rm file.txt").level, RiskLevel::Danger);
         assert_eq!(
             assess_bash_command("rm -f file.txt").level,
             RiskLevel::Danger
@@ -751,10 +775,7 @@ mod tests {
             assess_bash_command("pkill -9 maukode").level,
             RiskLevel::Danger
         );
-        assert_eq!(
-            assess_bash_command("kill -9 1234").level,
-            RiskLevel::Danger
-        );
+        assert_eq!(assess_bash_command("kill -9 1234").level, RiskLevel::Danger);
         assert_eq!(
             assess_bash_command("mkfs.ext4 /dev/sdb1").level,
             RiskLevel::Danger
@@ -795,10 +816,7 @@ mod tests {
             assess_bash_command("cargo test --workspace").level,
             RiskLevel::Safe
         );
-        assert_eq!(
-            assess_bash_command("git status").level,
-            RiskLevel::Safe
-        );
+        assert_eq!(assess_bash_command("git status").level, RiskLevel::Safe);
         assert_eq!(
             assess_bash_command("cat src/main.rs").level,
             RiskLevel::Safe

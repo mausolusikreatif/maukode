@@ -1,14 +1,12 @@
-use std::sync::Arc;
-use async_trait::async_trait;
-use eventsource_stream::Eventsource;
-use futures::{StreamExt, TryStreamExt};
-use maukode_protocol::{
-    ContentPart, FinishReason, LLMEvent, Role, TokenUsage, ToolCall,
-};
-use serde_json::json;
 use crate::client::{LLMClient, LLMStream};
 use crate::error::LLMError;
 use crate::request::LLMRequest;
+use async_trait::async_trait;
+use eventsource_stream::Eventsource;
+use futures::{StreamExt, TryStreamExt};
+use maukode_protocol::{ContentPart, FinishReason, LLMEvent, Role, TokenUsage, ToolCall};
+use serde_json::json;
+use std::sync::Arc;
 
 pub struct AnthropicClient {
     api_key: String,
@@ -146,8 +144,9 @@ impl LLMClient for AnthropicClient {
             usage: TokenUsage::default(),
         }));
 
-        let stream = event_source.map_err(|e| LLMError::Stream(e.to_string())).filter_map(
-            move |event_res| {
+        let stream = event_source
+            .map_err(|e| LLMError::Stream(e.to_string()))
+            .filter_map(move |event_res| {
                 let state = Arc::clone(&state);
                 async move {
                     let event = match event_res {
@@ -170,9 +169,13 @@ impl LLMClient for AnthropicClient {
                     match event_type {
                         "message_start" => {
                             if let Some(u) = val["message"]["usage"].as_object() {
-                                lock.usage.input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                lock.usage.cache_read_tokens = u.get("cache_read_input_tokens").and_then(|v| v.as_u64());
-                                lock.usage.cache_write_tokens = u.get("cache_creation_input_tokens").and_then(|v| v.as_u64());
+                                lock.usage.input_tokens =
+                                    u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                lock.usage.cache_read_tokens =
+                                    u.get("cache_read_input_tokens").and_then(|v| v.as_u64());
+                                lock.usage.cache_write_tokens = u
+                                    .get("cache_creation_input_tokens")
+                                    .and_then(|v| v.as_u64());
                             }
                             None
                         }
@@ -198,23 +201,20 @@ impl LLMClient for AnthropicClient {
                             } else if delta_type == "input_json_delta" {
                                 let partial = delta["partial_json"].as_str().unwrap_or("");
                                 lock.tool_args_buf.push_str(partial);
-                                if let Some(ref id) = lock.current_tool_id {
-                                    Some(Ok(LLMEvent::ToolCallDelta {
+                                lock.current_tool_id.as_ref().map(|id| {
+                                    Ok(LLMEvent::ToolCallDelta {
                                         id: id.clone(),
                                         delta: partial.to_string(),
-                                    }))
-                                } else {
-                                    None
-                                }
+                                    })
+                                })
                             } else {
                                 None
                             }
                         }
                         "content_block_stop" => {
-                            if let (Some(id), Some(name)) = (
-                                lock.current_tool_id.take(),
-                                lock.current_tool_name.take(),
-                            ) {
+                            if let (Some(id), Some(name)) =
+                                (lock.current_tool_id.take(), lock.current_tool_name.take())
+                            {
                                 let args: serde_json::Value =
                                     serde_json::from_str(&lock.tool_args_buf)
                                         .unwrap_or(serde_json::Value::Object(Default::default()));
@@ -232,7 +232,8 @@ impl LLMClient for AnthropicClient {
                         }
                         "message_delta" => {
                             if let Some(u) = val["usage"].as_object() {
-                                lock.usage.output_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                lock.usage.output_tokens =
+                                    u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
                             }
                             let finish_reason = match val["delta"]["stop_reason"].as_str() {
                                 Some("end_turn") | Some("stop_sequence") => FinishReason::EndTurn,
@@ -240,13 +241,14 @@ impl LLMClient for AnthropicClient {
                                 Some("max_tokens") => FinishReason::MaxTokens,
                                 _ => FinishReason::EndTurn,
                             };
-                            Some(Ok(LLMEvent::Finish { reason: finish_reason }))
+                            Some(Ok(LLMEvent::Finish {
+                                reason: finish_reason,
+                            }))
                         }
                         _ => None,
                     }
                 }
-            },
-        );
+            });
 
         Ok(Box::pin(stream))
     }

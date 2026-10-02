@@ -4,15 +4,15 @@ pub mod middleware;
 pub mod routes;
 pub mod state;
 
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
 use anyhow::Result;
-use tokio::net::TcpListener;
-use tracing::info;
 pub use client::ServerClient;
 pub use daemon::{ensure_daemon_running, get_daemon_status, stop_daemon, DaemonInfo};
 pub use state::ServerState;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::net::TcpListener;
+use tracing::info;
 
 pub struct ServerConfig {
     pub bind_addr: SocketAddr,
@@ -35,7 +35,10 @@ pub async fn run_server(config: ServerConfig) -> Result<()> {
     let app = routes::create_router(state);
 
     let listener = TcpListener::bind(config.bind_addr).await?;
-    info!("🚀 MauKode Server listening on http://{}", listener.local_addr()?);
+    info!(
+        "🚀 MauKode Server listening on http://{}",
+        listener.local_addr()?
+    );
     if config.auth_token.is_some() {
         info!("🔒 Bearer authentication enabled");
     }

@@ -1,6 +1,6 @@
+use super::parser::SymbolDef;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use super::parser::SymbolDef;
 
 #[derive(Debug, Clone)]
 pub struct FileSymbolData {
@@ -34,10 +34,7 @@ impl SymbolGraph {
         let mut def_to_files: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, file) in files.iter().enumerate() {
             for def in &file.definitions {
-                def_to_files
-                    .entry(def.name.clone())
-                    .or_default()
-                    .push(idx);
+                def_to_files.entry(def.name.clone()).or_default().push(idx);
             }
         }
 
@@ -129,7 +126,7 @@ impl SymbolGraph {
             }
 
             // Sort symbols by line number or relevance
-            ranked_symbols.sort_by(|a, b| a.0.line.cmp(&b.0.line));
+            ranked_symbols.sort_by_key(|a| a.0.line);
 
             ranked_files.push(RankedFile {
                 relative_path: file.relative_path.clone(),

@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use maukode_protocol::{Checkpoint, DiffResponse, UndoResponse};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -88,7 +88,8 @@ impl CheckpointManager {
         description: impl Into<String>,
     ) -> Result<Checkpoint> {
         let desc = description.into();
-        let temp_idx = std::env::temp_dir().join(format!("maukode_idx_{}_{}", session_id, Uuid::new_v4()));
+        let temp_idx =
+            std::env::temp_dir().join(format!("maukode_idx_{}_{}", session_id, Uuid::new_v4()));
 
         // 1. Stage working directory into isolated temporary index
         let add_out = tokio::process::Command::new("git")
@@ -130,10 +131,15 @@ impl CheckpointManager {
             );
         }
 
-        let tree_hash = String::from_utf8_lossy(&write_tree_out.stdout).trim().to_string();
+        let tree_hash = String::from_utf8_lossy(&write_tree_out.stdout)
+            .trim()
+            .to_string();
 
         // 3. Commit tree object
-        let commit_msg = format!("maukode checkpoint: session {} turn {}", session_id, turn_index);
+        let commit_msg = format!(
+            "maukode checkpoint: session {} turn {}",
+            session_id, turn_index
+        );
         let commit_out = tokio::process::Command::new("git")
             .arg("--git-dir")
             .arg(&self.git_dir)
@@ -145,7 +151,9 @@ impl CheckpointManager {
             .await?;
 
         let commit_hash = if commit_out.status.success() {
-            String::from_utf8_lossy(&commit_out.stdout).trim().to_string()
+            String::from_utf8_lossy(&commit_out.stdout)
+                .trim()
+                .to_string()
         } else {
             tree_hash.clone()
         };
@@ -181,7 +189,8 @@ impl CheckpointManager {
 
     /// Capture current working tree and return current tree hash
     async fn current_working_tree_hash(&self, session_id: &str) -> Result<String> {
-        let temp_idx = std::env::temp_dir().join(format!("maukode_cur_idx_{}_{}", session_id, Uuid::new_v4()));
+        let temp_idx =
+            std::env::temp_dir().join(format!("maukode_cur_idx_{}_{}", session_id, Uuid::new_v4()));
 
         let add_out = tokio::process::Command::new("git")
             .arg("--git-dir")
@@ -196,7 +205,10 @@ impl CheckpointManager {
 
         if !add_out.status.success() {
             let _ = tokio::fs::remove_file(&temp_idx).await;
-            anyhow::bail!("Failed to scan current working tree: {}", String::from_utf8_lossy(&add_out.stderr));
+            anyhow::bail!(
+                "Failed to scan current working tree: {}",
+                String::from_utf8_lossy(&add_out.stderr)
+            );
         }
 
         let write_tree_out = tokio::process::Command::new("git")
@@ -210,14 +222,23 @@ impl CheckpointManager {
         let _ = tokio::fs::remove_file(&temp_idx).await;
 
         if !write_tree_out.status.success() {
-            anyhow::bail!("Failed to compute current tree hash: {}", String::from_utf8_lossy(&write_tree_out.stderr));
+            anyhow::bail!(
+                "Failed to compute current tree hash: {}",
+                String::from_utf8_lossy(&write_tree_out.stderr)
+            );
         }
 
-        Ok(String::from_utf8_lossy(&write_tree_out.stdout).trim().to_string())
+        Ok(String::from_utf8_lossy(&write_tree_out.stdout)
+            .trim()
+            .to_string())
     }
 
     /// Calculate diff between session baseline checkpoint and current working directory.
-    pub async fn get_diff(&self, session_id: &str, target_turn: Option<usize>) -> Result<DiffResponse> {
+    pub async fn get_diff(
+        &self,
+        session_id: &str,
+        target_turn: Option<usize>,
+    ) -> Result<DiffResponse> {
         let lock = self.checkpoints.read().await;
         let session_cps = lock.get(session_id);
 
@@ -292,7 +313,10 @@ impl CheckpointManager {
         let n_back = turns_back.unwrap_or(1).max(1);
         let mut lock = self.checkpoints.write().await;
         let session_cps = lock.get_mut(session_id).ok_or_else(|| {
-            anyhow::anyhow!("No checkpoints available to undo for session {}", session_id)
+            anyhow::anyhow!(
+                "No checkpoints available to undo for session {}",
+                session_id
+            )
         })?;
 
         if session_cps.is_empty() {
@@ -338,7 +362,11 @@ impl CheckpointManager {
         }
 
         // 2. Checkout files from target tree
-        let temp_idx = std::env::temp_dir().join(format!("maukode_undo_idx_{}_{}", session_id, Uuid::new_v4()));
+        let temp_idx = std::env::temp_dir().join(format!(
+            "maukode_undo_idx_{}_{}",
+            session_id,
+            Uuid::new_v4()
+        ));
 
         let read_tree_out = tokio::process::Command::new("git")
             .arg("--git-dir")
@@ -351,7 +379,10 @@ impl CheckpointManager {
 
         if !read_tree_out.status.success() {
             let _ = tokio::fs::remove_file(&temp_idx).await;
-            anyhow::bail!("Failed to read target tree for undo: {}", String::from_utf8_lossy(&read_tree_out.stderr));
+            anyhow::bail!(
+                "Failed to read target tree for undo: {}",
+                String::from_utf8_lossy(&read_tree_out.stderr)
+            );
         }
 
         let checkout_out = tokio::process::Command::new("git")
@@ -369,7 +400,10 @@ impl CheckpointManager {
         let _ = tokio::fs::remove_file(&temp_idx).await;
 
         if !checkout_out.status.success() {
-            anyhow::bail!("Failed to checkout files during undo: {}", String::from_utf8_lossy(&checkout_out.stderr));
+            anyhow::bail!(
+                "Failed to checkout files during undo: {}",
+                String::from_utf8_lossy(&checkout_out.stderr)
+            );
         }
 
         // Truncate checkpoints after target_idx so subsequent undos operate cleanly
@@ -379,7 +413,10 @@ impl CheckpointManager {
             session_id: session_id.to_string(),
             target_turn,
             restored_checkpoint_id: target_cp.id,
-            message: format!("Reverted workspace to checkpoint before turn #{}", target_turn),
+            message: format!(
+                "Reverted workspace to checkpoint before turn #{}",
+                target_turn
+            ),
         })
     }
 
@@ -399,15 +436,27 @@ fn parse_diff_stat(stat: &str) -> (usize, usize, usize) {
     for part in last_line.split(',') {
         let trimmed = part.trim();
         if trimmed.contains("file") {
-            if let Some(num) = trimmed.split_whitespace().next().and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(num) = trimmed
+                .split_whitespace()
+                .next()
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 files = num;
             }
         } else if trimmed.contains("insertion") {
-            if let Some(num) = trimmed.split_whitespace().next().and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(num) = trimmed
+                .split_whitespace()
+                .next()
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 insertions = num;
             }
         } else if trimmed.contains("deletion") {
-            if let Some(num) = trimmed.split_whitespace().next().and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(num) = trimmed
+                .split_whitespace()
+                .next()
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 deletions = num;
             }
         }
@@ -433,7 +482,9 @@ mod tests {
         let session_id = "test-sess-1";
 
         // 1. Create baseline checkpoint
-        let cp1 = mgr.create_checkpoint(session_id, 1, "Initial state").await?;
+        let cp1 = mgr
+            .create_checkpoint(session_id, 1, "Initial state")
+            .await?;
         assert_eq!(cp1.turn_index, 1);
 
         // 2. Simulate AI modifications: modify file1 and add file2
@@ -445,8 +496,12 @@ mod tests {
         let diff = mgr.get_diff(session_id, None).await?;
         assert_eq!(diff.files_changed, 2);
         assert!(diff.diff_content.contains("+pub fn helper() {}"));
-        assert!(diff.diff_content.contains("-fn main() { println!(\"v1\"); }"));
-        assert!(diff.diff_content.contains("+fn main() { println!(\"v2 modified\"); }"));
+        assert!(diff
+            .diff_content
+            .contains("-fn main() { println!(\"v1\"); }"));
+        assert!(diff
+            .diff_content
+            .contains("+fn main() { println!(\"v2 modified\"); }"));
 
         // 4. Undo modifications
         let undo_res = mgr.undo(session_id, Some(1)).await?;

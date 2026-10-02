@@ -1,8 +1,8 @@
+use crate::memory::ProjectMemory;
+use crate::repo_map::RepoMapGenerator;
 use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use crate::memory::ProjectMemory;
-use crate::repo_map::RepoMapGenerator;
 
 pub struct ContextManager {
     cwd: PathBuf,
@@ -15,7 +15,11 @@ impl ContextManager {
         let cwd = cwd.into();
         let repo_map = Arc::new(RepoMapGenerator::new(&cwd));
         let memory = Arc::new(ProjectMemory::new(&cwd));
-        Self { cwd, repo_map, memory }
+        Self {
+            cwd,
+            repo_map,
+            memory,
+        }
     }
 
     pub fn repo_map(&self) -> &Arc<RepoMapGenerator> {
@@ -55,15 +59,16 @@ impl ContextManager {
              - Current Time: {now}\n\n\
              Guidelines:\n\
              - Always inspect existing files before making modifications.\n\
-             - Use the provided tools (read_file, write_file, edit_file, bash, grep, glob, get_codebase_map) to explore and make changes.\n\
+             - Use the provided tools (read_file, write_file, edit_file, bash, grep, glob, web_search, fetch_web_content, get_codebase_map) to explore and make changes.\n\
+             - When researching modern libraries, new crate versions, breaking API changes, or unfamiliar error messages, proactively use `web_search` and `fetch_web_content` to consult up-to-date documentation.\n\
              - Keep responses concise and focused on the solution.\n\
              - Prefer surgical edits using `edit_file` over overwriting complete files when possible.\n"
         );
 
         if let Some(instructions) = self.discover_instructions().await {
-            prompt.push_str("\n");
+            prompt.push('\n');
             prompt.push_str(&instructions);
-            prompt.push_str("\n");
+            prompt.push('\n');
         }
 
         // Generate and inject concise codebase skeleton map

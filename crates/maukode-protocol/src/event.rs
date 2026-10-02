@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::message::{ToolCall, ToolResult};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,11 +41,23 @@ pub struct PermissionRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LLMEvent {
-    TextDelta { text: String },
-    ReasoningDelta { text: String },
-    ToolCallStart { id: String, name: String },
-    ToolCallDelta { id: String, delta: String },
-    ToolCallFinish { tool_call: ToolCall },
+    TextDelta {
+        text: String,
+    },
+    ReasoningDelta {
+        text: String,
+    },
+    ToolCallStart {
+        id: String,
+        name: String,
+    },
+    ToolCallDelta {
+        id: String,
+        delta: String,
+    },
+    ToolCallFinish {
+        tool_call: ToolCall,
+    },
     ToolResult(ToolResult),
     PermissionRequest(PermissionRequest),
     Usage(TokenUsage),
@@ -55,8 +67,12 @@ pub enum LLMEvent {
         percent: u32,
         message: String,
     },
-    Finish { reason: FinishReason },
-    Error { message: String },
+    Finish {
+        reason: FinishReason,
+    },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,4 +162,3 @@ pub struct CompactResponse {
     pub compacted_tokens: usize,
     pub summary: String,
 }
-

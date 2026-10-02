@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use crate::compaction::estimator::TokenEstimator;
+use crate::session::Session;
 use anyhow::Result;
 use futures::StreamExt;
 use maukode_llm::{LLMClient, LLMRequest};
 use maukode_protocol::{ContentPart, LLMEvent, Message, Role};
-use crate::compaction::estimator::TokenEstimator;
-use crate::session::Session;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 pub struct CompactionResult {
@@ -31,7 +31,9 @@ impl ConversationCompactor {
         let original_tokens = TokenEstimator::estimate_messages(&session.messages, "");
 
         if total_messages <= 4 {
-            let summary = "Session history is already compact (<= 4 messages). No compaction needed.".to_string();
+            let summary =
+                "Session history is already compact (<= 4 messages). No compaction needed."
+                    .to_string();
             return Ok(CompactionResult {
                 original_message_count: total_messages,
                 compacted_message_count: total_messages,
@@ -45,11 +47,7 @@ impl ConversationCompactor {
         let archived_messages = session.messages.clone();
 
         // Keep the most recent turns (last 2-4 messages)
-        let keep_count = if total_messages <= 6 {
-            2
-        } else {
-            4
-        };
+        let keep_count = if total_messages <= 6 { 2 } else { 4 };
         let split_idx = total_messages.saturating_sub(keep_count);
         let older_messages = &session.messages[..split_idx];
         let recent_messages = &session.messages[split_idx..];
@@ -131,8 +129,7 @@ impl ConversationCompactor {
             "Please summarize our conversation so far according to the specified structure.",
         ));
 
-        let req = LLMRequest::new(model, req_messages)
-            .with_system_prompt(&system_prompt);
+        let req = LLMRequest::new(model, req_messages).with_system_prompt(&system_prompt);
 
         let mut stream = client.stream(req).await?;
         let mut out = String::new();
@@ -175,26 +172,53 @@ impl ConversationCompactor {
                                     }
                                 }
                             }
-                            ContentPart::ToolCall(call) => {
-                                match call.name.as_str() {
-                                    "write_to_file" | "replace_file_content" | "edit_file" => {
-                                        if let Some(target) = call.arguments.get("TargetFile").or_else(|| call.arguments.get("path")).and_then(|v| v.as_str()) {
-                                            files_modified.insert(target.to_string());
-                                        }
+                            ContentPart::ToolCall(call) => match call.name.as_str() {
+                                "write_to_file" | "replace_file_content" | "edit_file" => {
+                                    if let Some(target) = call
+                                        .arguments
+                                        .get("TargetFile")
+                                        .or_else(|| call.arguments.get("path"))
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        files_modified.insert(target.to_string());
                                     }
-                                    "view_file" | "read_file" => {
-                                        if let Some(target) = call.arguments.get("AbsolutePath").or_else(|| call.arguments.get("path")).and_then(|v| v.as_str()) {
-                                            files_inspected.insert(target.to_string());
-                                        }
-                                    }
-                                    "bash" => {
-                                        if let Some(cmd) = call.arguments.get("command").or_else(|| call.arguments.get("CommandLine")).and_then(|v| v.as_str()) {
-                                            commands_run.push(cmd.to_string());
-                                        }
-                                    }
-                                    _ => {}
                                 }
-                            }
+                                "view_file" | "read_file" => {
+                                    if let Some(target) = call
+                                        .arguments
+                                        .get("AbsolutePath")
+                                        .or_else(|| call.arguments.get("path"))
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        files_inspected.insert(target.to_string());
+                                    }
+                                }
+                                "bash" => {
+                                    if let Some(cmd) = call
+                                        .arguments
+                                        .get("command")
+                                        .or_else(|| call.arguments.get("CommandLine"))
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        commands_run.push(cmd.to_string());
+                                    }
+                                }
+                                "web_search" | "search_web" => {
+                                    if let Some(q) =
+                                        call.arguments.get("query").and_then(|v| v.as_str())
+                                    {
+                                        commands_run.push(format!("web_search: \"{q}\""));
+                                    }
+                                }
+                                "fetch_web_content" | "fetch_url" | "read_url" => {
+                                    if let Some(u) =
+                                        call.arguments.get("url").and_then(|v| v.as_str())
+                                    {
+                                        commands_run.push(format!("fetch_url: {u}"));
+                                    }
+                                }
+                                _ => {}
+                            },
                             _ => {}
                         }
                     }

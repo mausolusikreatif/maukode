@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use maukode_protocol::{Message, SessionId, SessionMetadata, SessionState};
+use std::path::PathBuf;
 
 pub struct Session {
     pub id: SessionId,

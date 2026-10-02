@@ -1,6 +1,3 @@
-use std::io::{self, Write};
-use std::path::PathBuf;
-use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use maukode_core::{
     AppConfig, ContextManager, ProviderConfig, ProviderKind, RunnerConfig, Session, SessionRunner,
@@ -8,26 +5,49 @@ use maukode_core::{
 };
 use maukode_protocol::{LLMEvent, SessionId};
 use maukode_tools::create_default_registry;
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 mod remote;
 
 #[derive(Parser, Debug)]
-#[command(name = "maukode", author, version, about = "Agentic AI coding assistant in Rust (inspired by OpenCode)")]
+#[command(
+    name = "maukode",
+    author,
+    version,
+    about = "Agentic AI coding assistant in Rust (inspired by OpenCode)"
+)]
 struct Cli {
-    #[arg(short, long, help = "Model provider: 'anthropic', 'openai', 'ollama', etc.")]
+    #[arg(
+        short,
+        long,
+        help = "Model provider: 'anthropic', 'openai', 'ollama', etc."
+    )]
     provider: Option<String>,
 
-    #[arg(short, long, help = "Model identifier (e.g. claude-3-7-sonnet-20250219, gpt-4o, qwen2.5-coder)")]
+    #[arg(
+        short,
+        long,
+        help = "Model identifier (e.g. claude-3-7-sonnet-20250219, gpt-4o, qwen2.5-coder)"
+    )]
     model: Option<String>,
 
-    #[arg(long, help = "API key (defaults to ANTHROPIC_API_KEY or OPENAI_API_KEY)")]
+    #[arg(
+        long,
+        help = "API key (defaults to ANTHROPIC_API_KEY or OPENAI_API_KEY)"
+    )]
     api_key: Option<String>,
 
     #[arg(long, help = "Custom base URL for the LLM API")]
     base_url: Option<String>,
 
-    #[arg(short = 'C', long, help = "Working directory (defaults to current dir)")]
+    #[arg(
+        short = 'C',
+        long,
+        help = "Working directory (defaults to current dir)"
+    )]
     cwd: Option<PathBuf>,
 
     #[arg(short = 's', long, help = "Resume a specific session by UUID")]
@@ -36,25 +56,45 @@ struct Cli {
     #[arg(short = 'c', long, help = "Continue the latest session")]
     continue_session: bool,
 
-    #[arg(long, default_value_t = 25, help = "Maximum turns of tool execution loop")]
+    #[arg(
+        long,
+        default_value_t = 25,
+        help = "Maximum turns of tool execution loop"
+    )]
     max_steps: usize,
 
-    #[arg(long, help = "Run in simple command-line REPL mode instead of full TUI")]
+    #[arg(
+        long,
+        help = "Run in simple command-line REPL mode instead of full TUI"
+    )]
     cli: bool,
 
-    #[arg(long, help = "Remote server URL (e.g. http://vps:4096) to connect to instead of local in-process")]
+    #[arg(
+        long,
+        help = "Remote server URL (e.g. http://vps:4096) to connect to instead of local in-process"
+    )]
     remote: Option<String>,
 
-    #[arg(long, env = "MAUKODE_AUTH_TOKEN", help = "Authentication Bearer token for remote server")]
+    #[arg(
+        long,
+        env = "MAUKODE_AUTH_TOKEN",
+        help = "Authentication Bearer token for remote server"
+    )]
     token: Option<String>,
 
-    #[arg(long, help = "Run in standalone in-process mode without local background daemon")]
+    #[arg(
+        long,
+        help = "Run in standalone in-process mode without local background daemon"
+    )]
     standalone: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
 
-    #[arg(trailing_var_arg = true, help = "Optional direct prompt (if no subcommand given)")]
+    #[arg(
+        trailing_var_arg = true,
+        help = "Optional direct prompt (if no subcommand given)"
+    )]
     prompt: Vec<String>,
 }
 
@@ -75,10 +115,20 @@ enum Commands {
         #[command(subcommand)]
         action: Option<ServerAction>,
 
-        #[arg(short, long, default_value = "127.0.0.1:4096", help = "Socket address to bind foreground server to (e.g. 0.0.0.0:4096)")]
+        #[arg(
+            short,
+            long,
+            default_value = "127.0.0.1:4096",
+            help = "Socket address to bind foreground server to (e.g. 0.0.0.0:4096)"
+        )]
         bind: String,
 
-        #[arg(short, long, env = "MAUKODE_AUTH_TOKEN", help = "Secret Bearer token required for clients")]
+        #[arg(
+            short,
+            long,
+            env = "MAUKODE_AUTH_TOKEN",
+            help = "Secret Bearer token required for clients"
+        )]
         token: Option<String>,
 
         #[arg(short = 'd', long, help = "Default root directory for workspaces")]
@@ -120,7 +170,9 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let cwd = cli.cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let cwd = cli
+        .cwd
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     // Handle "init" subcommand
     if let Some(Commands::Init { force }) = cli.command {
@@ -137,14 +189,23 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Handle "server" subcommand
-    if let Some(Commands::Server { action, bind, token, dir }) = cli.command {
+    if let Some(Commands::Server {
+        action,
+        bind,
+        token,
+        dir,
+    }) = cli.command
+    {
         match action {
             Some(ServerAction::Start { port, token }) => {
                 let info = maukode_server::ensure_daemon_running(port, token).await?;
                 println!("🚀 MauKode daemon started in background");
                 println!("  URL: \x1b[1;32m{}\x1b[0m", info.url);
                 println!("  PID: {}", info.pid);
-                println!("  Log: \x1b[2m{}\x1b[0m", maukode_server::daemon::daemon_log_path().display());
+                println!(
+                    "  Log: \x1b[2m{}\x1b[0m",
+                    maukode_server::daemon::daemon_log_path().display()
+                );
                 return Ok(());
             }
             Some(ServerAction::Stop) => {
@@ -160,7 +221,10 @@ async fn main() -> anyhow::Result<()> {
                     println!("● \x1b[1;32mMauKode daemon is running\x1b[0m");
                     println!("  URL: \x1b[1;32m{}\x1b[0m", info.url);
                     println!("  PID: {}", info.pid);
-                    println!("  Log: \x1b[2m{}\x1b[0m", maukode_server::daemon::daemon_log_path().display());
+                    println!(
+                        "  Log: \x1b[2m{}\x1b[0m",
+                        maukode_server::daemon::daemon_log_path().display()
+                    );
                 } else {
                     println!("○ \x1b[1;33mMauKode daemon is stopped\x1b[0m");
                 }
@@ -182,7 +246,9 @@ async fn main() -> anyhow::Result<()> {
                     .map_err(|e| anyhow::anyhow!("Invalid bind address '{bind}': {e}"))?;
 
                 println!("══════════════════════════════════════════════════════════════════");
-                println!("  🚀 \x1b[1;36mMauKode Server\x1b[0m (Foreground Daemon for VPS / Local)");
+                println!(
+                    "  🚀 \x1b[1;36mMauKode Server\x1b[0m (Foreground Daemon for VPS / Local)"
+                );
                 println!("  Listening on: \x1b[1;32mhttp://{}\x1b[0m", bind_addr);
                 if token.is_some() {
                     println!("  Authentication: \x1b[1;33mBearer Token Enabled\x1b[0m");
@@ -190,7 +256,10 @@ async fn main() -> anyhow::Result<()> {
                     println!("  Authentication: \x1b[1;31mDisabled (Open Access)\x1b[0m");
                 }
                 let workspace_dir = dir.as_deref().unwrap_or(&cwd);
-                println!("  Default workspace: \x1b[2m{}\x1b[0m", workspace_dir.display());
+                println!(
+                    "  Default workspace: \x1b[2m{}\x1b[0m",
+                    workspace_dir.display()
+                );
                 println!("══════════════════════════════════════════════════════════════════\n");
 
                 let server_config = maukode_server::ServerConfig {
@@ -233,7 +302,9 @@ async fn main() -> anyhow::Result<()> {
         match maukode_server::ensure_daemon_running(4096, None).await {
             Ok(info) => Some((info.url, info.token)),
             Err(e) => {
-                tracing::warn!("Could not start local daemon: {e}. Falling back to in-process mode.");
+                tracing::warn!(
+                    "Could not start local daemon: {e}. Falling back to in-process mode."
+                );
                 None
             }
         }
@@ -244,12 +315,19 @@ async fn main() -> anyhow::Result<()> {
     if let Some((url, token)) = remote_url_to_use {
         let client = Arc::new(maukode_server::ServerClient::new(&url, token)?);
         let is_remote_vps = cli.remote.is_some();
-        let label = if is_remote_vps { "remote server" } else { "local daemon" };
+        let label = if is_remote_vps {
+            "remote server"
+        } else {
+            "local daemon"
+        };
 
         let target_session_id = if let Some(id) = parsed_session_id {
             id
         } else if cli.continue_session {
-            let sessions = client.list_sessions(Some(&cwd), false).await.unwrap_or_default();
+            let sessions = client
+                .list_sessions(Some(&cwd), false)
+                .await
+                .unwrap_or_default();
             if let Some(first) = sessions.first() {
                 first.id
             } else {
@@ -260,7 +338,10 @@ async fn main() -> anyhow::Result<()> {
         };
 
         if let Some(prompt) = prompt_to_run {
-            println!("🚀 \x1b[1;36mMauKode\x1b[0m running via {label} (\x1b[2m{}\x1b[0m)", client.base_url());
+            println!(
+                "🚀 \x1b[1;36mMauKode\x1b[0m running via {label} (\x1b[2m{}\x1b[0m)",
+                client.base_url()
+            );
             println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
             remote::run_remote_turn(&client, target_session_id, &prompt).await?;
             return Ok(());
@@ -268,7 +349,10 @@ async fn main() -> anyhow::Result<()> {
 
         if cli.cli {
             println!("══════════════════════════════════════════════════════════════════");
-            println!("  🤖 \x1b[1;36mMauKode\x1b[0m (Connected to {label} at {})", client.base_url());
+            println!(
+                "  🤖 \x1b[1;36mMauKode\x1b[0m (Connected to {label} at {})",
+                client.base_url()
+            );
             println!("  Workspace: \x1b[2m{}\x1b[0m", cwd.display());
             println!("  Type 'exit' to quit.");
             println!("══════════════════════════════════════════════════════════════════\n");
@@ -323,16 +407,24 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 }
                 if trimmed == "/map" || trimmed == "/repomap" {
-                    match client.get_codebase_map(target_session_id, None, None, Some(1000)).await {
+                    match client
+                        .get_codebase_map(target_session_id, None, None, Some(1000))
+                        .await
+                    {
                         Ok(resp) => {
-                            println!("\x1b[1;32m=== Codebase Map (Tree-Sitter AST) ===\x1b[0m\n{}", resp.map);
+                            println!(
+                                "\x1b[1;32m=== Codebase Map (Tree-Sitter AST) ===\x1b[0m\n{}",
+                                resp.map
+                            );
                         }
                         Err(e) => eprintln!("\x1b[31mFailed to get codebase map: {e}\x1b[0m"),
                     }
                     continue;
                 }
                 if trimmed == "/init" || trimmed.starts_with("/init ") {
-                    let force = trimmed.split_whitespace().any(|p| p == "--force" || p == "-f");
+                    let force = trimmed
+                        .split_whitespace()
+                        .any(|p| p == "--force" || p == "-f");
                     match client.init_project(target_session_id, force).await {
                         Ok(resp) => {
                             if resp.created || resp.overwritten {
@@ -349,7 +441,9 @@ async fn main() -> anyhow::Result<()> {
                 if trimmed == "/mcp" {
                     match client.list_mcp_servers(target_session_id).await {
                         Ok(resp) => {
-                            println!("\x1b[1;36m=== Model Context Protocol (MCP) Servers ===\x1b[0m");
+                            println!(
+                                "\x1b[1;36m=== Model Context Protocol (MCP) Servers ===\x1b[0m"
+                            );
                             if resp.servers.is_empty() {
                                 println!("No MCP servers configured.");
                             } else {
@@ -364,7 +458,10 @@ async fn main() -> anyhow::Result<()> {
                                     } else {
                                         println!("  Tools ({}):", s.tools.len());
                                         for t in s.tools {
-                                            println!("    - \x1b[1m{}\x1b[0m: {}", t.name, t.description);
+                                            println!(
+                                                "    - \x1b[1m{}\x1b[0m: {}",
+                                                t.name, t.description
+                                            );
                                         }
                                     }
                                 }
@@ -380,19 +477,28 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         None
                     };
-                    println!("\x1b[2mCompacting conversation history and summarizing state...\x1b[0m");
+                    println!(
+                        "\x1b[2mCompacting conversation history and summarizing state...\x1b[0m"
+                    );
                     match client.compact_session(target_session_id, focus).await {
                         Ok(resp) => {
-                            let saved_tokens = resp.original_tokens.saturating_sub(resp.compacted_tokens);
+                            let saved_tokens =
+                                resp.original_tokens.saturating_sub(resp.compacted_tokens);
                             let saved_pct = if resp.original_tokens > 0 {
                                 (saved_tokens as f32 / resp.original_tokens as f32) * 100.0
                             } else {
                                 0.0
                             };
                             println!("\x1b[1;32m✓ Conversation Compacted Successfully!\x1b[0m");
-                            println!("  Messages: \x1b[1m{}\x1b[0m → \x1b[1m{}\x1b[0m", resp.original_messages, resp.compacted_messages);
+                            println!(
+                                "  Messages: \x1b[1m{}\x1b[0m → \x1b[1m{}\x1b[0m",
+                                resp.original_messages, resp.compacted_messages
+                            );
                             println!("  Tokens:   \x1b[2m~{}\x1b[0m → \x1b[2m~{}\x1b[0m (\x1b[1;32m{:.1}% saved\x1b[0m)", resp.original_tokens, resp.compacted_tokens, saved_pct);
-                            println!("\n\x1b[1;36m=== Compacted State Summary ===\x1b[0m\n{}", resp.summary.trim());
+                            println!(
+                                "\n\x1b[1;36m=== Compacted State Summary ===\x1b[0m\n{}",
+                                resp.summary.trim()
+                            );
                         }
                         Err(e) => eprintln!("\x1b[31mFailed to compact session: {e}\x1b[0m"),
                     }
@@ -406,7 +512,13 @@ async fn main() -> anyhow::Result<()> {
         }
 
         // Launch full Interactive TUI connected to daemon / server!
-        maukode_tui::run_tui(cwd, Some(target_session_id), cli.continue_session, Some(client)).await?;
+        maukode_tui::run_tui(
+            cwd,
+            Some(target_session_id),
+            cli.continue_session,
+            Some(client),
+        )
+        .await?;
         return Ok(());
     }
 
@@ -418,7 +530,10 @@ async fn main() -> anyhow::Result<()> {
             config.set_active_provider(&prov_id)?;
         } else {
             // New provider specified on CLI
-            let base = cli.base_url.clone().unwrap_or_else(|| "https://api.openai.com".to_string());
+            let base = cli
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.openai.com".to_string());
             let prov = ProviderConfig {
                 id: p.to_lowercase(),
                 name: p.clone(),
@@ -443,9 +558,15 @@ async fn main() -> anyhow::Result<()> {
         println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
 
         let active_sess = if let Some(id) = parsed_session_id {
-            store.load_session(id).await?.unwrap_or_else(|| Session::new(&cwd))
+            store
+                .load_session(id)
+                .await?
+                .unwrap_or_else(|| Session::new(&cwd))
         } else if cli.continue_session {
-            store.get_latest_session_in_directory(&cwd).await?.unwrap_or_else(|| Session::new(&cwd))
+            store
+                .get_latest_session_in_directory(&cwd)
+                .await?
+                .unwrap_or_else(|| Session::new(&cwd))
         } else {
             Session::new(&cwd)
         };
@@ -463,9 +584,14 @@ async fn main() -> anyhow::Result<()> {
         } else {
             create_default_registry(&cwd)
         };
+        config.configure_web_search_in_registry(&mut tool_reg);
         let mcp_manager = Arc::new(maukode_core::McpManager::new());
-        mcp_manager.register_tools_into_registry(&mut tool_reg, &cwd, &config).await;
-        tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+        mcp_manager
+            .register_tools_into_registry(&mut tool_reg, &cwd, &config)
+            .await;
+        tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
+            context.repo_map(),
+        ))));
         let tools = Arc::new(tool_reg);
         let llm_client = config.create_active_llm_client()?;
 
@@ -491,7 +617,9 @@ async fn main() -> anyhow::Result<()> {
 
         // Save session to SQLite
         let guard = session_arc.read().await;
-        store.save_session(&guard, &config.active_provider, &config.active_model).await?;
+        store
+            .save_session(&guard, &config.active_provider, &config.active_model)
+            .await?;
         println!("\n\x1b[2m[Session saved to SQLite: {}]\x1b[0m", guard.id);
         return Ok(());
     }
@@ -500,14 +628,23 @@ async fn main() -> anyhow::Result<()> {
     if cli.cli {
         println!("══════════════════════════════════════════════════════════════════");
         println!("  🤖 \x1b[1;36mMauKode\x1b[0m - AI Coding Agent (CLI Mode)");
-        println!("  Provider: \x1b[1;32m{}\x1b[0m | Model: \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
+        println!(
+            "  Provider: \x1b[1;32m{}\x1b[0m | Model: \x1b[1;33m{}\x1b[0m",
+            config.active_provider, config.active_model
+        );
         println!("  Commands: /diff, /undo, /map, /init, /mcp, /compact, exit");
         println!("══════════════════════════════════════════════════════════════════\n");
 
         let active_sess = if let Some(id) = parsed_session_id {
-            store.load_session(id).await?.unwrap_or_else(|| Session::new(&cwd))
+            store
+                .load_session(id)
+                .await?
+                .unwrap_or_else(|| Session::new(&cwd))
         } else if cli.continue_session {
-            store.get_latest_session_in_directory(&cwd).await?.unwrap_or_else(|| Session::new(&cwd))
+            store
+                .get_latest_session_in_directory(&cwd)
+                .await?
+                .unwrap_or_else(|| Session::new(&cwd))
         } else {
             Session::new(&cwd)
         };
@@ -526,9 +663,14 @@ async fn main() -> anyhow::Result<()> {
         } else {
             create_default_registry(&cwd)
         };
+        config.configure_web_search_in_registry(&mut tool_reg);
         let mcp_manager = Arc::new(maukode_core::McpManager::new());
-        mcp_manager.register_tools_into_registry(&mut tool_reg, &cwd, &config).await;
-        tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(context.repo_map()))));
+        mcp_manager
+            .register_tools_into_registry(&mut tool_reg, &cwd, &config)
+            .await;
+        tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
+            context.repo_map(),
+        ))));
         let tools = Arc::new(tool_reg);
         let llm_client = config.create_active_llm_client()?;
         let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&cwd).await?);
@@ -608,7 +750,11 @@ async fn main() -> anyhow::Result<()> {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 let subpath = parts.get(1).map(|s| s.to_string());
                 println!("\x1b[2mGenerating codebase repository map...\x1b[0m");
-                match context.repo_map().generate_map(1024, subpath.as_deref(), None).await {
+                match context
+                    .repo_map()
+                    .generate_map(1024, subpath.as_deref(), None)
+                    .await
+                {
                     Ok(map) => {
                         println!("\x1b[1;36m=== Codebase Map ===\x1b[0m");
                         if map.is_empty() {
@@ -622,8 +768,12 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
             if trimmed == "/init" || trimmed.starts_with("/init ") {
-                let force = trimmed.split_whitespace().any(|p| p == "--force" || p == "-f");
-                println!("\x1b[2mScanning project stack and generating standard AGENTS.md...\x1b[0m");
+                let force = trimmed
+                    .split_whitespace()
+                    .any(|p| p == "--force" || p == "-f");
+                println!(
+                    "\x1b[2mScanning project stack and generating standard AGENTS.md...\x1b[0m"
+                );
                 match maukode_core::init_project(&cwd, force).await {
                     Ok(res) => {
                         if res.created || res.overwritten {
@@ -677,20 +827,37 @@ async fn main() -> anyhow::Result<()> {
                     llm_client.as_deref(),
                     &config.active_model,
                     focus,
-                ).await {
+                )
+                .await
+                {
                     Ok(resp) => {
-                        let _ = store.archive_session_messages(session_guard.id, &resp.archived_messages).await;
-                        let _ = store.save_session(&session_guard, &config.active_provider, &config.active_model).await;
-                        let saved_tokens = resp.original_tokens.saturating_sub(resp.compacted_tokens);
+                        let _ = store
+                            .archive_session_messages(session_guard.id, &resp.archived_messages)
+                            .await;
+                        let _ = store
+                            .save_session(
+                                &session_guard,
+                                &config.active_provider,
+                                &config.active_model,
+                            )
+                            .await;
+                        let saved_tokens =
+                            resp.original_tokens.saturating_sub(resp.compacted_tokens);
                         let saved_pct = if resp.original_tokens > 0 {
                             (saved_tokens as f32 / resp.original_tokens as f32) * 100.0
                         } else {
                             0.0
                         };
                         println!("\x1b[1;32m✓ Conversation Compacted Successfully!\x1b[0m");
-                        println!("  Messages: \x1b[1m{}\x1b[0m → \x1b[1m{}\x1b[0m", resp.original_message_count, resp.compacted_message_count);
+                        println!(
+                            "  Messages: \x1b[1m{}\x1b[0m → \x1b[1m{}\x1b[0m",
+                            resp.original_message_count, resp.compacted_message_count
+                        );
                         println!("  Tokens:   \x1b[2m~{}\x1b[0m → \x1b[2m~{}\x1b[0m (\x1b[1;32m{:.1}% saved\x1b[0m)", resp.original_tokens, resp.compacted_tokens, saved_pct);
-                        println!("\n\x1b[1;36m=== Compacted State Summary ===\x1b[0m\n{}", resp.summary.trim());
+                        println!(
+                            "\n\x1b[1;36m=== Compacted State Summary ===\x1b[0m\n{}",
+                            resp.summary.trim()
+                        );
                     }
                     Err(e) => eprintln!("\x1b[31mFailed to compact session: {e}\x1b[0m"),
                 }
@@ -698,9 +865,16 @@ async fn main() -> anyhow::Result<()> {
             }
 
             println!();
-            execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(trimmed.to_string())).await?;
+            execute_turn(
+                &runner,
+                Some(Arc::clone(&perm_mgr)),
+                Some(trimmed.to_string()),
+            )
+            .await?;
             let guard = session_arc.read().await;
-            store.save_session(&guard, &config.active_provider, &config.active_model).await?;
+            store
+                .save_session(&guard, &config.active_provider, &config.active_model)
+                .await?;
             println!("\n");
         }
         return Ok(());
@@ -751,7 +925,9 @@ async fn execute_turn(
                         print!("\x1b[0m\n\n");
                         in_reasoning = false;
                     }
-                    println!("\n\x1b[1;35m⚡ Tool Call: \x1b[1;37m{name}\x1b[0m \x1b[2m({id})\x1b[0m");
+                    println!(
+                        "\n\x1b[1;35m⚡ Tool Call: \x1b[1;37m{name}\x1b[0m \x1b[2m({id})\x1b[0m"
+                    );
                 }
                 LLMEvent::ToolCallFinish { tool_call } => {
                     println!("\x1b[2m  Args: {}\x1b[0m", tool_call.arguments);
@@ -762,7 +938,10 @@ async fn execute_turn(
                     } else {
                         "\x1b[1;32m✓ Tool Result:\x1b[0m"
                     };
-                    println!("{badge} \x1b[1m{}\x1b[0m \x1b[2m({})\x1b[0m", tr.tool_name, tr.tool_call_id);
+                    println!(
+                        "{badge} \x1b[1m{}\x1b[0m \x1b[2m({})\x1b[0m",
+                        tr.tool_name, tr.tool_call_id
+                    );
                     let preview = if tr.content.len() > 300 {
                         format!("{}... (truncated)", &tr.content[..300])
                     } else {
@@ -784,11 +963,19 @@ async fn execute_turn(
                             .unwrap_or_default()
                     );
                 }
-                LLMEvent::ContextWarning { current_tokens, max_tokens, percent, message } => {
+                LLMEvent::ContextWarning {
+                    current_tokens,
+                    max_tokens,
+                    percent,
+                    message,
+                } => {
                     println!("\n\x1b[1;33m⚠️  [CONTEXT WARNING]\x1b[0m {message} ({current_tokens}/{max_tokens} tokens, {percent}%)");
                 }
                 LLMEvent::PermissionRequest(req) => {
-                    let cmd = req.command.as_deref().unwrap_or(req.path.as_deref().unwrap_or(&req.description));
+                    let cmd = req
+                        .command
+                        .as_deref()
+                        .unwrap_or(req.path.as_deref().unwrap_or(&req.description));
                     println!("\n\x1b[1;33m⚠️  [CONFIRMATION REQUIRED]\x1b[0m");
                     println!("  Tool: \x1b[1m{}\x1b[0m", req.tool_name);
                     println!("  Command: \x1b[1;37m{}\x1b[0m", cmd);

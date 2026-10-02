@@ -1,9 +1,9 @@
+use super::RepoMapGenerator;
 use async_trait::async_trait;
 use maukode_tools::{Tool, ToolError};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use super::RepoMapGenerator;
 
 pub struct CodebaseMapTool {
     generator: Arc<RepoMapGenerator>,

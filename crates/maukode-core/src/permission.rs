@@ -1,24 +1,19 @@
+use maukode_protocol::PermissionDecision;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
-use maukode_protocol::PermissionDecision;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionMode {
     /// Ask for confirmation on dangerous commands (default)
+    #[default]
     Ask,
     /// Ask for confirmation on all commands and operations
     Strict,
     /// Auto-allow all operations without prompting
     Trust,
-}
-
-impl Default for PermissionMode {
-    fn default() -> Self {
-        Self::Ask
-    }
 }
 
 #[derive(Clone)]
@@ -91,7 +86,10 @@ impl PermissionManager {
     }
 
     /// Register a pending permission request and obtain a receiver
-    pub async fn register_request(&self, request_id: String) -> oneshot::Receiver<PermissionDecision> {
+    pub async fn register_request(
+        &self,
+        request_id: String,
+    ) -> oneshot::Receiver<PermissionDecision> {
         let (tx, rx) = oneshot::channel();
         let mut guard = self.pending.lock().await;
         guard.insert(request_id, tx);
