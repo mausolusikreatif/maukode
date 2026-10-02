@@ -893,10 +893,7 @@ async fn execute_turn(
 ) -> anyhow::Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<LLMEvent>();
 
-    let runner_task = {
-        let runner = runner;
-        async move { runner.run(prompt, event_tx).await }
-    };
+    let runner_task = async move { runner.run(prompt, event_tx).await };
 
     let display_task = async {
         let mut stdout = io::stdout();

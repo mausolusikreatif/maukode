@@ -279,23 +279,21 @@ def main():
 
     #[test]
     fn test_symbol_graph_and_formatter() {
-        let mut defs1 = Vec::new();
-        defs1.push(SymbolDef {
+        let defs1 = vec![SymbolDef {
             name: "CoreService".to_string(),
             kind: SymbolKind::Struct,
             signature: "pub struct CoreService".to_string(),
             line: 5,
             parent: None,
-        });
+        }];
 
-        let mut defs2 = Vec::new();
-        defs2.push(SymbolDef {
+        let defs2 = vec![SymbolDef {
             name: "Consumer".to_string(),
             kind: SymbolKind::Struct,
             signature: "pub struct Consumer".to_string(),
             line: 10,
             parent: None,
-        });
+        }];
 
         let mut refs2 = std::collections::HashSet::new();
         refs2.insert("CoreService".to_string());

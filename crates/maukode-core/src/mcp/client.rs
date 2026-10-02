@@ -11,10 +11,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
+type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>>>;
+
 pub struct McpClient {
     name: String,
     stdin_tx: mpsc::Sender<String>,
-    pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>>>,
+    pending_requests: PendingRequests,
     next_id: AtomicU64,
     child: Arc<Mutex<Option<Child>>>,
 }
@@ -81,9 +83,7 @@ impl McpClient {
         });
 
         // 3. Setup response dispatching from stdout
-        let pending_requests: Arc<
-            Mutex<HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>>,
-        > = Arc::new(Mutex::new(HashMap::new()));
+        let pending_requests: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
         let pending_map = Arc::clone(&pending_requests);
         let s_name = name.clone();
 

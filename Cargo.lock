@@ -1579,9 +1579,11 @@ dependencies = [
  "maukode-tools",
  "ratatui",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tracing",
+ "unicode-width",
  "uuid",
 ]
 

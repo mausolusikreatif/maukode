@@ -39,6 +39,20 @@ pub struct ChatItem {
     pub content: String,
 }
 
+// Keep streamed chunks in one item so a burst does not create a widget per token.
+pub(crate) fn append_stream_delta(items: &mut Vec<ChatItem>, role: ChatRole, text: String) {
+    if let Some(last) = items.last_mut() {
+        if std::mem::discriminant(&last.role) == std::mem::discriminant(&role) {
+            last.content.push_str(&text);
+            return;
+        }
+    }
+    items.push(ChatItem {
+        role,
+        content: text,
+    });
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActiveModal {
     None,
@@ -76,6 +90,7 @@ pub enum ActiveModal {
     Help,
     PermissionConfirmation {
         request: PermissionRequest,
+        scroll: usize,
     },
 }
 
@@ -728,33 +743,18 @@ impl App {
     pub fn handle_llm_event(&mut self, event: LLMEvent) {
         match event {
             LLMEvent::PermissionRequest(req) => {
-                self.active_modal = ActiveModal::PermissionConfirmation { request: req };
+                self.active_modal = ActiveModal::PermissionConfirmation {
+                    request: req,
+                    scroll: 0,
+                };
                 self.set_status("⚠️ Action requires user confirmation");
             }
             LLMEvent::TextDelta { text } => {
-                if let Some(last) = self.items.last_mut() {
-                    if matches!(last.role, ChatRole::Assistant) {
-                        last.content.push_str(&text);
-                        return;
-                    }
-                }
-                self.items.push(ChatItem {
-                    role: ChatRole::Assistant,
-                    content: text,
-                });
+                append_stream_delta(&mut self.items, ChatRole::Assistant, text);
                 self.auto_scroll = true;
             }
             LLMEvent::ReasoningDelta { text } => {
-                if let Some(last) = self.items.last_mut() {
-                    if matches!(last.role, ChatRole::Reasoning) {
-                        last.content.push_str(&text);
-                        return;
-                    }
-                }
-                self.items.push(ChatItem {
-                    role: ChatRole::Reasoning,
-                    content: text,
-                });
+                append_stream_delta(&mut self.items, ChatRole::Reasoning, text);
                 self.auto_scroll = true;
             }
             LLMEvent::ToolCallStart { name, id } => {
@@ -1141,5 +1141,27 @@ impl App {
                 let _ = tx.send(AppEvent::SessionCompacted(res));
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn deterministic_stream_burst_coalesces_chunks_within_ci_budget() {
+        let mut items = Vec::new();
+        let started = Instant::now();
+        for _ in 0..20_000 {
+            append_stream_delta(&mut items, ChatRole::Assistant, "hello world ".into());
+        }
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].content.len(), 240_000);
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "20,000 stream chunks took {:?}",
+            started.elapsed()
+        );
     }
 }

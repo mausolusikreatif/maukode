@@ -10,25 +10,42 @@ use ratatui::{
     },
     Frame,
 };
+use unicode_width::UnicodeWidthChar;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.area();
 
-    // 1-line Telemetry Header, Maximum Chat Viewport, 3-line Input & Hint Area
+    // Grow the prompt up to six rows while retaining space for chat and hints.
+    let desired_input_rows = wrapped_input(&app.input, app.cursor_pos, size.width)
+        .0
+        .len()
+        .min(u16::MAX as usize) as u16;
+    let input_rows = desired_input_rows
+        .min(6)
+        .min(size.height.saturating_sub(6))
+        .max(1);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Minimalist telemetry status bar
-            Constraint::Min(4),    // Chat viewport
-            Constraint::Length(3), // Input: hairline border, prompt line, contextual hints
+            Constraint::Length(1),              // Minimalist telemetry status bar
+            Constraint::Min(4),                 // Chat viewport
+            Constraint::Length(input_rows + 2), // Divider, wrapped prompt, hints
         ])
         .split(size);
 
     draw_header(f, app, chunks[0]);
-    draw_messages(f, app, chunks[1]);
-    draw_input(f, app, chunks[2]);
+    draw_messages(
+        f,
+        &app.items,
+        &mut app.scroll,
+        &mut app.max_scroll,
+        app.auto_scroll,
+        chunks[1],
+    );
+    draw_input(f, &app.input, app.cursor_pos, app.is_running, chunks[2]);
 
     // Active modal overlays
+    let mut permission_max_scroll = None;
     match &app.active_modal {
         ActiveModal::None => {}
         ActiveModal::ProviderSelector { selected_idx } => {
@@ -68,9 +85,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ActiveModal::Help => {
             draw_help_modal(f);
         }
-        ActiveModal::PermissionConfirmation { request } => {
-            draw_permission_modal(f, request);
+        ActiveModal::PermissionConfirmation { request, scroll } => {
+            permission_max_scroll = Some(draw_permission_modal(f, request, *scroll));
         }
+    }
+    if let (Some(max_scroll), ActiveModal::PermissionConfirmation { scroll, .. }) =
+        (permission_max_scroll, &mut app.active_modal)
+    {
+        *scroll = (*scroll).min(max_scroll);
     }
 }
 
@@ -137,10 +159,17 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 // Messages Viewport: Clean Typography, Cards, Diff Highlighting
 // -------------------------------------------------------------
 
-fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
+fn draw_messages(
+    f: &mut Frame,
+    items: &[crate::app::ChatItem],
+    scroll: &mut usize,
+    max_scroll: &mut usize,
+    auto_scroll: bool,
+    area: Rect,
+) {
     let mut lines = Vec::new();
 
-    for item in &app.items {
+    for item in items {
         match &item.role {
             ChatRole::User => {
                 lines.push(Line::from(vec![Span::styled(
@@ -292,33 +321,29 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    let inner_width = area.width.saturating_sub(4).max(1) as usize;
-    let mut total_visual_lines = 0;
-    for line in &lines {
-        let line_len = line.width();
-        let wrapped = (line_len + inner_width - 1) / inner_width;
-        total_visual_lines += wrapped.max(1);
-    }
+    // Use the same word wrapping algorithm as Paragraph when computing scroll bounds.
+    let viewport_height = area.height.saturating_sub(1) as usize;
+    let content_width = area.width.max(1);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let visual_lines = paragraph.line_count(content_width);
+    *max_scroll = visual_lines.saturating_sub(viewport_height);
 
-    let viewport_height = area.height.saturating_sub(2) as usize;
-    app.max_scroll = total_visual_lines.saturating_sub(viewport_height);
-
-    if app.auto_scroll {
-        app.scroll = app.max_scroll;
+    if auto_scroll {
+        *scroll = *max_scroll;
     } else {
-        app.scroll = app.scroll.min(app.max_scroll);
+        *scroll = (*scroll).min(*max_scroll);
     }
 
-    let title = if app.auto_scroll {
+    let title = if auto_scroll {
         " Live Session ".to_string()
     } else {
         format!(
             " Scrolled [{}/{}] ── Press End to resume ",
-            app.scroll, app.max_scroll
+            *scroll, *max_scroll
         )
     };
 
-    let title_style = if app.auto_scroll {
+    let title_style = if auto_scroll {
         theme::dim_style()
     } else {
         Style::default()
@@ -332,16 +357,15 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         .border_style(theme::border_style())
         .title(Span::styled(title, title_style));
 
-    let paragraph = Paragraph::new(lines)
+    let paragraph = paragraph
         .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((app.scroll as u16, 0));
+        .scroll(((*scroll).min(u16::MAX as usize) as u16, 0));
 
     f.render_widget(paragraph, area);
 
     // Render subtle scrollbar
-    if app.max_scroll > 0 {
-        let mut scrollbar_state = ScrollbarState::new(app.max_scroll).position(app.scroll);
+    if *max_scroll > 0 {
+        let mut scrollbar_state = ScrollbarState::new(*max_scroll).position(*scroll);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(None)
             .end_symbol(None)
@@ -364,19 +388,69 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
 // Input & Contextual Hint Bar
 // -------------------------------------------------------------
 
-fn draw_input(f: &mut Frame, app: &App, area: Rect) {
+fn wrapped_input(input: &str, cursor_pos: usize, width: u16) -> (Vec<String>, usize, u16) {
+    let content_width = width.saturating_sub(2).max(1) as usize;
+    let chars: Vec<char> = input.chars().collect();
+    let cursor_pos = cursor_pos.min(chars.len());
+    let mut rows = vec![String::new()];
+    let mut column = 0;
+    let mut cursor = (0, 2);
+
+    for (index, ch) in chars.iter().enumerate() {
+        let char_width = UnicodeWidthChar::width(*ch).unwrap_or(0);
+        if ch.is_whitespace() && column >= content_width {
+            rows.push(String::new());
+            column = 0;
+        }
+        if rows.len() > 1 && column == 0 && ch.is_whitespace() {
+            if index == cursor_pos {
+                cursor = (rows.len() - 1, 2);
+            }
+            continue;
+        }
+        if !ch.is_whitespace() && (index == 0 || chars[index - 1].is_whitespace()) {
+            let word_width: usize = chars[index..]
+                .iter()
+                .take_while(|next| !next.is_whitespace())
+                .map(|next| UnicodeWidthChar::width(*next).unwrap_or(0))
+                .sum();
+            if column > 0 && word_width <= content_width && column + word_width > content_width {
+                rows.push(String::new());
+                column = 0;
+            }
+        }
+        if column > 0 && column + char_width > content_width {
+            rows.push(String::new());
+            column = 0;
+        }
+        if index == cursor_pos {
+            cursor = (rows.len() - 1, (column + 2) as u16);
+        }
+        if let Some(row) = rows.last_mut() {
+            row.push(*ch);
+        }
+        column += char_width;
+    }
+    if cursor_pos == chars.len() {
+        if column >= content_width {
+            rows.push(String::new());
+            column = 0;
+        }
+        cursor = (rows.len() - 1, (column + 2) as u16);
+    }
+    (rows, cursor.0, cursor.1.min(width.saturating_sub(1)))
+}
+
+fn draw_input(f: &mut Frame, input: &str, cursor_pos: usize, is_busy: bool, area: Rect) {
     let input_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Top divider hairline
-            Constraint::Length(1), // Prompt line
-            Constraint::Length(1), // Contextual hotkey bar
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
         ])
         .split(area);
 
-    let is_busy = app.is_running;
-
-    // Row 0: Top divider with status title
     let title = if is_busy {
         Span::styled(
             " ⠋ MauKode is thinking... (press Esc to cancel) ",
@@ -385,7 +459,6 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     } else {
         Span::styled(" Prompt ", theme::dim_style())
     };
-
     let divider = Paragraph::new(Line::from(vec![
         Span::styled("─", theme::border_style()),
         title,
@@ -396,25 +469,35 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     ]));
     f.render_widget(divider, input_layout[0]);
 
-    // Row 1: Prompt line
-    let prompt_symbol = if is_busy {
-        Span::styled("⏳ ", Style::default().fg(COLOR_AMBER))
-    } else {
-        Span::styled("❯ ", theme::brand_style())
-    };
-
-    let prompt_line = Line::from(vec![
-        prompt_symbol,
-        Span::styled(&app.input, theme::text_style()),
-    ]);
-    let paragraph = Paragraph::new(prompt_line);
-    f.render_widget(paragraph, input_layout[1]);
-
-    // Cursor positioning
-    if !is_busy {
+    let (rows, cursor_row, cursor_column) = wrapped_input(input, cursor_pos, area.width);
+    let visible_rows = input_layout[1].height as usize;
+    let first_row = cursor_row.saturating_sub(visible_rows.saturating_sub(1));
+    let prompt_lines: Vec<Line> = rows
+        .iter()
+        .skip(first_row)
+        .take(visible_rows)
+        .enumerate()
+        .map(|(index, row)| {
+            let symbol = if index + first_row == 0 {
+                if is_busy {
+                    "● "
+                } else {
+                    "❯ "
+                }
+            } else {
+                "  "
+            };
+            Line::from(vec![
+                Span::styled(symbol, theme::brand_style()),
+                Span::styled(row.as_str(), theme::text_style()),
+            ])
+        })
+        .collect();
+    f.render_widget(Paragraph::new(prompt_lines), input_layout[1]);
+    if !is_busy && input_layout[1].height > 0 {
         f.set_cursor_position((
-            input_layout[1].x + 2 + app.cursor_pos as u16,
-            input_layout[1].y,
+            input_layout[1].x + cursor_column,
+            input_layout[1].y + (cursor_row - first_row) as u16,
         ));
     }
 
@@ -507,7 +590,7 @@ fn draw_model_modal(
     let inner = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Filter search box
+            Constraint::Length(4), // Wrapped filter search box
             Constraint::Min(4),    // Model list
             Constraint::Length(1), // Bottom hints
         ])
@@ -526,7 +609,17 @@ fn draw_model_modal(
         Span::styled("> ", theme::brand_style()),
         Span::styled(filter, theme::text_style()),
     ]);
-    let filter_p = Paragraph::new(filter_line).block(filter_block);
+    let filter_width = inner[0].width.saturating_sub(2).max(1);
+    let filter_rows = Paragraph::new(filter_line.clone())
+        .wrap(Wrap { trim: false })
+        .line_count(filter_width);
+    let filter_scroll = filter_rows
+        .saturating_sub(inner[0].height.saturating_sub(2) as usize)
+        .min(u16::MAX as usize) as u16;
+    let filter_p = Paragraph::new(filter_line)
+        .block(filter_block)
+        .wrap(Wrap { trim: false })
+        .scroll((filter_scroll, 0));
     f.render_widget(filter_p, inner[0]);
 
     if is_loading {
@@ -793,7 +886,7 @@ fn draw_add_provider_modal(
     default_model: &str,
     active_field: usize,
 ) {
-    let area = centered_rect(65, 55, f.area());
+    let area = centered_rect(75, 85, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -808,10 +901,10 @@ fn draw_add_provider_modal(
     let inner = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Name
-            Constraint::Length(3), // Base URL
-            Constraint::Length(3), // API Key
-            Constraint::Length(3), // Default Model
+            Constraint::Length(4), // Name
+            Constraint::Length(4), // Base URL
+            Constraint::Length(4), // API Key
+            Constraint::Length(4), // Default Model
             Constraint::Length(1), // Hint
         ])
         .margin(1)
@@ -849,7 +942,17 @@ fn draw_add_provider_modal(
                 },
             ));
 
-        let p = Paragraph::new(*val).block(field_block);
+        let field_width = inner[idx].width.saturating_sub(2).max(1);
+        let field_rows = Paragraph::new(*val)
+            .wrap(Wrap { trim: false })
+            .line_count(field_width);
+        let field_scroll = field_rows
+            .saturating_sub(inner[idx].height.saturating_sub(2) as usize)
+            .min(u16::MAX as usize) as u16;
+        let p = Paragraph::new(*val)
+            .block(field_block)
+            .wrap(Wrap { trim: false })
+            .scroll((field_scroll, 0));
         f.render_widget(p, inner[idx]);
     }
 
@@ -1006,12 +1109,25 @@ fn draw_help_modal(f: &mut Frame) {
     f.render_widget(p, area);
 }
 
-fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRequest) {
+fn draw_permission_modal(
+    f: &mut Frame,
+    request: &maukode_protocol::PermissionRequest,
+    scroll: usize,
+) -> usize {
     let screen = f.area();
     let area_width = (screen.width * 75 / 100)
         .max(64)
         .min(screen.width.saturating_sub(2));
-    let area_height = 17.min(screen.height.saturating_sub(2)).max(14);
+    let cmd_text = request
+        .command
+        .as_deref()
+        .unwrap_or(request.path.as_deref().unwrap_or(&request.description));
+    let command_rows = Paragraph::new(format!("  $ {cmd_text}"))
+        .wrap(Wrap { trim: false })
+        .line_count(area_width.saturating_sub(4).max(1));
+    let area_height = 14u16
+        .saturating_add(command_rows.min(u16::MAX as usize) as u16)
+        .min(screen.height.saturating_sub(2));
     let x = (screen.width.saturating_sub(area_width)) / 2;
     let y = (screen.height.saturating_sub(area_height)) / 2;
     let area = Rect::new(x, y, area_width, area_height);
@@ -1042,8 +1158,8 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
         .constraints([
             Constraint::Length(1), // Subtitle / intro
             Constraint::Min(3),    // Command / target box
-            Constraint::Length(1), // Risk description
-            Constraint::Length(1), // Blank
+            Constraint::Length(2), // Wrapped risk description
+            Constraint::Length(0), // No spacer on narrow terminals
             Constraint::Length(3), // Action options list (3 distinct choices)
         ])
         .margin(1)
@@ -1060,16 +1176,22 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
     f.render_widget(Paragraph::new(intro), inner[0]);
 
     // Command / details box
-    let cmd_text = request
-        .command
-        .as_deref()
-        .unwrap_or(request.path.as_deref().unwrap_or(&request.description));
+    let command_view_height = inner[1].height.saturating_sub(2) as usize;
+    let max_scroll = command_rows.saturating_sub(command_view_height);
+    let effective_scroll = scroll.min(max_scroll);
     let cmd_para = Paragraph::new(format!("  $ {cmd_text}"))
+        .scroll((effective_scroll.min(u16::MAX as usize) as u16, 0))
         .style(Style::default().fg(Color::White).bg(Color::Rgb(25, 25, 35)))
+        .wrap(Wrap { trim: false })
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
+                .border_style(Style::default().fg(Color::DarkGray))
+                .title(if max_scroll > 0 {
+                    " Command ↑↓ "
+                } else {
+                    " Command "
+                }),
         );
     f.render_widget(cmd_para, inner[1]);
 
@@ -1083,7 +1205,10 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
         ),
         Span::styled(&request.description, theme::text_style()),
     ]);
-    f.render_widget(Paragraph::new(risk_line), inner[2]);
+    f.render_widget(
+        Paragraph::new(risk_line).wrap(Wrap { trim: false }),
+        inner[2],
+    );
 
     // Action options list (explicit, beautifully structured, never cut off)
     let options = vec![
@@ -1130,6 +1255,7 @@ fn draw_permission_modal(f: &mut Frame, request: &maukode_protocol::PermissionRe
         ]),
     ];
     f.render_widget(Paragraph::new(options), inner[4]);
+    max_scroll
 }
 
 fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
@@ -1371,4 +1497,176 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
         Paragraph::new(footer).alignment(Alignment::Center),
         inner[3],
     );
+}
+
+#[cfg(test)]
+mod chat_viewport_tests {
+    use super::*;
+    use crate::app::ChatItem;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn render(
+        terminal: &mut Terminal<TestBackend>,
+        items: &[ChatItem],
+        scroll: &mut usize,
+        max_scroll: &mut usize,
+        auto_scroll: bool,
+    ) -> String {
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                draw_messages(frame, items, scroll, max_scroll, auto_scroll, area);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn input_wraps_and_keeps_unicode_cursor_visible() {
+        let (rows, row, column) = wrapped_input("ab界cd", 5, 6);
+        assert_eq!(rows, ["ab界", "cd"]);
+        assert_eq!((row, column), (1, 4));
+
+        let mut terminal = Terminal::new(TestBackend::new(12, 5)).unwrap();
+        terminal
+            .draw(|frame| draw_input(frame, "a long input that wraps", 23, false, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            screen.contains("input that") && screen.contains("wraps"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn provider_field_and_permission_command_show_wrapped_tail() {
+        let mut terminal = Terminal::new(TestBackend::new(100, 35)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_add_provider_modal(
+                    frame,
+                    "Local",
+                    "https://example.test/a/very/long/provider/path/with/final-segment",
+                    "",
+                    "model",
+                    1,
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let provider_screen: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(
+            provider_screen.contains("final-seg") && provider_screen.contains("ment"),
+            "{provider_screen}"
+        );
+
+        let request = maukode_protocol::PermissionRequest {
+            request_id: "req".into(),
+            session_id: "session".into(),
+            tool_name: "bash".into(),
+            command: Some(format!(
+                "{} final-command-tail",
+                "echo long words ".repeat(12)
+            )),
+            path: None,
+            risk_level: "warning".into(),
+            description: "A command with a longer explanation that should wrap".into(),
+        };
+        terminal
+            .draw(|frame| {
+                draw_permission_modal(frame, &request, 0);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let permission_screen: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(permission_screen.contains("final-command-tail"));
+        assert!(permission_screen.contains("should wrap"));
+    }
+
+    #[test]
+    fn wrapped_message_can_be_scrolled_to_its_end() {
+        let mut terminal = Terminal::new(TestBackend::new(18, 5)).unwrap();
+        let items = vec![ChatItem {
+            role: ChatRole::Assistant,
+            content: "alpha beta gamma delta epsilon zeta omega".into(),
+        }];
+        let (mut scroll, mut max_scroll) = (0, 0);
+        let top = render(&mut terminal, &items, &mut scroll, &mut max_scroll, false);
+        assert!(top.contains("alpha"), "{top}");
+        assert!(max_scroll > 0);
+
+        let bottom = render(&mut terminal, &items, &mut scroll, &mut max_scroll, true);
+        assert_eq!(scroll, max_scroll);
+        assert!(bottom.contains("omega"), "{bottom}");
+    }
+
+    #[test]
+    fn streamed_chat_remains_renderable_under_ci_budget() {
+        use std::time::{Duration, Instant};
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut items = Vec::new();
+        let (mut scroll, mut max_scroll) = (0, 0);
+        let started = Instant::now();
+        for batch in 0..40 {
+            for _ in 0..100 {
+                crate::app::append_stream_delta(
+                    &mut items,
+                    ChatRole::Assistant,
+                    "streamed words ".into(),
+                );
+            }
+            let screen = render(&mut terminal, &items, &mut scroll, &mut max_scroll, true);
+            assert!(screen.contains("streamed"), "batch {batch}");
+        }
+        assert_eq!(items.len(), 1);
+        assert_eq!(scroll, max_scroll);
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "4,000 chunks and 40 redraws took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn long_history_reaches_both_ends_without_overscrolling() {
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        let items: Vec<_> = (0..2_000)
+            .map(|index| ChatItem {
+                role: ChatRole::Assistant,
+                content: format!("message {index:04}"),
+            })
+            .collect();
+        let (mut scroll, mut max_scroll) = (0, 0);
+        let bottom = render(&mut terminal, &items, &mut scroll, &mut max_scroll, true);
+        assert!(bottom.contains("message 1999"), "{bottom}");
+        assert_eq!(scroll, max_scroll);
+        assert!(max_scroll > 5_000);
+
+        scroll = 0;
+        let top = render(&mut terminal, &items, &mut scroll, &mut max_scroll, false);
+        assert!(top.contains("message 0000"), "{top}");
+        assert_eq!(scroll, 0);
+
+        scroll = usize::MAX;
+        let clamped = render(&mut terminal, &items, &mut scroll, &mut max_scroll, false);
+        assert_eq!(scroll, max_scroll);
+        assert!(clamped.contains("message 1999"), "{clamped}");
+    }
 }
