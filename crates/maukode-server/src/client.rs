@@ -328,4 +328,24 @@ impl ServerClient {
         }
         Ok(resp.json().await?)
     }
+
+    pub async fn compact_session(
+        &self,
+        session_id: SessionId,
+        focus: Option<&str>,
+    ) -> Result<maukode_protocol::CompactResponse> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/sessions/{session_id}/compact", self.base_url))
+            .json(&maukode_protocol::CompactRequest {
+                focus: focus.map(|s| s.to_string()),
+            })
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to compact session: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
 }

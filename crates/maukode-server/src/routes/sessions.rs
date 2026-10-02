@@ -366,3 +366,54 @@ pub async fn list_mcp_servers(
 
     Ok(Json(maukode_protocol::McpListResponse { servers }))
 }
+
+pub async fn compact_session(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<maukode_protocol::CompactRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = state
+        .get_or_load_session(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
+
+    let mut session = session_arc.write().await;
+    let config_guard = state.config.read().await;
+    let model = config_guard.active_model.clone();
+    let llm_res = config_guard.create_active_llm_client();
+    let llm_client = llm_res.ok();
+    drop(config_guard);
+
+    let result = maukode_core::ConversationCompactor::compact(
+        &mut session,
+        llm_client.as_deref(),
+        &model,
+        payload.focus.as_deref(),
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Archive the uncompressed original messages in SQLite audit store
+    let _ = state
+        .store
+        .archive_session_messages(id, &result.archived_messages)
+        .await;
+
+    // Save the updated compacted session
+    let config_guard = state.config.read().await;
+    let _ = state
+        .store
+        .save_session(&session, &config_guard.active_provider, &config_guard.active_model)
+        .await;
+
+    Ok(Json(maukode_protocol::CompactResponse {
+        session_id: id.to_string(),
+        original_messages: result.original_message_count,
+        compacted_messages: result.compacted_message_count,
+        original_tokens: result.original_tokens,
+        compacted_tokens: result.compacted_tokens,
+        summary: result.summary,
+    }))
+}
+

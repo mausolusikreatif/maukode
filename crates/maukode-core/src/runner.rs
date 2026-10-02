@@ -108,8 +108,57 @@ impl SessionRunner {
             let current_messages = session_guard.messages.clone();
             drop(session_guard);
 
+            // Context pruning: non-destructively truncate older tool outputs in LLM prompt payload
+            let pruner = crate::compaction::ContextPruner::default();
+            let mut pruned_messages = pruner.prune_messages(&current_messages);
+
+            // Context window threshold monitoring
+            let usage = crate::compaction::TokenEstimator::check_threshold(
+                &pruned_messages,
+                &system_prompt,
+                &self.config.model,
+            );
+            if usage.exceeds_threshold {
+                let pct = (usage.ratio * 100.0) as u32;
+                tracing::warn!(
+                    "Context window usage is high: {}/{} tokens ({}%).",
+                    usage.estimated_tokens,
+                    usage.context_limit,
+                    pct
+                );
+                let _ = event_tx.send(LLMEvent::ContextWarning {
+                    current_tokens: usage.estimated_tokens,
+                    max_tokens: usage.context_limit,
+                    percent: pct,
+                    message: format!(
+                        "Context window is {}% full ({}/{} tokens). Use /compact to free context space.",
+                        pct, usage.estimated_tokens, usage.context_limit
+                    ),
+                });
+
+                // If critical (>85%) and session has >6 messages, automatically compact older history
+                if usage.is_critical && current_messages.len() > 6 {
+                    tracing::info!("Context window critical ({}%). Triggering automatic conversation compaction.", pct);
+                    let mut session_write = self.session.write().await;
+                    if let Ok(compact_res) = crate::compaction::ConversationCompactor::compact(
+                        &mut session_write,
+                        Some(self.llm.as_ref()),
+                        &self.config.model,
+                        Some("Preserve latest active task progress and key decisions"),
+                    ).await {
+                        pruned_messages = pruner.prune_messages(&session_write.messages);
+                        tracing::info!(
+                            "Auto-compacted session from {} to {} messages ({} tokens saved)",
+                            compact_res.original_message_count,
+                            compact_res.compacted_message_count,
+                            compact_res.original_tokens.saturating_sub(compact_res.compacted_tokens)
+                        );
+                    }
+                }
+            }
+
             let tool_defs = self.tools.definitions();
-            let mut req = LLMRequest::new(&self.config.model, current_messages)
+            let mut req = LLMRequest::new(&self.config.model, pruned_messages)
                 .with_system_prompt(&system_prompt)
                 .with_tools(tool_defs);
 

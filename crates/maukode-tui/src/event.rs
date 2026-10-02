@@ -18,6 +18,7 @@ pub enum AppEvent {
     CodebaseMapFetched(Result<String, String>),
     InitProjectCompleted(Result<maukode_protocol::InitProjectResponse, String>),
     McpStatusFetched(Result<maukode_protocol::McpListResponse, String>),
+    SessionCompacted(Result<maukode_protocol::CompactResponse, String>),
 }
 
 pub struct EventHandler {

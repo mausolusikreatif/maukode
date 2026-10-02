@@ -49,6 +49,12 @@ pub enum LLMEvent {
     ToolResult(ToolResult),
     PermissionRequest(PermissionRequest),
     Usage(TokenUsage),
+    ContextWarning {
+        current_tokens: usize,
+        max_tokens: usize,
+        percent: u32,
+        message: String,
+    },
     Finish { reason: FinishReason },
     Error { message: String },
 }
@@ -124,3 +130,20 @@ pub struct McpServerStatus {
 pub struct McpListResponse {
     pub servers: Vec<McpServerStatus>,
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactRequest {
+    #[serde(default)]
+    pub focus: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactResponse {
+    pub session_id: String,
+    pub original_messages: usize,
+    pub compacted_messages: usize,
+    pub original_tokens: usize,
+    pub compacted_tokens: usize,
+    pub summary: String,
+}
+

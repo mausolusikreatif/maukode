@@ -278,6 +278,40 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 app.set_status(format!("MCP query failed: {e}"));
             }
         },
+        AppEvent::SessionCompacted(res) => match res {
+            Ok(resp) => {
+                let saved_tokens = resp.original_tokens.saturating_sub(resp.compacted_tokens);
+                let saved_pct = if resp.original_tokens > 0 {
+                    (saved_tokens as f32 / resp.original_tokens as f32) * 100.0
+                } else {
+                    0.0
+                };
+                let content = format!(
+                    "✨ Conversation Compacted Successfully!\n\
+                     • Messages: {} → {}\n\
+                     • Estimated Tokens: ~{} → ~{} ({:.1}% saved)\n\n\
+                     Summary:\n{}",
+                    resp.original_messages,
+                    resp.compacted_messages,
+                    resp.original_tokens,
+                    resp.compacted_tokens,
+                    saved_pct,
+                    resp.summary.trim()
+                );
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content,
+                });
+                app.set_status(format!("Compacted: {} msgs -> {} msgs ({:.0}% saved)", resp.original_messages, resp.compacted_messages, saved_pct));
+            }
+            Err(e) => {
+                app.items.push(crate::app::ChatItem {
+                    role: ChatRole::System,
+                    content: format!("Failed to compact session: {e}"),
+                });
+                app.set_status(format!("Compaction failed: {e}"));
+            }
+        },
     }
 }
 

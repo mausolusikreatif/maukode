@@ -374,6 +374,30 @@ async fn main() -> anyhow::Result<()> {
                     }
                     continue;
                 }
+                if trimmed == "/compact" || trimmed.starts_with("/compact ") {
+                    let focus = if trimmed.len() > 8 {
+                        Some(trimmed[8..].trim())
+                    } else {
+                        None
+                    };
+                    println!("\x1b[2mCompacting conversation history and summarizing state...\x1b[0m");
+                    match client.compact_session(target_session_id, focus).await {
+                        Ok(resp) => {
+                            let saved_tokens = resp.original_tokens.saturating_sub(resp.compacted_tokens);
+                            let saved_pct = if resp.original_tokens > 0 {
+                                (saved_tokens as f32 / resp.original_tokens as f32) * 100.0
+                            } else {
+                                0.0
+                            };
+                            println!("\x1b[1;32m✓ Conversation Compacted Successfully!\x1b[0m");
+                            println!("  Messages: \x1b[1m{}\x1b[0m → \x1b[1m{}\x1b[0m", resp.original_messages, resp.compacted_messages);
+                            println!("  Tokens:   \x1b[2m~{}\x1b[0m → \x1b[2m~{}\x1b[0m (\x1b[1;32m{:.1}% saved\x1b[0m)", resp.original_tokens, resp.compacted_tokens, saved_pct);
+                            println!("\n\x1b[1;36m=== Compacted State Summary ===\x1b[0m\n{}", resp.summary.trim());
+                        }
+                        Err(e) => eprintln!("\x1b[31mFailed to compact session: {e}\x1b[0m"),
+                    }
+                    continue;
+                }
                 println!();
                 remote::run_remote_turn(&client, target_session_id, trimmed).await?;
                 println!();
@@ -477,7 +501,7 @@ async fn main() -> anyhow::Result<()> {
         println!("══════════════════════════════════════════════════════════════════");
         println!("  🤖 \x1b[1;36mMauKode\x1b[0m - AI Coding Agent (CLI Mode)");
         println!("  Provider: \x1b[1;32m{}\x1b[0m | Model: \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
-        println!("  Commands: /diff, /undo, /map, /init, /mcp, exit");
+        println!("  Commands: /diff, /undo, /map, /init, /mcp, /compact, exit");
         println!("══════════════════════════════════════════════════════════════════\n");
 
         let active_sess = if let Some(id) = parsed_session_id {
@@ -638,6 +662,40 @@ async fn main() -> anyhow::Result<()> {
                 }
                 continue;
             }
+            if trimmed == "/compact" || trimmed.starts_with("/compact ") {
+                let focus = if trimmed.len() > 8 {
+                    Some(trimmed[8..].trim())
+                } else {
+                    None
+                };
+                println!("\x1b[2mCompacting conversation history and summarizing state...\x1b[0m");
+                let mut session_guard = session_arc.write().await;
+                let llm_res = config.create_active_llm_client();
+                let llm_client = llm_res.ok();
+                match maukode_core::ConversationCompactor::compact(
+                    &mut session_guard,
+                    llm_client.as_deref(),
+                    &config.active_model,
+                    focus,
+                ).await {
+                    Ok(resp) => {
+                        let _ = store.archive_session_messages(session_guard.id, &resp.archived_messages).await;
+                        let _ = store.save_session(&session_guard, &config.active_provider, &config.active_model).await;
+                        let saved_tokens = resp.original_tokens.saturating_sub(resp.compacted_tokens);
+                        let saved_pct = if resp.original_tokens > 0 {
+                            (saved_tokens as f32 / resp.original_tokens as f32) * 100.0
+                        } else {
+                            0.0
+                        };
+                        println!("\x1b[1;32m✓ Conversation Compacted Successfully!\x1b[0m");
+                        println!("  Messages: \x1b[1m{}\x1b[0m → \x1b[1m{}\x1b[0m", resp.original_message_count, resp.compacted_message_count);
+                        println!("  Tokens:   \x1b[2m~{}\x1b[0m → \x1b[2m~{}\x1b[0m (\x1b[1;32m{:.1}% saved\x1b[0m)", resp.original_tokens, resp.compacted_tokens, saved_pct);
+                        println!("\n\x1b[1;36m=== Compacted State Summary ===\x1b[0m\n{}", resp.summary.trim());
+                    }
+                    Err(e) => eprintln!("\x1b[31mFailed to compact session: {e}\x1b[0m"),
+                }
+                continue;
+            }
 
             println!();
             execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(trimmed.to_string())).await?;
@@ -725,6 +783,9 @@ async fn execute_turn(
                             .map(|c| format!(" | Cache Read {c}"))
                             .unwrap_or_default()
                     );
+                }
+                LLMEvent::ContextWarning { current_tokens, max_tokens, percent, message } => {
+                    println!("\n\x1b[1;33m⚠️  [CONTEXT WARNING]\x1b[0m {message} ({current_tokens}/{max_tokens} tokens, {percent}%)");
                 }
                 LLMEvent::PermissionRequest(req) => {
                     let cmd = req.command.as_deref().unwrap_or(req.path.as_deref().unwrap_or(&req.description));

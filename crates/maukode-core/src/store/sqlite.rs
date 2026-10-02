@@ -76,6 +76,17 @@ impl SqliteSessionStore {
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+
+            CREATE TABLE IF NOT EXISTS messages_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                parts_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(session_id, parts_json)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_messages_audit_session_id ON messages_audit(session_id);
             ",
         )?;
 
@@ -146,9 +157,62 @@ impl SqliteSessionStore {
                  VALUES (?1, ?2, ?3, ?4);",
                 params![id_str, role_str, parts_json, now],
             )?;
+
+            // Retain full uncompressed message in messages_audit for historical auditing
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO messages_audit (session_id, role, parts_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4);",
+                params![id_str, role_str, parts_json, now],
+            );
         }
 
         Ok(())
+    }
+
+    pub async fn archive_session_messages(&self, session_id: SessionId, messages: &[Message]) -> Result<()> {
+        let conn = self.conn.lock().await;
+        let id_str = session_id.to_string();
+        for msg in messages {
+            let role_str = serde_json::to_string(&msg.role)?;
+            let parts_json = serde_json::to_string(&msg.parts)?;
+            let now = Utc::now().to_rfc3339();
+
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO messages_audit (session_id, role, parts_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4);",
+                params![id_str, role_str, parts_json, now],
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn load_audit_messages(&self, id: SessionId) -> Result<Vec<Message>> {
+        let conn = self.conn.lock().await;
+        let id_str = id.to_string();
+
+        let mut stmt = conn.prepare(
+            "SELECT role, parts_json FROM messages_audit WHERE session_id = ?1 ORDER BY id ASC;",
+        )?;
+
+        let message_rows = stmt.query_map(params![id_str], |row| {
+            let role_str: String = row.get(0)?;
+            let parts_json: String = row.get(1)?;
+            Ok((role_str, parts_json))
+        })?;
+
+        let mut messages = Vec::new();
+        for row in message_rows {
+            if let Ok((role_str, parts_json)) = row {
+                if let (Ok(role), Ok(parts)) = (
+                    serde_json::from_str(&role_str),
+                    serde_json::from_str(&parts_json),
+                ) {
+                    messages.push(Message { role, parts });
+                }
+            }
+        }
+
+        Ok(messages)
     }
 
     pub async fn load_session(&self, id: SessionId) -> Result<Option<Session>> {
@@ -335,3 +399,47 @@ impl SqliteSessionStore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_sqlite_retains_uncompressed_audit_messages_after_compaction() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_audit.db");
+        let store = SqliteSessionStore::new(&db_path).unwrap();
+
+        let mut session = Session::new(temp_dir.path());
+        session.add_message(Message::user("Turn 1 user prompt with lots of context"));
+        session.add_message(Message::assistant_text("Turn 1 assistant response with 500 lines of build output"));
+        session.add_message(Message::user("Turn 2 user prompt"));
+        session.add_message(Message::assistant_text("Turn 2 assistant response"));
+
+        // Save session originally
+        store.save_session(&session, "anthropic", "claude-3-7-sonnet").await.unwrap();
+
+        // Check audit messages count
+        let audit_before = store.load_audit_messages(session.id).await.unwrap();
+        assert_eq!(audit_before.len(), 4);
+
+        // Now simulate compaction on active session
+        session.messages = vec![
+            Message::user("[CONVERSATION SUMMARY - COMPACTED CONTEXT]"),
+            Message::assistant_text("Understood summary. Continuing..."),
+        ];
+
+        // Save compacted session
+        store.save_session(&session, "anthropic", "claude-3-7-sonnet").await.unwrap();
+
+        // Active session messages has 2
+        let loaded = store.load_session(session.id).await.unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 2);
+
+        // But audit table STILL has all original messages plus the new ones!
+        let audit_after = store.load_audit_messages(session.id).await.unwrap();
+        assert_eq!(audit_after.len(), 6);
+        assert_eq!(audit_after[1].text_content(), "Turn 1 assistant response with 500 lines of build output");
+    }
+}
+

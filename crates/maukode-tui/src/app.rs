@@ -523,6 +523,14 @@ impl App {
             "/mcp" => {
                 self.show_mcp_status();
             }
+            "/compact" => {
+                let focus = if parts.len() > 1 {
+                    Some(parts[1..].join(" "))
+                } else {
+                    None
+                };
+                self.compact_session(focus);
+            }
             "/new" => {
                 self.switch_to_new_session();
             }
@@ -740,6 +748,14 @@ impl App {
             }
             LLMEvent::Usage(usage) => {
                 self.token_usage = Some(usage);
+            }
+            LLMEvent::ContextWarning { current_tokens, max_tokens, percent, message } => {
+                self.set_status(format!("⚠️ Context {percent}% full ({current_tokens}/{max_tokens} tokens). Use /compact"));
+                self.items.push(ChatItem {
+                    role: ChatRole::System,
+                    content: format!("⚠️ {message}"),
+                });
+                self.auto_scroll = true;
             }
             LLMEvent::Error { message } => {
                 self.items.push(ChatItem {
@@ -1012,6 +1028,50 @@ impl App {
             tokio::spawn(async move {
                 let servers = mcp.list_server_statuses(&cwd, &config).await;
                 let _ = tx.send(AppEvent::McpStatusFetched(Ok(maukode_protocol::McpListResponse { servers })));
+            });
+        }
+    }
+
+    pub fn compact_session(&mut self, focus: Option<String>) {
+        let sid = {
+            let guard = self.session.try_read();
+            match guard {
+                Ok(s) => s.id,
+                Err(_) => SessionId::new(),
+            }
+        };
+        let tx = self.event_tx.clone();
+        self.set_status("Compacting conversation history and summarizing state...");
+
+        if let Some(client) = self.server_client.clone() {
+            tokio::spawn(async move {
+                let res = client.compact_session(sid, focus.as_deref()).await.map_err(|e| e.to_string());
+                let _ = tx.send(AppEvent::SessionCompacted(res));
+            });
+        } else {
+            let session_arc = Arc::clone(&self.session);
+            let config = self.config.clone();
+            tokio::spawn(async move {
+                let mut session_guard = session_arc.write().await;
+                let llm_res = config.create_active_llm_client();
+                let llm_client = llm_res.ok();
+                let res = match maukode_core::ConversationCompactor::compact(
+                    &mut session_guard,
+                    llm_client.as_deref(),
+                    &config.active_model,
+                    focus.as_deref(),
+                ).await {
+                    Ok(cr) => Ok(maukode_protocol::CompactResponse {
+                        session_id: sid.to_string(),
+                        original_messages: cr.original_message_count,
+                        compacted_messages: cr.compacted_message_count,
+                        original_tokens: cr.original_tokens,
+                        compacted_tokens: cr.compacted_tokens,
+                        summary: cr.summary,
+                    }),
+                    Err(e) => Err(e.to_string()),
+                };
+                let _ = tx.send(AppEvent::SessionCompacted(res));
             });
         }
     }

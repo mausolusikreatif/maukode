@@ -131,4 +131,9 @@ async fn test_diff_and_undo_endpoints() {
     let mcp_resp = client.list_mcp_servers(meta.id).await.unwrap();
     // Initially empty unless configured
     assert!(mcp_resp.servers.is_empty());
+
+    // 6. Test compaction endpoint
+    let compact_resp = client.compact_session(meta.id, Some("Focus on server core")).await.unwrap();
+    assert_eq!(compact_resp.session_id, meta.id.to_string());
+    assert!(compact_resp.compacted_messages <= 4);
 }
