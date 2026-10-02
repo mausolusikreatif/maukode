@@ -48,6 +48,9 @@ struct Cli {
     #[arg(long, env = "MAUKODE_AUTH_TOKEN", help = "Authentication Bearer token for remote server")]
     token: Option<String>,
 
+    #[arg(long, help = "Run in standalone in-process mode without local background daemon")]
+    standalone: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 
@@ -62,9 +65,12 @@ enum Commands {
         #[arg(required = true, help = "The prompt instruction for MauKode")]
         prompt: String,
     },
-    #[command(about = "Start headless MauKode daemon server (HTTP REST + SSE) for VPS or local")]
+    #[command(about = "Manage background server daemon or start foreground server")]
     Server {
-        #[arg(short, long, default_value = "127.0.0.1:4096", help = "Socket address to bind server to (e.g. 0.0.0.0:4096)")]
+        #[command(subcommand)]
+        action: Option<ServerAction>,
+
+        #[arg(short, long, default_value = "127.0.0.1:4096", help = "Socket address to bind foreground server to (e.g. 0.0.0.0:4096)")]
         bind: String,
 
         #[arg(short, long, env = "MAUKODE_AUTH_TOKEN", help = "Secret Bearer token required for clients")]
@@ -72,6 +78,30 @@ enum Commands {
 
         #[arg(short = 'd', long, help = "Default root directory for workspaces")]
         dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServerAction {
+    #[command(about = "Start server daemon in the background")]
+    Start {
+        #[arg(short, long, default_value_t = 4096, help = "Port to listen on")]
+        port: u16,
+
+        #[arg(short, long, env = "MAUKODE_AUTH_TOKEN", help = "Secret Bearer token")]
+        token: Option<String>,
+    },
+    #[command(about = "Stop the background server daemon")]
+    Stop,
+    #[command(about = "Show status of the background server daemon")]
+    Status,
+    #[command(about = "Restart the background server daemon")]
+    Restart {
+        #[arg(short, long, default_value_t = 4096, help = "Port to listen on")]
+        port: u16,
+
+        #[arg(short, long, env = "MAUKODE_AUTH_TOKEN", help = "Secret Bearer token")]
+        token: Option<String>,
     },
 }
 
@@ -87,32 +117,73 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let cwd = cli.cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    // Handle "server" subcommand for VPS / headless daemon
-    if let Some(Commands::Server { bind, token, dir }) = cli.command {
-        let bind_addr: std::net::SocketAddr = bind
-            .parse()
-            .map_err(|e| anyhow::anyhow!("Invalid bind address '{bind}': {e}"))?;
+    // Handle "server" subcommand
+    if let Some(Commands::Server { action, bind, token, dir }) = cli.command {
+        match action {
+            Some(ServerAction::Start { port, token }) => {
+                let info = maukode_server::ensure_daemon_running(port, token).await?;
+                println!("🚀 MauKode daemon started in background");
+                println!("  URL: \x1b[1;32m{}\x1b[0m", info.url);
+                println!("  PID: {}", info.pid);
+                println!("  Log: \x1b[2m{}\x1b[0m", maukode_server::daemon::daemon_log_path().display());
+                return Ok(());
+            }
+            Some(ServerAction::Stop) => {
+                if maukode_server::stop_daemon().await? {
+                    println!("🛑 MauKode daemon stopped.");
+                } else {
+                    println!("ℹ️ No active MauKode daemon was running.");
+                }
+                return Ok(());
+            }
+            Some(ServerAction::Status) => {
+                if let Some(info) = maukode_server::get_daemon_status().await? {
+                    println!("● \x1b[1;32mMauKode daemon is running\x1b[0m");
+                    println!("  URL: \x1b[1;32m{}\x1b[0m", info.url);
+                    println!("  PID: {}", info.pid);
+                    println!("  Log: \x1b[2m{}\x1b[0m", maukode_server::daemon::daemon_log_path().display());
+                } else {
+                    println!("○ \x1b[1;33mMauKode daemon is stopped\x1b[0m");
+                }
+                return Ok(());
+            }
+            Some(ServerAction::Restart { port, token }) => {
+                let _ = maukode_server::stop_daemon().await;
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                let info = maukode_server::ensure_daemon_running(port, token).await?;
+                println!("🚀 MauKode daemon restarted in background");
+                println!("  URL: \x1b[1;32m{}\x1b[0m", info.url);
+                println!("  PID: {}", info.pid);
+                return Ok(());
+            }
+            None => {
+                // Foreground server (e.g. for VPS)
+                let bind_addr: std::net::SocketAddr = bind
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("Invalid bind address '{bind}': {e}"))?;
 
-        println!("══════════════════════════════════════════════════════════════════");
-        println!("  🚀 \x1b[1;36mMauKode Server\x1b[0m (Headless Daemon for VPS / Local)");
-        println!("  Listening on: \x1b[1;32mhttp://{}\x1b[0m", bind_addr);
-        if token.is_some() {
-            println!("  Authentication: \x1b[1;33mBearer Token Enabled\x1b[0m");
-        } else {
-            println!("  Authentication: \x1b[1;31mDisabled (Open Access)\x1b[0m");
+                println!("══════════════════════════════════════════════════════════════════");
+                println!("  🚀 \x1b[1;36mMauKode Server\x1b[0m (Foreground Daemon for VPS / Local)");
+                println!("  Listening on: \x1b[1;32mhttp://{}\x1b[0m", bind_addr);
+                if token.is_some() {
+                    println!("  Authentication: \x1b[1;33mBearer Token Enabled\x1b[0m");
+                } else {
+                    println!("  Authentication: \x1b[1;31mDisabled (Open Access)\x1b[0m");
+                }
+                let workspace_dir = dir.as_deref().unwrap_or(&cwd);
+                println!("  Default workspace: \x1b[2m{}\x1b[0m", workspace_dir.display());
+                println!("══════════════════════════════════════════════════════════════════\n");
+
+                let server_config = maukode_server::ServerConfig {
+                    bind_addr,
+                    auth_token: token,
+                    default_dir: dir.or(Some(cwd)),
+                };
+
+                maukode_server::run_server(server_config).await?;
+                return Ok(());
+            }
         }
-        let workspace_dir = dir.as_deref().unwrap_or(&cwd);
-        println!("  Default workspace: \x1b[2m{}\x1b[0m", workspace_dir.display());
-        println!("══════════════════════════════════════════════════════════════════\n");
-
-        let server_config = maukode_server::ServerConfig {
-            bind_addr,
-            auth_token: token,
-            default_dir: dir.or(Some(cwd)),
-        };
-
-        maukode_server::run_server(server_config).await?;
-        return Ok(());
     }
 
     // Determine direct prompt
@@ -136,49 +207,73 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // Handle remote server connection
-    if let Some(ref remote_url) = cli.remote {
-        let client = maukode_server::ServerClient::new(remote_url, cli.token.clone())?;
-        println!("🚀 \x1b[1;36mMauKode\x1b[0m connected to remote server at \x1b[1;32m{}\x1b[0m", client.base_url());
-        println!("📂 Remote Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
+    // Determine target server URL: explicit --remote, or auto-started local daemon
+    let remote_url_to_use = if let Some(ref remote_url) = cli.remote {
+        Some((remote_url.clone(), cli.token.clone()))
+    } else if !cli.standalone {
+        match maukode_server::ensure_daemon_running(4096, None).await {
+            Ok(info) => Some((info.url, info.token)),
+            Err(e) => {
+                tracing::warn!("Could not start local daemon: {e}. Falling back to in-process mode.");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    if let Some((url, token)) = remote_url_to_use {
+        let client = Arc::new(maukode_server::ServerClient::new(&url, token)?);
+        let is_remote_vps = cli.remote.is_some();
+        let label = if is_remote_vps { "remote server" } else { "local daemon" };
 
         let target_session_id = if let Some(id) = parsed_session_id {
             id
         } else if cli.continue_session {
-            let sessions = client.list_sessions(Some(&cwd), false).await?;
+            let sessions = client.list_sessions(Some(&cwd), false).await.unwrap_or_default();
             if let Some(first) = sessions.first() {
                 first.id
             } else {
-                let meta = client.create_session(Some(&cwd), None).await?;
-                meta.id
+                client.create_session(Some(&cwd), None).await?.id
             }
         } else {
-            let meta = client.create_session(Some(&cwd), None).await?;
-            meta.id
+            client.create_session(Some(&cwd), None).await?.id
         };
 
         if let Some(prompt) = prompt_to_run {
+            println!("🚀 \x1b[1;36mMauKode\x1b[0m running via {label} (\x1b[2m{}\x1b[0m)", client.base_url());
+            println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
             remote::run_remote_turn(&client, target_session_id, &prompt).await?;
             return Ok(());
         }
 
-        println!("Connected. Type your prompt, or 'exit' / 'quit' to close.\n");
-        loop {
-            print!("❯ ");
-            io::stdout().flush()?;
-            let mut line = String::new();
-            io::stdin().read_line(&mut line)?;
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
+        if cli.cli {
+            println!("══════════════════════════════════════════════════════════════════");
+            println!("  🤖 \x1b[1;36mMauKode\x1b[0m (Connected to {label} at {})", client.base_url());
+            println!("  Workspace: \x1b[2m{}\x1b[0m", cwd.display());
+            println!("  Type 'exit' to quit.");
+            println!("══════════════════════════════════════════════════════════════════\n");
+            loop {
+                print!("❯ ");
+                io::stdout().flush()?;
+                let mut line = String::new();
+                io::stdin().read_line(&mut line)?;
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if trimmed == "exit" || trimmed == "quit" {
+                    break;
+                }
+                println!();
+                remote::run_remote_turn(&client, target_session_id, trimmed).await?;
+                println!();
             }
-            if trimmed == "exit" || trimmed == "quit" {
-                break;
-            }
-            println!();
-            remote::run_remote_turn(&client, target_session_id, trimmed).await?;
-            println!();
+            return Ok(());
         }
+
+        // Launch full Interactive TUI connected to daemon / server!
+        maukode_tui::run_tui(cwd, Some(target_session_id), cli.continue_session, Some(client)).await?;
         return Ok(());
     }
 
@@ -311,8 +406,8 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Default: Launch the full Interactive TUI!
-    maukode_tui::run_tui(cwd, parsed_session_id, cli.continue_session).await?;
+    // Default: Launch the full Interactive TUI in standalone mode!
+    maukode_tui::run_tui(cwd, parsed_session_id, cli.continue_session, None).await?;
 
     Ok(())
 }

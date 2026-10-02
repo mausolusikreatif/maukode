@@ -1,4 +1,5 @@
 pub mod client;
+pub mod daemon;
 pub mod middleware;
 pub mod routes;
 pub mod state;
@@ -10,6 +11,7 @@ use anyhow::Result;
 use tokio::net::TcpListener;
 use tracing::info;
 pub use client::ServerClient;
+pub use daemon::{ensure_daemon_running, get_daemon_status, stop_daemon, DaemonInfo};
 pub use state::ServerState;
 
 pub struct ServerConfig {

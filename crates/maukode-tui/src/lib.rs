@@ -21,6 +21,7 @@ pub async fn run_tui(
     cwd: PathBuf,
     session_id: Option<SessionId>,
     continue_latest: bool,
+    server_client: Option<std::sync::Arc<maukode_server::ServerClient>>,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -33,7 +34,7 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(backend)?;
 
     let (mut events, event_tx) = EventHandler::new(Duration::from_millis(50));
-    let mut app = App::new(cwd, event_tx, session_id, continue_latest)?;
+    let mut app = App::new(cwd, event_tx, session_id, continue_latest, server_client)?;
 
     let res = run_loop(&mut terminal, &mut app, &mut events).await;
 
@@ -317,6 +318,15 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     let target_id = target.id;
                     let loaded = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(async {
+                            if let Some(ref client) = app.server_client {
+                                if let Ok(detail) = client.get_session(target_id).await {
+                                    let mut s = maukode_core::Session::new(&detail.directory);
+                                    s.id = detail.id;
+                                    s.messages = detail.messages;
+                                    s.state = detail.state;
+                                    return Some(s);
+                                }
+                            }
                             app.store.load_session(target_id).await.unwrap_or(None)
                         })
                     });

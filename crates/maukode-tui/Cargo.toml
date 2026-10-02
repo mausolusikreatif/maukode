@@ -10,6 +10,7 @@ maukode-protocol.workspace = true
 maukode-llm.workspace = true
 maukode-tools.workspace = true
 maukode-core.workspace = true
+maukode-server.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 tokio.workspace = true

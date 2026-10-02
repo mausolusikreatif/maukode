@@ -78,8 +78,20 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         Err(_) => "....".to_string(),
     };
 
+    let (mode_label, mode_color) = if let Some(ref client) = app.server_client {
+        if client.base_url().contains("127.0.0.1") || client.base_url().contains("localhost") {
+            ("daemon", Color::Green)
+        } else {
+            ("remote", Color::LightCyan)
+        }
+    } else {
+        ("standalone", Color::DarkGray)
+    };
+
     let title_spans = vec![
         Span::styled(" 🤖 MauKode ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw(" │ Mode: "),
+        Span::styled(mode_label, Style::default().fg(mode_color).add_modifier(Modifier::BOLD)),
         Span::raw(" │ Provider: "),
         Span::styled(active_prov, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw(" │ Model: "),

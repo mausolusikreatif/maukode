@@ -6,6 +6,7 @@ use maukode_core::{
     SessionSummary, SqliteSessionStore,
 };
 use maukode_protocol::{ContentPart, LLMEvent, Role, SessionId, TokenUsage};
+use maukode_server::ServerClient;
 use maukode_tools::{create_default_registry, ToolRegistry};
 use tokio::sync::{mpsc, RwLock};
 use crate::event::AppEvent;
@@ -71,6 +72,7 @@ pub struct App {
     pub status_message: Option<(String, Instant)>,
     pub should_quit: bool,
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
+    pub server_client: Option<Arc<ServerClient>>,
 }
 
 impl App {
@@ -79,6 +81,7 @@ impl App {
         event_tx: mpsc::UnboundedSender<AppEvent>,
         session_id_to_load: Option<SessionId>,
         continue_latest: bool,
+        server_client: Option<Arc<ServerClient>>,
     ) -> anyhow::Result<Self> {
         let config = AppConfig::load();
         let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
@@ -89,6 +92,15 @@ impl App {
         let initial_session = if let Some(id) = session_id_to_load {
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
+                    if let Some(ref client) = server_client {
+                        if let Ok(detail) = client.get_session(id).await {
+                            let mut s = Session::new(&detail.directory);
+                            s.id = detail.id;
+                            s.messages = detail.messages;
+                            s.state = detail.state;
+                            return Some(s);
+                        }
+                    }
                     store.load_session(id).await.unwrap_or(None)
                 })
             }).unwrap_or_else(|| Session::new(&cwd))
@@ -101,6 +113,17 @@ impl App {
         } else {
             Session::new(&cwd)
         };
+
+        if let Some(ref client) = server_client {
+            let client = Arc::clone(client);
+            let dir = cwd.clone();
+            let sid = initial_session.id;
+            tokio::spawn(async move {
+                if client.get_session(sid).await.is_err() {
+                    let _ = client.create_session(Some(&dir), None).await;
+                }
+            });
+        }
 
         let session = Arc::new(RwLock::new(initial_session));
 
@@ -191,6 +214,7 @@ impl App {
             status_message: None,
             should_quit: false,
             event_tx,
+            server_client,
         })
     }
 
@@ -292,6 +316,13 @@ impl App {
             content: format!("Started a fresh new session in '{}'.", self.cwd.display()),
         });
         self.set_status("Started new session");
+
+        if let Some(client) = self.server_client.clone() {
+            let cwd = self.cwd.clone();
+            tokio::spawn(async move {
+                let _ = client.create_session(Some(&cwd), None).await;
+            });
+        }
     }
 
     pub fn handle_slash_command(&mut self, line: &str) {
@@ -448,7 +479,59 @@ impl App {
         });
         self.auto_scroll = true;
 
-        // Prepare LLM Client
+        if let Some(client) = self.server_client.clone() {
+            self.is_running = true;
+            self.set_status("Thinking (server)...");
+
+            let session_id = {
+                let guard = self.session.try_read();
+                match guard {
+                    Ok(s) => s.id,
+                    Err(_) => SessionId::new(),
+                }
+            };
+            let app_event_tx = self.event_tx.clone();
+            let input_clone = input.clone();
+
+            tokio::spawn(async move {
+                // 1. Subscribe first to capture full event stream
+                let mut stream = match client.subscribe_events(session_id).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = app_event_tx.send(AppEvent::TurnFinished(Err(format!("Stream error: {e}"))));
+                        return;
+                    }
+                };
+
+                // 2. Submit prompt to initiate turn on server
+                if let Err(e) = client.submit_prompt(session_id, &input_clone).await {
+                    let _ = app_event_tx.send(AppEvent::TurnFinished(Err(format!("Server error: {e}"))));
+                    return;
+                }
+
+                // 3. Process events until completed
+                use futures::StreamExt;
+                while let Some(event_res) = stream.next().await {
+                    match event_res {
+                        Ok(event) => {
+                            let is_finish = matches!(event, LLMEvent::Finish { .. });
+                            let _ = app_event_tx.send(AppEvent::LLM(event));
+                            if is_finish {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Stream parse error: {e}");
+                            break;
+                        }
+                    }
+                }
+                let _ = app_event_tx.send(AppEvent::TurnFinished(Ok(())));
+            });
+            return;
+        }
+
+        // Prepare LLM Client (standalone fallback)
         let llm_client = match self.config.create_active_llm_client() {
             Ok(c) => c,
             Err(e) => {
@@ -583,7 +666,23 @@ impl App {
             }
         }
 
-        // Persist session to SQLite!
+        // If connected to server, sync session state from server
+        if let Some(client) = self.server_client.clone() {
+            let session_arc = Arc::clone(&self.session);
+            let session_id = {
+                session_arc.try_read().map(|s| s.id).unwrap_or_else(|_| SessionId::new())
+            };
+            tokio::spawn(async move {
+                if let Ok(detail) = client.get_session(session_id).await {
+                    let mut guard = session_arc.write().await;
+                    guard.messages = detail.messages;
+                    guard.state = detail.state;
+                }
+            });
+            return;
+        }
+
+        // Standalone mode: persist directly to local SQLite
         let session = Arc::clone(&self.session);
         let db_path = self.store.db_path().clone();
         let provider = self.config.active_provider.clone();
