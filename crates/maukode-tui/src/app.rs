@@ -17,7 +17,7 @@ use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ChatRole {
     User,
     Assistant,
@@ -35,7 +35,7 @@ pub enum ChatRole {
     Reasoning,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChatItem {
     pub role: ChatRole,
     pub content: String,
@@ -209,6 +209,7 @@ pub struct App {
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
     pub server_client: Option<Arc<ServerClient>>,
     pub mcp_manager: Arc<maukode_core::McpManager>,
+    pub render_cache: crate::render_cache::MessageRenderCache,
 }
 
 impl App {
@@ -324,6 +325,7 @@ impl App {
             event_tx,
             server_client,
             mcp_manager,
+            render_cache: crate::render_cache::MessageRenderCache::default(),
         })
     }
 

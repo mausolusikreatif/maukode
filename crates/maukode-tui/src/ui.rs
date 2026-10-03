@@ -37,6 +37,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_messages(
         f,
         &app.items,
+        &mut app.render_cache,
         &mut app.scroll,
         &mut app.max_scroll,
         app.auto_scroll,
@@ -166,129 +167,147 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 // Messages Viewport: Clean Typography, Cards, Diff Highlighting
 // -------------------------------------------------------------
 
+/// Build the styled lines for a single chat item. Always owned/`'static` so callers (the
+/// per-item render cache in particular) can keep the result past the lifetime of `item`.
+pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    match &item.role {
+        ChatRole::User => {
+            lines.push(Line::from(vec![Span::styled(
+                "❯ You",
+                theme::brand_style(),
+            )]));
+            for l in item.content.lines() {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(l.to_string(), theme::text_style()),
+                ]));
+            }
+            lines.push(Line::from(""));
+        }
+        ChatRole::Assistant => {
+            lines.push(Line::from(vec![Span::styled(
+                "● MauKode",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            )]));
+
+            lines.extend(crate::markdown::render(&item.content));
+            lines.push(Line::from(""));
+        }
+        ChatRole::Reasoning => {
+            lines.push(Line::from(vec![Span::styled(
+                "💭 Thinking",
+                theme::thinking_style(),
+            )]));
+            for l in item.content.lines() {
+                lines.push(Line::from(vec![
+                    Span::styled("  │ ", theme::border_style()),
+                    Span::styled(
+                        l.to_string(),
+                        Style::default()
+                            .fg(COLOR_MUTED)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
+                ]));
+            }
+            lines.push(Line::from(""));
+        }
+        ChatRole::ToolCall { name, id, args } => {
+            lines.push(Line::from(vec![
+                Span::styled("╭─ ⚡ ", theme::tool_style()),
+                Span::styled(
+                    name.clone(),
+                    Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!(" ({id})"), theme::dim_style()),
+            ]));
+            if !args.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("│  ", theme::tool_style()),
+                    Span::styled(format!("Args: {args}"), theme::muted_style()),
+                ]));
+            }
+        }
+        ChatRole::ToolResult { name, is_error, .. } => {
+            let (prefix, badge_style) = if *is_error {
+                ("╰─ ✗ Error: ", theme::error_style())
+            } else {
+                ("╰─ ✓ Result: ", theme::success_style())
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(prefix, badge_style),
+                Span::styled(name.clone(), theme::text_style()),
+            ]));
+
+            let (content_preview, is_truncated) = if item.content.len() > 600 {
+                let end = item.content.floor_char_boundary(600);
+                (&item.content[..end], true)
+            } else {
+                (item.content.as_str(), false)
+            };
+
+            for l in content_preview.lines() {
+                let style = if l.starts_with('+') {
+                    theme::diff_add_style()
+                } else if l.starts_with('-') {
+                    theme::diff_del_style()
+                } else if l.starts_with("@@") {
+                    theme::diff_hunk_style()
+                } else {
+                    theme::dim_style()
+                };
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(l.to_string(), style),
+                ]));
+            }
+            if is_truncated {
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled("... (preview truncated)", theme::dim_style()),
+                ]));
+            }
+            lines.push(Line::from(""));
+        }
+        ChatRole::System => {
+            lines.push(Line::from(vec![
+                Span::styled("ℹ ", Style::default().fg(COLOR_AMBER)),
+                Span::styled(item.content.clone(), theme::muted_style()),
+            ]));
+            lines.push(Line::from(""));
+        }
+    }
+
+    lines
+}
+
+/// Build the full styled line buffer for a conversation by concatenating each item's lines.
+/// Pure and Frame-free so it can be measured directly in benchmarks
+/// (`benches/render_messages.rs`) without constructing an `App`. Prefer
+/// [`crate::render_cache::MessageRenderCache`] on the hot draw path — this recomputes
+/// everything unconditionally and is O(total conversation size) every call.
+pub fn build_message_lines(items: &[crate::app::ChatItem]) -> Vec<Line<'static>> {
+    items.iter().flat_map(build_item_lines).collect()
+}
+
 fn draw_messages(
     f: &mut Frame,
     items: &[crate::app::ChatItem],
+    render_cache: &mut crate::render_cache::MessageRenderCache,
     scroll: &mut usize,
     max_scroll: &mut usize,
     auto_scroll: bool,
     area: Rect,
 ) {
-    let mut lines = Vec::new();
-
-    for item in items {
-        match &item.role {
-            ChatRole::User => {
-                lines.push(Line::from(vec![Span::styled(
-                    "❯ You",
-                    theme::brand_style(),
-                )]));
-                for l in item.content.lines() {
-                    lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(l, theme::text_style()),
-                    ]));
-                }
-                lines.push(Line::from(""));
-            }
-            ChatRole::Assistant => {
-                lines.push(Line::from(vec![Span::styled(
-                    "● MauKode",
-                    Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
-                )]));
-
-                lines.extend(crate::markdown::render(&item.content));
-                lines.push(Line::from(""));
-            }
-            ChatRole::Reasoning => {
-                lines.push(Line::from(vec![Span::styled(
-                    "💭 Thinking",
-                    theme::thinking_style(),
-                )]));
-                for l in item.content.lines() {
-                    lines.push(Line::from(vec![
-                        Span::styled("  │ ", theme::border_style()),
-                        Span::styled(
-                            l,
-                            Style::default()
-                                .fg(COLOR_MUTED)
-                                .add_modifier(Modifier::ITALIC),
-                        ),
-                    ]));
-                }
-                lines.push(Line::from(""));
-            }
-            ChatRole::ToolCall { name, id, args } => {
-                lines.push(Line::from(vec![
-                    Span::styled("╭─ ⚡ ", theme::tool_style()),
-                    Span::styled(
-                        name,
-                        Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(format!(" ({id})"), theme::dim_style()),
-                ]));
-                if !args.is_empty() {
-                    lines.push(Line::from(vec![
-                        Span::styled("│  ", theme::tool_style()),
-                        Span::styled(format!("Args: {args}"), theme::muted_style()),
-                    ]));
-                }
-            }
-            ChatRole::ToolResult { name, is_error, .. } => {
-                let (prefix, badge_style) = if *is_error {
-                    ("╰─ ✗ Error: ", theme::error_style())
-                } else {
-                    ("╰─ ✓ Result: ", theme::success_style())
-                };
-
-                lines.push(Line::from(vec![
-                    Span::styled(prefix, badge_style),
-                    Span::styled(name, theme::text_style()),
-                ]));
-
-                let (content_preview, is_truncated) = if item.content.len() > 600 {
-                    let end = item.content.floor_char_boundary(600);
-                    (&item.content[..end], true)
-                } else {
-                    (item.content.as_str(), false)
-                };
-
-                for l in content_preview.lines() {
-                    let style = if l.starts_with('+') {
-                        theme::diff_add_style()
-                    } else if l.starts_with('-') {
-                        theme::diff_del_style()
-                    } else if l.starts_with("@@") {
-                        theme::diff_hunk_style()
-                    } else {
-                        theme::dim_style()
-                    };
-                    lines.push(Line::from(vec![Span::raw("   "), Span::styled(l, style)]));
-                }
-                if is_truncated {
-                    lines.push(Line::from(vec![
-                        Span::raw("   "),
-                        Span::styled("... (preview truncated)", theme::dim_style()),
-                    ]));
-                }
-                lines.push(Line::from(""));
-            }
-            ChatRole::System => {
-                lines.push(Line::from(vec![
-                    Span::styled("ℹ ", Style::default().fg(COLOR_AMBER)),
-                    Span::styled(&item.content, theme::muted_style()),
-                ]));
-                lines.push(Line::from(""));
-            }
-        }
-    }
-
-    // Use the same word wrapping algorithm as Paragraph when computing scroll bounds.
     let viewport_height = area.height.saturating_sub(1) as usize;
     let content_width = area.width.max(1);
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    let visual_lines = paragraph.line_count(content_width);
-    *max_scroll = visual_lines.saturating_sub(viewport_height);
+
+    // Only items whose content actually changed since the last frame get rebuilt/rewrapped;
+    // everything else is reused from the cache (see render_cache.rs for why this matters).
+    render_cache.sync(items, content_width);
+    *max_scroll = render_cache.total_height().saturating_sub(viewport_height);
 
     if auto_scroll {
         *scroll = *max_scroll;
@@ -319,9 +338,13 @@ fn draw_messages(
         .border_style(theme::border_style())
         .title(Span::styled(title, title_style));
 
-    let paragraph = paragraph
+    // Only the items overlapping the visible row range are concatenated, so Paragraph's wrap
+    // pass below is bounded by viewport size, not conversation length.
+    let (visible_lines, local_scroll) = render_cache.visible_lines(*scroll, viewport_height);
+    let paragraph = Paragraph::new(visible_lines)
+        .wrap(Wrap { trim: false })
         .block(block)
-        .scroll(((*scroll).min(u16::MAX as usize) as u16, 0));
+        .scroll((local_scroll, 0));
 
     f.render_widget(paragraph, area);
 
@@ -1480,6 +1503,7 @@ mod chat_viewport_tests {
     fn render(
         terminal: &mut Terminal<TestBackend>,
         items: &[ChatItem],
+        cache: &mut crate::render_cache::MessageRenderCache,
         scroll: &mut usize,
         max_scroll: &mut usize,
         auto_scroll: bool,
@@ -1487,7 +1511,7 @@ mod chat_viewport_tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                draw_messages(frame, items, scroll, max_scroll, auto_scroll, area);
+                draw_messages(frame, items, cache, scroll, max_scroll, auto_scroll, area);
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
@@ -1587,12 +1611,27 @@ mod chat_viewport_tests {
             role: ChatRole::Assistant,
             content: "alpha beta gamma delta epsilon zeta omega".into(),
         }];
+        let mut cache = crate::render_cache::MessageRenderCache::default();
         let (mut scroll, mut max_scroll) = (0, 0);
-        let top = render(&mut terminal, &items, &mut scroll, &mut max_scroll, false);
+        let top = render(
+            &mut terminal,
+            &items,
+            &mut cache,
+            &mut scroll,
+            &mut max_scroll,
+            false,
+        );
         assert!(top.contains("alpha"), "{top}");
         assert!(max_scroll > 0);
 
-        let bottom = render(&mut terminal, &items, &mut scroll, &mut max_scroll, true);
+        let bottom = render(
+            &mut terminal,
+            &items,
+            &mut cache,
+            &mut scroll,
+            &mut max_scroll,
+            true,
+        );
         assert_eq!(scroll, max_scroll);
         assert!(bottom.contains("omega"), "{bottom}");
     }
@@ -1603,6 +1642,7 @@ mod chat_viewport_tests {
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         let mut items = Vec::new();
+        let mut cache = crate::render_cache::MessageRenderCache::default();
         let (mut scroll, mut max_scroll) = (0, 0);
         let started = Instant::now();
         for batch in 0..40 {
@@ -1613,7 +1653,14 @@ mod chat_viewport_tests {
                     "streamed words ".into(),
                 );
             }
-            let screen = render(&mut terminal, &items, &mut scroll, &mut max_scroll, true);
+            let screen = render(
+                &mut terminal,
+                &items,
+                &mut cache,
+                &mut scroll,
+                &mut max_scroll,
+                true,
+            );
             assert!(screen.contains("streamed"), "batch {batch}");
         }
         assert_eq!(items.len(), 1);
@@ -1634,19 +1681,41 @@ mod chat_viewport_tests {
                 content: format!("message {index:04}"),
             })
             .collect();
+        let mut cache = crate::render_cache::MessageRenderCache::default();
         let (mut scroll, mut max_scroll) = (0, 0);
-        let bottom = render(&mut terminal, &items, &mut scroll, &mut max_scroll, true);
+        let bottom = render(
+            &mut terminal,
+            &items,
+            &mut cache,
+            &mut scroll,
+            &mut max_scroll,
+            true,
+        );
         assert!(bottom.contains("message 1999"), "{bottom}");
         assert_eq!(scroll, max_scroll);
         assert!(max_scroll > 5_000);
 
         scroll = 0;
-        let top = render(&mut terminal, &items, &mut scroll, &mut max_scroll, false);
+        let top = render(
+            &mut terminal,
+            &items,
+            &mut cache,
+            &mut scroll,
+            &mut max_scroll,
+            false,
+        );
         assert!(top.contains("message 0000"), "{top}");
         assert_eq!(scroll, 0);
 
         scroll = usize::MAX;
-        let clamped = render(&mut terminal, &items, &mut scroll, &mut max_scroll, false);
+        let clamped = render(
+            &mut terminal,
+            &items,
+            &mut cache,
+            &mut scroll,
+            &mut max_scroll,
+            false,
+        );
         assert_eq!(scroll, max_scroll);
         assert!(clamped.contains("message 1999"), "{clamped}");
     }

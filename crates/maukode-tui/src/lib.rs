@@ -1,6 +1,7 @@
 pub mod app;
 pub mod event;
 pub mod markdown;
+pub mod render_cache;
 pub mod theme;
 pub mod ui;
 

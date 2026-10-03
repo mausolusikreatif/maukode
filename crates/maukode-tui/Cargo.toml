@@ -28,3 +28,8 @@ unicode-width = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "render_messages"
+harness = false
