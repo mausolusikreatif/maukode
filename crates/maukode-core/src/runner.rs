@@ -289,7 +289,9 @@ impl SessionRunner {
 
             // Execute tools
             let mut tool_results = Vec::new();
+            let mut stop_after_private_execution = false;
             for call in tool_calls {
+                let mut keep_result_private = false;
                 if let Some(ref token) = cancellation_token {
                     if token.is_cancelled() {
                         let _ = event_tx.send(LLMEvent::Finish {
@@ -306,7 +308,7 @@ impl SessionRunner {
                 if let Some(ref perm_mgr) = self.permission_manager {
                     let needs_permission = match perm_mgr.mode() {
                         PermissionMode::Trust => false,
-                        PermissionMode::Strict => true,
+                        PermissionMode::Strict | PermissionMode::Review => true,
                         PermissionMode::Ask => {
                             if call.name == "bash" {
                                 if let Some(cmd_val) =
@@ -343,8 +345,10 @@ impl SessionRunner {
                             let assess = maukode_tools::assess_bash_command(&cmd);
                             (Some(cmd), assess.level.to_string(), assess.reason)
                         } else {
+                            let details = serde_json::to_string_pretty(&call.arguments)
+                                .unwrap_or_else(|_| call.arguments.to_string());
                             (
-                                None,
+                                Some(details),
                                 "warning".to_string(),
                                 format!("Tool '{}' requires confirmation", call.name),
                             )
@@ -386,6 +390,10 @@ impl SessionRunner {
                                         .whitelist_session_command(&session_id_str, cmd)
                                         .await;
                                 }
+                            }
+                            maukode_protocol::PermissionDecision::AllowPrivate => {
+                                keep_result_private = true;
+                                stop_after_private_execution = true;
                             }
                             maukode_protocol::PermissionDecision::Deny => {
                                 let tr = ToolResult {
@@ -431,16 +439,34 @@ impl SessionRunner {
                     is_error,
                 };
                 let _ = event_tx.send(LLMEvent::ToolResult(tr.clone()));
-                tool_results.push(ContentPart::ToolResult(tr));
+                if keep_result_private {
+                    tool_results.push(ContentPart::ToolResult(ToolResult {
+                        tool_call_id: tr.tool_call_id,
+                        tool_name: tr.tool_name,
+                        content: "Tool executed by the user; result withheld from the model."
+                            .to_string(),
+                        is_error: false,
+                    }));
+                } else {
+                    tool_results.push(ContentPart::ToolResult(tr));
+                }
             }
 
-            // Append tool results as user role message for LLM continuation
+            // Tool calls must have matching results in model history. Private results are replaced
+            // by an explicit placeholder so their contents can never enter a later model request.
             let mut session = self.session.write().await;
             session.add_message(Message {
                 role: Role::User,
                 parts: tool_results,
             });
             drop(session);
+
+            if stop_after_private_execution {
+                let _ = event_tx.send(LLMEvent::Finish {
+                    reason: FinishReason::EndTurn,
+                });
+                break;
+            }
         }
 
         let mut session = self.session.write().await;

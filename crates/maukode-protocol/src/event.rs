@@ -25,6 +25,9 @@ pub struct TokenUsage {
 pub enum PermissionDecision {
     AllowOnce,
     AllowSession,
+    /// Execute the tool locally, show the result to the user, and do not send the result to the
+    /// model. The current agent turn stops after all pending tool calls have completed.
+    AllowPrivate,
     Deny,
 }
 

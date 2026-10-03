@@ -101,7 +101,7 @@ The `"security"` block governs sandbox boundaries and human-in-the-loop approval
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `permission_mode` | `string` | `"ask"` | Confirmation policy: `"ask"` prompts on dangerous commands (`rm`, `sudo`, `pkill`, git force actions); `"strict"` prompts on every command; `"trust"` auto-allows all commands (useful in isolated CI containers). |
+| `permission_mode` | `string` | `"ask"` | Confirmation policy: `"ask"` prompts on dangerous commands (`rm`, `sudo`, `pkill`, git force actions); `"review"` prompts for every tool and supports private results; `"strict"` prompts on every command; `"trust"` auto-allows all commands (useful in isolated CI containers). Runtime mode can be changed with `/permission review`, `/permission strict`, `/permission ask`, or `/permission trust`. |
 | `jail_path_traversal` | `bool` | `true` | When `true`, enforces strict workspace confinement. Prevents tools from accessing or modifying paths outside the active working directory. |
 | `bash_whitelist` | `array` | `[]` | List of glob patterns for safe bash commands that execute immediately without prompting for human approval. |
 

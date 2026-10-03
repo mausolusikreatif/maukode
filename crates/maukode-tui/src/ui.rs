@@ -1004,6 +1004,16 @@ fn draw_help_modal(f: &mut Frame) {
         ]),
         Line::from(vec![
             Span::styled(
+                "/permission    ",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Set ask/review/strict/trust tool execution mode",
+                theme::text_style(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
                 "/diff           ",
                 Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
             ),
@@ -1120,7 +1130,7 @@ fn draw_permission_modal(
     let command_rows = Paragraph::new(format!("  $ {cmd_text}"))
         .wrap(Wrap { trim: false })
         .line_count(area_width.saturating_sub(4).max(1));
-    let area_height = 14u16
+    let area_height = 15u16
         .saturating_add(command_rows.min(u16::MAX as usize) as u16)
         .min(screen.height.saturating_sub(2));
     let x = (screen.width.saturating_sub(area_width)) / 2;
@@ -1155,7 +1165,7 @@ fn draw_permission_modal(
             Constraint::Min(3),    // Command / target box
             Constraint::Length(2), // Wrapped risk description
             Constraint::Length(0), // No spacer on narrow terminals
-            Constraint::Length(3), // Action options list (3 distinct choices)
+            Constraint::Length(4), // Action options list
         ])
         .margin(1)
         .split(block.inner(area));
@@ -1221,6 +1231,24 @@ fn draw_permission_modal(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("• Run this command one time", theme::dim_style()),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  [p] ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Run Privately          ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "• Show result only to you; withhold it from AI",
+                theme::dim_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled(

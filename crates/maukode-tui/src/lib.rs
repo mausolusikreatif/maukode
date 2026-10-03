@@ -746,6 +746,9 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::AllowOnce);
                 }
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    app.respond_permission(req, maukode_protocol::PermissionDecision::AllowPrivate);
+                }
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::AllowSession);
                 }
