@@ -48,6 +48,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             post(sessions::submit_prompt),
         )
         .route(
+            "/api/v1/sessions/{id}/cancel",
+            post(sessions::cancel_prompt),
+        )
+        .route(
             "/api/v1/sessions/{id}/events",
             get(sessions::stream_session_events),
         )

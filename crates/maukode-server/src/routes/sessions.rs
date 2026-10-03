@@ -186,14 +186,20 @@ pub async fn submit_prompt(
     .with_checkpoint_manager(Arc::clone(&state.checkpoint_manager));
 
     let event_broadcast_tx = state.get_event_sender(id).await;
+    let cancellation_token = state.register_active_turn(id).await;
     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
     let store = Arc::clone(&state.store);
     let session_for_persist = Arc::clone(&session_arc);
+    let active_turns = Arc::clone(&state.active_turns);
+    let clear_session_id = id;
 
     // Spawn execution loop in background
     tokio::spawn(async move {
-        let run_handle =
-            tokio::spawn(async move { runner.run(Some(payload.prompt), llm_tx).await });
+        let run_handle = tokio::spawn(async move {
+            runner
+                .run_with_cancellation(Some(payload.prompt), llm_tx, Some(cancellation_token))
+                .await
+        });
 
         // Forward stream events to broadcast subscribers
         while let Some(event) = llm_rx.recv().await {
@@ -201,6 +207,9 @@ pub async fn submit_prompt(
         }
 
         let _ = run_handle.await;
+
+        // Clear the active turn marker so future prompts can proceed.
+        active_turns.write().await.remove(&clear_session_id);
 
         // Persist final session state to SQLite
         let guard = session_for_persist.read().await;
@@ -231,6 +240,22 @@ pub async fn stream_session_events(
     });
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+pub async fn cancel_prompt(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let cancelled = state.cancel_active_turn(id).await;
+    let status = if cancelled {
+        "cancelled"
+    } else {
+        "no_active_turn"
+    };
+    Ok(Json(json!({
+        "status": status,
+        "session_id": id,
+    })))
 }
 
 #[derive(Debug, Deserialize)]

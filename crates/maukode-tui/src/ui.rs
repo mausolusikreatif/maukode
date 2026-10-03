@@ -197,52 +197,7 @@ fn draw_messages(
                     Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
                 )]));
 
-                let mut in_code_block = false;
-                for l in item.content.lines() {
-                    if l.trim_start().starts_with("```") {
-                        in_code_block = !in_code_block;
-                        lines.push(Line::from(vec![
-                            Span::raw("  "),
-                            Span::styled(l, theme::dim_style()),
-                        ]));
-                        continue;
-                    }
-
-                    if in_code_block {
-                        let line_style = if l.starts_with('+') {
-                            theme::diff_add_style()
-                        } else if l.starts_with('-') {
-                            theme::diff_del_style()
-                        } else if l.starts_with("@@") {
-                            theme::diff_hunk_style()
-                        } else {
-                            Style::default().fg(COLOR_FG)
-                        };
-                        lines.push(Line::from(vec![
-                            Span::raw("  "),
-                            Span::styled(l, line_style),
-                        ]));
-                    } else if l.starts_with("# ") || l.starts_with("## ") || l.starts_with("### ") {
-                        lines.push(Line::from(vec![
-                            Span::raw("  "),
-                            Span::styled(
-                                l,
-                                Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
-                            ),
-                        ]));
-                    } else if l.starts_with("- ") || l.starts_with("* ") {
-                        lines.push(Line::from(vec![
-                            Span::raw("  "),
-                            Span::styled("• ", Style::default().fg(COLOR_CYAN)),
-                            Span::styled(&l[2..], theme::text_style()),
-                        ]));
-                    } else {
-                        lines.push(Line::from(vec![
-                            Span::raw("  "),
-                            Span::styled(l, theme::text_style()),
-                        ]));
-                    }
-                }
+                lines.extend(crate::markdown::render(&item.content));
                 lines.push(Line::from(""));
             }
             ChatRole::Reasoning => {

@@ -4,8 +4,8 @@ use maukode_core::{
     RunnerConfig, Session, SessionRunner, SessionSummary, SqliteSessionStore,
 };
 use maukode_protocol::{
-    ContentPart, FinishReason, LLMEvent, PermissionDecision, PermissionRequest, Role, SessionId,
-    TokenUsage,
+    ContentPart, FinishReason, LLMEvent, Message, PermissionDecision, PermissionRequest, Role,
+    SessionId, TokenUsage,
 };
 use maukode_server::ServerClient;
 use maukode_tools::{
@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub enum ChatRole {
@@ -79,6 +80,68 @@ fn finish_tool_call(items: &mut [ChatItem], call: &maukode_protocol::ToolCall) {
     }
 }
 
+pub fn chat_items_from_messages(messages: &[Message]) -> Vec<ChatItem> {
+    let mut items = Vec::new();
+    for message in messages {
+        match message.role {
+            Role::User => {
+                for part in &message.parts {
+                    match part {
+                        ContentPart::Text { text } if !text.is_empty() => items.push(ChatItem {
+                            role: ChatRole::User,
+                            content: text.clone(),
+                        }),
+                        ContentPart::ToolResult(result) => items.push(ChatItem {
+                            role: ChatRole::ToolResult {
+                                name: result.tool_name.clone(),
+                                id: result.tool_call_id.clone(),
+                                is_error: result.is_error,
+                            },
+                            content: result.content.clone(),
+                        }),
+                        _ => {}
+                    }
+                }
+            }
+            Role::Assistant => {
+                for part in &message.parts {
+                    match part {
+                        ContentPart::Text { text } if !text.is_empty() => items.push(ChatItem {
+                            role: ChatRole::Assistant,
+                            content: text.clone(),
+                        }),
+                        ContentPart::Reasoning { text } if !text.is_empty() => {
+                            items.push(ChatItem {
+                                role: ChatRole::Reasoning,
+                                content: text.clone(),
+                            });
+                        }
+                        ContentPart::ToolCall(call) => items.push(ChatItem {
+                            role: ChatRole::ToolCall {
+                                name: call.name.clone(),
+                                id: call.id.clone(),
+                                args: call.arguments.to_string(),
+                            },
+                            content: String::new(),
+                        }),
+                        _ => {}
+                    }
+                }
+            }
+            Role::System => {
+                let text = message.text_content();
+                if !text.is_empty() {
+                    items.push(ChatItem {
+                        role: ChatRole::System,
+                        content: text,
+                    });
+                }
+            }
+        }
+    }
+    items
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActiveModal {
     None,
@@ -131,6 +194,8 @@ pub struct App {
     pub checkpoint_manager: Arc<CheckpointManager>,
     pub items: Vec<ChatItem>,
     pub is_running: bool,
+    pub active_cancellation: Option<CancellationToken>,
+    pub cancel_requested: bool,
     pub input: String,
     pub cursor_pos: usize,
     pub scroll: usize,
@@ -218,66 +283,13 @@ impl App {
 
         let session = Arc::new(RwLock::new(initial_session));
 
-        // Convert existing messages to chat items
-        let mut items = Vec::new();
-        {
-            let guard = session.try_read().unwrap();
-            for msg in &guard.messages {
-                match msg.role {
-                    Role::User => {
-                        let text = msg.text_content();
-                        if !text.is_empty() {
-                            items.push(ChatItem {
-                                role: ChatRole::User,
-                                content: text,
-                            });
-                        }
-                        for part in &msg.parts {
-                            if let ContentPart::ToolResult(tr) = part {
-                                items.push(ChatItem {
-                                    role: ChatRole::ToolResult {
-                                        name: tr.tool_name.clone(),
-                                        id: tr.tool_call_id.clone(),
-                                        is_error: tr.is_error,
-                                    },
-                                    content: tr.content.clone(),
-                                });
-                            }
-                        }
-                    }
-                    Role::Assistant => {
-                        for part in &msg.parts {
-                            match part {
-                                ContentPart::Text { text } => {
-                                    items.push(ChatItem {
-                                        role: ChatRole::Assistant,
-                                        content: text.clone(),
-                                    });
-                                }
-                                ContentPart::Reasoning { text } => {
-                                    items.push(ChatItem {
-                                        role: ChatRole::Reasoning,
-                                        content: text.clone(),
-                                    });
-                                }
-                                ContentPart::ToolCall(tc) => {
-                                    items.push(ChatItem {
-                                        role: ChatRole::ToolCall {
-                                            name: tc.name.clone(),
-                                            id: tc.id.clone(),
-                                            args: tc.arguments.to_string(),
-                                        },
-                                        content: String::new(),
-                                    });
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Role::System => {}
-                }
-            }
-        }
+        // Use the same conversion path for startup and later session switches.
+        let mut items = {
+            let guard = session
+                .try_read()
+                .map_err(|_| anyhow::anyhow!("session lock busy"))?;
+            chat_items_from_messages(&guard.messages)
+        };
 
         if items.is_empty() {
             items.push(ChatItem {
@@ -297,6 +309,8 @@ impl App {
             checkpoint_manager,
             items,
             is_running: false,
+            active_cancellation: None,
+            cancel_requested: false,
             input: String::new(),
             cursor_pos: 0,
             scroll: 0,
@@ -337,6 +351,17 @@ impl App {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = Some((msg.into(), Instant::now()));
+    }
+
+    pub fn cancel_current_turn(&mut self) {
+        if !self.is_running || self.cancel_requested {
+            return;
+        }
+        self.cancel_requested = true;
+        if let Some(token) = &self.active_cancellation {
+            token.cancel();
+        }
+        self.set_status("Cancelling…");
     }
 
     /// Advance time-based visual indicators by one event-loop tick.
@@ -683,6 +708,9 @@ impl App {
 
         if let Some(client) = self.server_client.clone() {
             self.is_running = true;
+            self.cancel_requested = false;
+            let cancellation = CancellationToken::new();
+            self.active_cancellation = Some(cancellation.clone());
             self.set_status("Thinking (server)...");
 
             let session_id = {
@@ -694,6 +722,17 @@ impl App {
             };
             let app_event_tx = self.event_tx.clone();
             let input_clone = input.clone();
+
+            let cancel_client = Arc::clone(&client);
+            let cancel_tx = app_event_tx.clone();
+            tokio::spawn(async move {
+                cancellation.cancelled().await;
+                if let Err(error) = cancel_client.cancel_prompt(session_id).await {
+                    let _ = cancel_tx.send(AppEvent::TurnFinished(Err(format!(
+                        "Failed to cancel server turn: {error}"
+                    ))));
+                }
+            });
 
             tokio::spawn(async move {
                 // 1. Subscribe first to capture full event stream
@@ -764,6 +803,9 @@ impl App {
         };
 
         self.is_running = true;
+        self.cancel_requested = false;
+        let cancellation = CancellationToken::new();
+        self.active_cancellation = Some(cancellation.clone());
         self.set_status("Thinking...");
 
         let session = Arc::clone(&self.session);
@@ -784,7 +826,11 @@ impl App {
 
         // Forward LLM stream events to AppEvent
         tokio::spawn(async move {
-            let run_handle = tokio::spawn(async move { runner.run(Some(input), llm_tx).await });
+            let run_handle = tokio::spawn(async move {
+                runner
+                    .run_with_cancellation(Some(input), llm_tx, Some(cancellation))
+                    .await
+            });
 
             while let Some(event) = llm_rx.recv().await {
                 let _ = app_event_tx.send(AppEvent::LLM(event));
@@ -871,7 +917,12 @@ impl App {
 
     pub fn handle_turn_finished(&mut self, result: Result<(), String>) {
         self.is_running = false;
+        self.active_cancellation = None;
+        let was_cancelled = std::mem::take(&mut self.cancel_requested);
         match result {
+            Ok(()) if was_cancelled => {
+                self.set_status("Cancelled");
+            }
             Ok(()) => {
                 self.set_status("Idle");
             }

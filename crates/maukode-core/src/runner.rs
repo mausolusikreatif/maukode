@@ -71,11 +71,23 @@ impl SessionRunner {
         self
     }
 
-    /// Run the multi-turn agent loop until completion, emitting events to `event_tx`
+    /// Run the multi-turn agent loop until completion, emitting events to `event_tx`.
+    /// Accepts an optional `CancellationToken` for responsive cancellation.
     pub async fn run(
         &self,
         user_prompt: Option<String>,
         event_tx: mpsc::UnboundedSender<LLMEvent>,
+    ) -> anyhow::Result<()> {
+        self.run_with_cancellation(user_prompt, event_tx, None)
+            .await
+    }
+
+    /// Run the multi-turn agent loop with cancellation support.
+    pub async fn run_with_cancellation(
+        &self,
+        user_prompt: Option<String>,
+        event_tx: mpsc::UnboundedSender<LLMEvent>,
+        cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> anyhow::Result<()> {
         let (session_id_str, turn_idx) = {
             let mut session = self.session.write().await;
@@ -167,6 +179,17 @@ impl SessionRunner {
                 }
             }
 
+            if let Some(ref token) = cancellation_token {
+                if token.is_cancelled() {
+                    let mut session = self.session.write().await;
+                    session.state = SessionState::Idle;
+                    let _ = event_tx.send(LLMEvent::Finish {
+                        reason: FinishReason::Cancelled,
+                    });
+                    return Ok(());
+                }
+            }
+
             let tool_defs = self.tools.definitions();
             let mut req = LLMRequest::new(&self.config.model, pruned_messages)
                 .with_system_prompt(&system_prompt)
@@ -183,7 +206,21 @@ impl SessionRunner {
             let mut provider_items = Vec::new();
             let mut _finish_reason = FinishReason::EndTurn;
 
-            while let Some(event_res) = stream.next().await {
+            let mut is_cancelled = false;
+            while let Some(event_res) = tokio::select! {
+                biased;
+                _ = async {
+                    if let Some(ref token) = cancellation_token {
+                        token.cancelled().await;
+                    } else {
+                        futures::future::pending::<()>().await;
+                    }
+                } => {
+                    is_cancelled = true;
+                    None
+                }
+                item = stream.next() => item,
+            } {
                 match event_res {
                     Ok(event) => {
                         match &event {
@@ -233,6 +270,17 @@ impl SessionRunner {
             session.add_message(Message::assistant(assistant_parts));
             drop(session);
 
+            // If the turn was cancelled mid-stream, stop after preserving partial output.
+            if is_cancelled {
+                debug!("Turn cancelled by user mid-stream.");
+                let _ = event_tx.send(LLMEvent::Finish {
+                    reason: FinishReason::Cancelled,
+                });
+                let mut session = self.session.write().await;
+                session.state = SessionState::Idle;
+                return Ok(());
+            }
+
             // If there are no tool calls to execute, the turn is complete!
             if tool_calls.is_empty() {
                 debug!("Turn complete with no further tool calls.");
@@ -242,6 +290,17 @@ impl SessionRunner {
             // Execute tools
             let mut tool_results = Vec::new();
             for call in tool_calls {
+                if let Some(ref token) = cancellation_token {
+                    if token.is_cancelled() {
+                        let _ = event_tx.send(LLMEvent::Finish {
+                            reason: FinishReason::Cancelled,
+                        });
+                        let mut session = self.session.write().await;
+                        session.state = SessionState::Idle;
+                        return Ok(());
+                    }
+                }
+
                 info!("Executing tool: {} ({})", call.name, call.id);
 
                 if let Some(ref perm_mgr) = self.permission_manager {
@@ -344,7 +403,22 @@ impl SessionRunner {
                     }
                 }
 
-                let exec_res = self.tools.execute(&call.name, call.arguments).await;
+                let exec_res = if let Some(ref token) = cancellation_token {
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => {
+                            let _ = event_tx.send(LLMEvent::Finish {
+                                reason: FinishReason::Cancelled,
+                            });
+                            let mut session = self.session.write().await;
+                            session.state = SessionState::Idle;
+                            return Ok(());
+                        }
+                        res = self.tools.execute(&call.name, call.arguments) => res,
+                    }
+                } else {
+                    self.tools.execute(&call.name, call.arguments).await
+                };
                 let (content, is_error) = match exec_res {
                     Ok(out) => (out, false),
                     Err(err) => (format!("Error executing tool: {err}"), true),

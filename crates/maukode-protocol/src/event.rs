@@ -8,6 +8,7 @@ pub enum FinishReason {
     ToolUse,
     MaxTokens,
     StopSequence,
+    Cancelled,
     Error,
 }
 
