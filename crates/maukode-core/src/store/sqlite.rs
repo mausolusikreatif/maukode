@@ -321,6 +321,46 @@ impl SqliteSessionStore {
         Ok(messages)
     }
 
+    pub async fn audit_summary(&self, session_id: SessionId) -> Result<String> {
+        let conn = self.conn.lock().await;
+        let id = session_id.to_string();
+        let permissions: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM permission_audit WHERE session_id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        let mode_changes: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM permission_mode_audit WHERE session_id = ?1",
+            params![session_id.to_string()],
+            |row| row.get(0),
+        )?;
+        let compactions: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM compaction_audit WHERE session_id = ?1",
+            params![session_id.to_string()],
+            |row| row.get(0),
+        )?;
+        let mut output = format!(
+            "Session provenance\n\nPermission decisions: {permissions}\nMode changes: {mode_changes}\nCompactions: {compactions}\n\nRecent permission decisions:\n"
+        );
+        let mut stmt = conn.prepare(
+            "SELECT turn_id, tool_name, decision, result_visibility, created_at
+             FROM permission_audit WHERE session_id = ?1 ORDER BY id DESC LIMIT 20",
+        )?;
+        let rows = stmt.query_map(params![session_id.to_string()], |row| {
+            Ok(format!(
+                "turn {} | {} | {} | {} | {}",
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?
+            ))
+        })?;
+        for row in rows {
+            output.push_str(&format!("{}\n", row?));
+        }
+        Ok(output)
+    }
     pub async fn start_turn(&self, session_id: SessionId, ordinal: i64) -> Result<i64> {
         let conn = self.conn.lock().await;
         conn.execute(

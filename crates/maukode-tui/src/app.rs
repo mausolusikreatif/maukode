@@ -177,6 +177,10 @@ pub enum ActiveModal {
         scroll: usize,
         max_scroll: usize,
     },
+    AuditViewer {
+        content: String,
+        scroll: usize,
+    },
     Help,
     PrivateResult {
         tool_name: String,
@@ -702,6 +706,25 @@ impl App {
                         content: message.clone(),
                     });
                     self.set_status(message);
+                }
+            }
+            "/audit" => {
+                let store = self.store.clone();
+                let tx = self.event_tx.clone();
+                let session_id = self.session.try_read().ok().map(|session| session.id);
+                self.set_status("Loading audit history...");
+                if let Some(session_id) = session_id {
+                    tokio::spawn(async move {
+                        let result = store
+                            .audit_summary(session_id)
+                            .await
+                            .map_err(|error| error.to_string());
+                        let _ = tx.send(AppEvent::AuditLoaded(result));
+                    });
+                } else {
+                    let _ = self.event_tx.send(AppEvent::AuditLoaded(Err(
+                        "Session is currently unavailable".to_string(),
+                    )));
                 }
             }
             "/diff" => {

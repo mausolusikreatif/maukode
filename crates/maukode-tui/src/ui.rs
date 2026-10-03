@@ -103,6 +103,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ActiveModal::PermissionConfirmation { request, scroll } => {
             permission_max_scroll = Some(draw_permission_modal(f, request, *scroll));
         }
+        ActiveModal::AuditViewer { content, scroll } => {
+            draw_audit_modal(f, content, *scroll);
+        }
     }
     if let (Some(max_scroll), ActiveModal::PermissionConfirmation { scroll, .. }) =
         (permission_max_scroll, &mut app.active_modal)
@@ -1152,6 +1155,20 @@ fn draw_private_result_modal(f: &mut Frame, tool_name: &str, content: &str, scro
             },
         );
     }
+}
+
+fn draw_audit_modal(f: &mut Frame, content: &str, scroll: usize) {
+    let area = centered_rect(80, 80, f.area());
+    f.render_widget(Clear, area);
+    let paragraph = Paragraph::new(content.to_string())
+        .block(
+            Block::default()
+                .title(" Audit / provenance (Esc to close) ")
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false })
+        .scroll(((scroll.min(u16::MAX as usize)) as u16, 0));
+    f.render_widget(paragraph, area);
 }
 
 fn draw_permission_modal(
