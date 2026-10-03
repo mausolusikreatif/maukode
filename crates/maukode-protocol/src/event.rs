@@ -66,6 +66,8 @@ pub enum LLMEvent {
         tool_call: ToolCall,
     },
     ToolResult(ToolResult),
+    /// A real tool result shown only in the user's private-result popup.
+    PrivateToolResult(ToolResult),
     PermissionRequest(PermissionRequest),
     Usage(TokenUsage),
     ContextWarning {

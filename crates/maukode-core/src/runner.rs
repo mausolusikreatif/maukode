@@ -289,7 +289,6 @@ impl SessionRunner {
 
             // Execute tools
             let mut tool_results = Vec::new();
-            let mut stop_after_private_execution = false;
             for call in tool_calls {
                 let mut keep_result_private = false;
                 if let Some(ref token) = cancellation_token {
@@ -305,28 +304,40 @@ impl SessionRunner {
 
                 info!("Executing tool: {} ({})", call.name, call.id);
 
+                let permission_key = if call.name == "bash" {
+                    call.arguments
+                        .get("command")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
+                } else {
+                    serde_json::to_string(&call.arguments).ok()
+                };
+
                 if let Some(ref perm_mgr) = self.permission_manager {
-                    let needs_permission = match perm_mgr.mode() {
-                        PermissionMode::Trust => false,
-                        PermissionMode::Strict | PermissionMode::Review => true,
-                        PermissionMode::Ask => {
-                            if call.name == "bash" {
-                                if let Some(cmd_val) =
-                                    call.arguments.get("command").and_then(|v| v.as_str())
-                                {
-                                    let session_id_str = self.session.read().await.id.to_string();
-                                    if perm_mgr.is_whitelisted(&session_id_str, cmd_val).await {
-                                        false
-                                    } else {
+                    let whitelisted = match permission_key.as_deref() {
+                        Some(key) => perm_mgr.is_whitelisted(&session_id_str, key).await,
+                        None => false,
+                    };
+                    let needs_permission = if whitelisted {
+                        false
+                    } else {
+                        match perm_mgr.mode() {
+                            PermissionMode::Trust => false,
+                            PermissionMode::Strict | PermissionMode::Review => true,
+                            PermissionMode::Ask => {
+                                if call.name == "bash" {
+                                    if let Some(cmd_val) =
+                                        call.arguments.get("command").and_then(|v| v.as_str())
+                                    {
                                         let assessment =
                                             maukode_tools::assess_bash_command(cmd_val);
                                         assessment.level != maukode_tools::RiskLevel::Safe
+                                    } else {
+                                        false
                                     }
                                 } else {
                                     false
                                 }
-                            } else {
-                                false
                             }
                         }
                     };
@@ -385,15 +396,14 @@ impl SessionRunner {
                                 // Proceed with execution
                             }
                             maukode_protocol::PermissionDecision::AllowSession => {
-                                if let Some(ref cmd) = command {
+                                if let Some(ref key) = permission_key {
                                     perm_mgr
-                                        .whitelist_session_command(&session_id_str, cmd)
+                                        .whitelist_session_command(&session_id_str, key)
                                         .await;
                                 }
                             }
                             maukode_protocol::PermissionDecision::AllowPrivate => {
                                 keep_result_private = true;
-                                stop_after_private_execution = true;
                             }
                             maukode_protocol::PermissionDecision::Deny => {
                                 let tr = ToolResult {
@@ -438,7 +448,11 @@ impl SessionRunner {
                     content,
                     is_error,
                 };
-                let _ = event_tx.send(LLMEvent::ToolResult(tr.clone()));
+                let _ = event_tx.send(if keep_result_private {
+                    LLMEvent::PrivateToolResult(tr.clone())
+                } else {
+                    LLMEvent::ToolResult(tr.clone())
+                });
                 if keep_result_private {
                     tool_results.push(ContentPart::ToolResult(ToolResult {
                         tool_call_id: tr.tool_call_id,
@@ -460,13 +474,6 @@ impl SessionRunner {
                 parts: tool_results,
             });
             drop(session);
-
-            if stop_after_private_execution {
-                let _ = event_tx.send(LLMEvent::Finish {
-                    reason: FinishReason::EndTurn,
-                });
-                break;
-            }
         }
 
         let mut session = self.session.write().await;

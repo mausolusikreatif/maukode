@@ -178,6 +178,11 @@ pub enum ActiveModal {
         max_scroll: usize,
     },
     Help,
+    PrivateResult {
+        tool_name: String,
+        content: String,
+        scroll: usize,
+    },
     PermissionConfirmation {
         request: PermissionRequest,
         scroll: usize,
@@ -941,6 +946,14 @@ impl App {
                 });
                 self.set_status("Tool executed");
                 self.auto_scroll = true;
+            }
+            LLMEvent::PrivateToolResult(tr) => {
+                self.active_modal = ActiveModal::PrivateResult {
+                    tool_name: tr.tool_name,
+                    content: tr.content,
+                    scroll: 0,
+                };
+                self.set_status("Private tool result — hidden from AI");
             }
             LLMEvent::Usage(usage) => {
                 self.token_usage = Some(usage);

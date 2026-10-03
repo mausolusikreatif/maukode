@@ -56,6 +56,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let mut permission_max_scroll = None;
     match &app.active_modal {
         ActiveModal::None => {}
+        ActiveModal::PrivateResult {
+            tool_name,
+            content,
+            scroll,
+        } => {
+            draw_private_result_modal(f, tool_name, content, *scroll);
+        }
         ActiveModal::ProviderSelector { selected_idx } => {
             draw_provider_modal(f, app, *selected_idx);
         }
@@ -1112,6 +1119,39 @@ fn draw_help_modal(f: &mut Frame) {
         .block(block)
         .alignment(Alignment::Left);
     f.render_widget(p, area);
+}
+
+fn draw_private_result_modal(f: &mut Frame, tool_name: &str, content: &str, scroll: usize) {
+    let area = centered_rect(80, 70, f.area());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(Span::styled(
+            format!(" Private result: {tool_name} (hidden from AI) "),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    let paragraph = Paragraph::new(content.to_string())
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll.min(u16::MAX as usize) as u16, 0));
+    f.render_widget(paragraph, area);
+    if inner.height > 0 {
+        f.render_widget(
+            Paragraph::new("Press Esc or Enter to close; the AI continues without this result.")
+                .style(theme::dim_style()),
+            Rect {
+                x: inner.x,
+                y: inner.bottom().saturating_sub(1),
+                width: inner.width,
+                height: 1,
+            },
+        );
+    }
 }
 
 fn draw_permission_modal(
