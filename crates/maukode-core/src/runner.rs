@@ -97,7 +97,7 @@ impl SessionRunner {
         event_tx: mpsc::UnboundedSender<LLMEvent>,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> anyhow::Result<()> {
-        let (session_id, session_id_str, turn_idx) = {
+        let (session_id, session_id_str, mut turn_idx) = {
             let mut session = self.session.write().await;
             if let Some(ref prompt) = user_prompt {
                 session.add_message(Message::user(prompt.clone()));
@@ -105,6 +105,12 @@ impl SessionRunner {
             session.state = SessionState::Running;
             (session.id, session.id.to_string(), session.messages.len())
         };
+
+        if let Some(store) = &self.permission_store {
+            if let Ok(stable_turn_id) = store.start_turn(session_id, turn_idx as i64).await {
+                turn_idx = stable_turn_id as usize;
+            }
+        }
 
         // Automatic pre-turn shadow git snapshot before any agent tool modifications
         if let Some(ref cm) = self.checkpoint_manager {

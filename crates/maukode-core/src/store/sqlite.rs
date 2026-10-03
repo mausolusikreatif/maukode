@@ -128,6 +128,17 @@ impl SqliteSessionStore {
 
             CREATE INDEX IF NOT EXISTS idx_messages_audit_session_id ON messages_audit(session_id);
 
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(session_id, ordinal),
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_session_turns_session_id
+                ON session_turns(session_id, id);
             CREATE TABLE IF NOT EXISTS permission_audit (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -310,6 +321,20 @@ impl SqliteSessionStore {
         Ok(messages)
     }
 
+    pub async fn start_turn(&self, session_id: SessionId, ordinal: i64) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT OR IGNORE INTO session_turns (session_id, ordinal, created_at)
+             VALUES (?1, ?2, ?3)",
+            params![session_id.to_string(), ordinal, Utc::now().to_rfc3339()],
+        )?;
+        let id = conn.query_row(
+            "SELECT id FROM session_turns WHERE session_id = ?1 AND ordinal = ?2",
+            params![session_id.to_string(), ordinal],
+            |row| row.get(0),
+        )?;
+        Ok(id)
+    }
     pub async fn record_permission(&self, record: &PermissionAuditRecord) -> Result<()> {
         let conn = self.conn.lock().await;
         conn.execute(
