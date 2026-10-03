@@ -183,6 +183,7 @@ pub async fn submit_prompt(
         runner_config,
     )
     .with_permission_manager(Arc::clone(&state.permission_manager))
+    .with_permission_store(Arc::clone(&state.store))
     .with_checkpoint_manager(Arc::clone(&state.checkpoint_manager));
 
     let event_broadcast_tx = state.get_event_sender(id).await;
@@ -261,13 +262,33 @@ pub async fn cancel_prompt(
 #[derive(Debug, Deserialize)]
 pub struct SetPermissionModeRequest {
     pub mode: maukode_core::PermissionMode,
+    pub session_id: Option<maukode_protocol::SessionId>,
 }
 
 pub async fn set_permission_mode(
     State(state): State<Arc<ServerState>>,
     Json(payload): Json<SetPermissionModeRequest>,
 ) -> impl IntoResponse {
+    let previous_mode = state.permission_manager.mode();
     state.permission_manager.set_mode(payload.mode);
+    if let Some(session_id) = payload.session_id {
+        let session = state.sessions.read().await.get(&session_id).cloned();
+        let turn_id = match session {
+            Some(session) => session.read().await.messages.len() as i64,
+            None => 0,
+        };
+        let record = maukode_core::store::sqlite::PermissionModeAuditRecord {
+            session_id,
+            turn_id,
+            previous_mode,
+            new_mode: payload.mode,
+            source: "server_api".to_string(),
+            created_at: chrono::Utc::now(),
+        };
+        if let Err(error) = state.store.record_permission_mode_change(&record).await {
+            tracing::warn!(%error, "Failed to persist permission mode audit record");
+        }
+    }
     Json(json!({ "status": "ok", "mode": payload.mode }))
 }
 

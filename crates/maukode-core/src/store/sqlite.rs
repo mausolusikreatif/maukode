@@ -58,6 +58,7 @@ pub struct CompactionAuditRecord {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Clone)]
 pub struct SqliteSessionStore {
     conn: Arc<Mutex<Connection>>,
     pub db_path: PathBuf,

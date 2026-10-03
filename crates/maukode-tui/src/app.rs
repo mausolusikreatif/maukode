@@ -878,6 +878,7 @@ impl App {
 
         let runner = SessionRunner::new(session, llm_client, tools, context, runner_config)
             .with_permission_manager(Arc::clone(&self.permission_manager))
+            .with_permission_store(Arc::new(self.store.clone()))
             .with_checkpoint_manager(Arc::clone(&self.checkpoint_manager));
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let app_event_tx = self.event_tx.clone();
