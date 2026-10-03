@@ -45,7 +45,7 @@ MauKode operates autonomously to plan, research, and execute complex software en
 - **Security Sandboxing & Human-in-the-Loop Permissions**:
   - Strict workspace directory jail preventing path traversal attacks (`/etc/`, `~/.ssh/`).
   - Interactive approval modals for high-risk commands (`rm -rf`, `sudo`, destructive git operations).
-  - Configurable permission policies: `ask` (default), `strict`, and `trust`.
+  - Configurable permission policies: `ask` (default), `review`, `strict`, and `trust`.
 - **Universal Multi-Provider & Model Hub**:
   - Streaming SSE support for Anthropic, OpenAI, Ollama (Local), OpenRouter, DeepSeek, and custom OpenAI-compatible endpoints.
 
@@ -253,10 +253,12 @@ MauKode enforces strict safety boundaries to prevent unintended system modificat
 2. **Interactive Human-in-the-Loop Confirmation**:
    - Destructive operations (`rm -rf`, `sudo`, `pkill`, `git reset --hard`, `git clean -f`, force push) trigger an approval modal:
      - `[y / Enter]`: Allow Once
+     - `[p]`: Run privately and display the result only to you without sharing it with the AI
      - `[a]`: Always Allow for the current session (adds command to session whitelist)
      - `[n / Esc]`: Reject execution (informs agent to choose another approach)
 3. **Configurable Permission Policies**:
    - `"ask"` (default): Prompts for dangerous commands.
+   - `"review"`: Prompts for every tool. Choose `[p]` to run locally and withhold the result from the AI; the agent turn stops so you can decide what to say next.
    - `"strict"`: Prompts for all commands and file operations.
    - `"trust"`: Auto-allows all commands (intended for isolated Docker / CI containers).
 

@@ -56,6 +56,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let mut permission_max_scroll = None;
     match &app.active_modal {
         ActiveModal::None => {}
+        ActiveModal::PrivateResult {
+            tool_name,
+            content,
+            scroll,
+        } => {
+            draw_private_result_modal(f, tool_name, content, *scroll);
+        }
         ActiveModal::ProviderSelector { selected_idx } => {
             draw_provider_modal(f, app, *selected_idx);
         }
@@ -1004,6 +1011,16 @@ fn draw_help_modal(f: &mut Frame) {
         ]),
         Line::from(vec![
             Span::styled(
+                "/permission    ",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Set ask/review/strict/trust tool execution mode",
+                theme::text_style(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
                 "/diff           ",
                 Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
             ),
@@ -1104,6 +1121,39 @@ fn draw_help_modal(f: &mut Frame) {
     f.render_widget(p, area);
 }
 
+fn draw_private_result_modal(f: &mut Frame, tool_name: &str, content: &str, scroll: usize) {
+    let area = centered_rect(80, 70, f.area());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(Span::styled(
+            format!(" Private result: {tool_name} (hidden from AI) "),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    let paragraph = Paragraph::new(content.to_string())
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll.min(u16::MAX as usize) as u16, 0));
+    f.render_widget(paragraph, area);
+    if inner.height > 0 {
+        f.render_widget(
+            Paragraph::new("Press Esc or Enter to close; the AI continues without this result.")
+                .style(theme::dim_style()),
+            Rect {
+                x: inner.x,
+                y: inner.bottom().saturating_sub(1),
+                width: inner.width,
+                height: 1,
+            },
+        );
+    }
+}
+
 fn draw_permission_modal(
     f: &mut Frame,
     request: &maukode_protocol::PermissionRequest,
@@ -1120,7 +1170,7 @@ fn draw_permission_modal(
     let command_rows = Paragraph::new(format!("  $ {cmd_text}"))
         .wrap(Wrap { trim: false })
         .line_count(area_width.saturating_sub(4).max(1));
-    let area_height = 14u16
+    let area_height = 15u16
         .saturating_add(command_rows.min(u16::MAX as usize) as u16)
         .min(screen.height.saturating_sub(2));
     let x = (screen.width.saturating_sub(area_width)) / 2;
@@ -1155,7 +1205,7 @@ fn draw_permission_modal(
             Constraint::Min(3),    // Command / target box
             Constraint::Length(2), // Wrapped risk description
             Constraint::Length(0), // No spacer on narrow terminals
-            Constraint::Length(3), // Action options list (3 distinct choices)
+            Constraint::Length(4), // Action options list
         ])
         .margin(1)
         .split(block.inner(area));
@@ -1221,6 +1271,24 @@ fn draw_permission_modal(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("• Run this command one time", theme::dim_style()),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  [p] ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Run Privately          ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "• Show result only to you; withhold it from AI",
+                theme::dim_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled(

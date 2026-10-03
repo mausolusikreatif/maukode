@@ -1,7 +1,8 @@
 use crate::event::AppEvent;
 use maukode_core::{
-    AppConfig, CheckpointManager, ContextManager, PermissionManager, ProviderConfig, ProviderKind,
-    RunnerConfig, Session, SessionRunner, SessionSummary, SqliteSessionStore,
+    AppConfig, CheckpointManager, ContextManager, PermissionManager, PermissionMode,
+    ProviderConfig, ProviderKind, RunnerConfig, Session, SessionRunner, SessionSummary,
+    SqliteSessionStore,
 };
 use maukode_protocol::{
     ContentPart, FinishReason, LLMEvent, Message, PermissionDecision, PermissionRequest, Role,
@@ -177,6 +178,11 @@ pub enum ActiveModal {
         max_scroll: usize,
     },
     Help,
+    PrivateResult {
+        tool_name: String,
+        content: String,
+        scroll: usize,
+    },
     PermissionConfirmation {
         request: PermissionRequest,
         scroll: usize,
@@ -631,6 +637,56 @@ impl App {
                     });
                 }
             }
+            "/privacy" | "/permission" => {
+                let requested = parts.get(1).map(|value| value.to_ascii_lowercase());
+                let mode = match requested.as_deref() {
+                    Some("review" | "private" | "manual") => Some(PermissionMode::Review),
+                    Some("strict") => Some(PermissionMode::Strict),
+                    Some("ask") => Some(PermissionMode::Ask),
+                    Some("trust") => Some(PermissionMode::Trust),
+                    None => {
+                        self.items.push(ChatItem {
+                            role: ChatRole::System,
+                            content: format!(
+                                "Permission mode: {:?}. Usage: /permission \
+                                 [review|strict|ask|trust]",
+                                self.permission_manager.mode()
+                            ),
+                        });
+                        None
+                    }
+                    Some(other) => {
+                        self.set_status(format!("Unknown permission mode: {other}"));
+                        None
+                    }
+                };
+
+                if let Some(mode) = mode {
+                    self.permission_manager.set_mode(mode);
+                    self.config.security.permission_mode = mode;
+                    if let Err(error) = self.config.save() {
+                        tracing::warn!("Failed to save permission mode: {error}");
+                    }
+                    if let Some(client) = self.server_client.clone() {
+                        tokio::spawn(async move {
+                            if let Err(error) = client.set_permission_mode(mode).await {
+                                tracing::error!("Failed to update server permission mode: {error}");
+                            }
+                        });
+                    }
+                    let message = if mode == PermissionMode::Review {
+                        "Review mode enabled: every tool is shown first; press p to run privately"
+                            .to_string()
+                    } else {
+                        format!("Permission mode changed to {mode:?}")
+                    };
+                    self.items.push(ChatItem {
+                        role: ChatRole::System,
+                        content: message.clone(),
+                    });
+                    self.set_status(message);
+                }
+            }
             "/diff" => {
                 self.open_diff_modal();
             }
@@ -891,6 +947,14 @@ impl App {
                 self.set_status("Tool executed");
                 self.auto_scroll = true;
             }
+            LLMEvent::PrivateToolResult(tr) => {
+                self.active_modal = ActiveModal::PrivateResult {
+                    tool_name: tr.tool_name,
+                    content: tr.content,
+                    scroll: 0,
+                };
+                self.set_status("Private tool result — hidden from AI");
+            }
             LLMEvent::Usage(usage) => {
                 self.token_usage = Some(usage);
             }
@@ -976,6 +1040,9 @@ impl App {
         let action_str = match decision {
             PermissionDecision::AllowOnce => "allowed (once)",
             PermissionDecision::AllowSession => "allowed (session whitelist)",
+            PermissionDecision::AllowPrivate => {
+                "running privately; result will not be shared with AI"
+            }
             PermissionDecision::Deny => "rejected",
         };
         self.set_status(format!("Action {action_str}"));

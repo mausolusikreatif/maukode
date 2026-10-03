@@ -736,6 +736,16 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.active_modal = ActiveModal::None;
             }
         }
+        ActiveModal::PrivateResult { scroll, .. } => match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                app.active_modal = ActiveModal::None;
+            }
+            KeyCode::Up | KeyCode::PageUp => *scroll = scroll.saturating_sub(3),
+            KeyCode::Down | KeyCode::PageDown => *scroll = scroll.saturating_add(3),
+            KeyCode::Home => *scroll = 0,
+            KeyCode::End => *scroll = usize::MAX,
+            _ => {}
+        },
         ActiveModal::PermissionConfirmation { request, scroll } => {
             let req = request.clone();
             match key.code {
@@ -745,6 +755,9 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 KeyCode::End => *scroll = usize::MAX,
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::AllowOnce);
+                }
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    app.respond_permission(req, maukode_protocol::PermissionDecision::AllowPrivate);
                 }
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     app.respond_permission(req, maukode_protocol::PermissionDecision::AllowSession);

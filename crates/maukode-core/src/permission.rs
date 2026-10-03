@@ -1,6 +1,7 @@
 use maukode_protocol::PermissionDecision;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 
@@ -12,13 +13,35 @@ pub enum PermissionMode {
     Ask,
     /// Ask for confirmation on all commands and operations
     Strict,
+    /// Ask for every operation and allow its result to be kept private from the model
+    Review,
     /// Auto-allow all operations without prompting
     Trust,
 }
 
+impl PermissionMode {
+    const fn as_u8(self) -> u8 {
+        match self {
+            Self::Ask => 0,
+            Self::Strict => 1,
+            Self::Review => 2,
+            Self::Trust => 3,
+        }
+    }
+
+    const fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Strict,
+            2 => Self::Review,
+            3 => Self::Trust,
+            _ => Self::Ask,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct PermissionManager {
-    mode: PermissionMode,
+    mode: Arc<AtomicU8>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<PermissionDecision>>>>,
     session_whitelists: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     static_whitelist: Arc<Vec<String>>,
@@ -33,7 +56,7 @@ impl Default for PermissionManager {
 impl PermissionManager {
     pub fn new(mode: PermissionMode) -> Self {
         Self {
-            mode,
+            mode: Arc::new(AtomicU8::new(mode.as_u8())),
             pending: Arc::new(Mutex::new(HashMap::new())),
             session_whitelists: Arc::new(Mutex::new(HashMap::new())),
             static_whitelist: Arc::new(Vec::new()),
@@ -46,7 +69,12 @@ impl PermissionManager {
     }
 
     pub fn mode(&self) -> PermissionMode {
-        self.mode
+        PermissionMode::from_u8(self.mode.load(Ordering::Relaxed))
+    }
+
+    /// Change the mode for this manager and all of its clones.
+    pub fn set_mode(&self, mode: PermissionMode) {
+        self.mode.store(mode.as_u8(), Ordering::Relaxed);
     }
 
     /// Check if a command is whitelisted either statically or for this session
@@ -105,5 +133,33 @@ impl PermissionManager {
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_changes_are_shared_by_clones() {
+        let manager = PermissionManager::new(PermissionMode::Ask);
+        let cloned = manager.clone();
+
+        manager.set_mode(PermissionMode::Review);
+
+        assert_eq!(cloned.mode(), PermissionMode::Review);
+    }
+
+    #[tokio::test]
+    async fn private_decision_is_delivered_to_pending_request() {
+        let manager = PermissionManager::default();
+        let receiver = manager.register_request("request".to_string()).await;
+
+        assert!(
+            manager
+                .respond("request", PermissionDecision::AllowPrivate)
+                .await
+        );
+        assert_eq!(receiver.await, Ok(PermissionDecision::AllowPrivate));
     }
 }

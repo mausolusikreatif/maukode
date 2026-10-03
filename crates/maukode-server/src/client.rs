@@ -262,6 +262,20 @@ impl ServerClient {
         Ok(Box::pin(stream))
     }
 
+    pub async fn set_permission_mode(&self, mode: maukode_core::PermissionMode) -> Result<()> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/permissions/mode", self.base_url))
+            .json(&serde_json::json!({ "mode": mode }))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to set permission mode: {err}"));
+        }
+        Ok(())
+    }
+
     pub async fn respond_permission(
         &self,
         session_id: SessionId,

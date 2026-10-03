@@ -37,6 +37,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/api/v1/models", get(providers::list_models))
         .route("/api/v1/models/active", post(providers::set_active_model))
+        .route(
+            "/api/v1/permissions/mode",
+            post(sessions::set_permission_mode),
+        )
         // Sessions
         .route(
             "/api/v1/sessions",

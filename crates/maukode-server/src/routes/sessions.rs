@@ -259,6 +259,19 @@ pub async fn cancel_prompt(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SetPermissionModeRequest {
+    pub mode: maukode_core::PermissionMode,
+}
+
+pub async fn set_permission_mode(
+    State(state): State<Arc<ServerState>>,
+    Json(payload): Json<SetPermissionModeRequest>,
+) -> impl IntoResponse {
+    state.permission_manager.set_mode(payload.mode);
+    Json(json!({ "status": "ok", "mode": payload.mode }))
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RespondPermissionRequest {
     pub decision: maukode_protocol::PermissionDecision,
 }

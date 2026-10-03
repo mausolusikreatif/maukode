@@ -290,6 +290,7 @@ impl SessionRunner {
             // Execute tools
             let mut tool_results = Vec::new();
             for call in tool_calls {
+                let mut keep_result_private = false;
                 if let Some(ref token) = cancellation_token {
                     if token.is_cancelled() {
                         let _ = event_tx.send(LLMEvent::Finish {
@@ -303,28 +304,40 @@ impl SessionRunner {
 
                 info!("Executing tool: {} ({})", call.name, call.id);
 
+                let permission_key = if call.name == "bash" {
+                    call.arguments
+                        .get("command")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
+                } else {
+                    serde_json::to_string(&call.arguments).ok()
+                };
+
                 if let Some(ref perm_mgr) = self.permission_manager {
-                    let needs_permission = match perm_mgr.mode() {
-                        PermissionMode::Trust => false,
-                        PermissionMode::Strict => true,
-                        PermissionMode::Ask => {
-                            if call.name == "bash" {
-                                if let Some(cmd_val) =
-                                    call.arguments.get("command").and_then(|v| v.as_str())
-                                {
-                                    let session_id_str = self.session.read().await.id.to_string();
-                                    if perm_mgr.is_whitelisted(&session_id_str, cmd_val).await {
-                                        false
-                                    } else {
+                    let whitelisted = match permission_key.as_deref() {
+                        Some(key) => perm_mgr.is_whitelisted(&session_id_str, key).await,
+                        None => false,
+                    };
+                    let needs_permission = if whitelisted {
+                        false
+                    } else {
+                        match perm_mgr.mode() {
+                            PermissionMode::Trust => false,
+                            PermissionMode::Strict | PermissionMode::Review => true,
+                            PermissionMode::Ask => {
+                                if call.name == "bash" {
+                                    if let Some(cmd_val) =
+                                        call.arguments.get("command").and_then(|v| v.as_str())
+                                    {
                                         let assessment =
                                             maukode_tools::assess_bash_command(cmd_val);
                                         assessment.level != maukode_tools::RiskLevel::Safe
+                                    } else {
+                                        false
                                     }
                                 } else {
                                     false
                                 }
-                            } else {
-                                false
                             }
                         }
                     };
@@ -343,8 +356,10 @@ impl SessionRunner {
                             let assess = maukode_tools::assess_bash_command(&cmd);
                             (Some(cmd), assess.level.to_string(), assess.reason)
                         } else {
+                            let details = serde_json::to_string_pretty(&call.arguments)
+                                .unwrap_or_else(|_| call.arguments.to_string());
                             (
-                                None,
+                                Some(details),
                                 "warning".to_string(),
                                 format!("Tool '{}' requires confirmation", call.name),
                             )
@@ -381,11 +396,14 @@ impl SessionRunner {
                                 // Proceed with execution
                             }
                             maukode_protocol::PermissionDecision::AllowSession => {
-                                if let Some(ref cmd) = command {
+                                if let Some(ref key) = permission_key {
                                     perm_mgr
-                                        .whitelist_session_command(&session_id_str, cmd)
+                                        .whitelist_session_command(&session_id_str, key)
                                         .await;
                                 }
+                            }
+                            maukode_protocol::PermissionDecision::AllowPrivate => {
+                                keep_result_private = true;
                             }
                             maukode_protocol::PermissionDecision::Deny => {
                                 let tr = ToolResult {
@@ -430,11 +448,26 @@ impl SessionRunner {
                     content,
                     is_error,
                 };
-                let _ = event_tx.send(LLMEvent::ToolResult(tr.clone()));
-                tool_results.push(ContentPart::ToolResult(tr));
+                let _ = event_tx.send(if keep_result_private {
+                    LLMEvent::PrivateToolResult(tr.clone())
+                } else {
+                    LLMEvent::ToolResult(tr.clone())
+                });
+                if keep_result_private {
+                    tool_results.push(ContentPart::ToolResult(ToolResult {
+                        tool_call_id: tr.tool_call_id,
+                        tool_name: tr.tool_name,
+                        content: "Tool executed by the user; result withheld from the model."
+                            .to_string(),
+                        is_error: false,
+                    }));
+                } else {
+                    tool_results.push(ContentPart::ToolResult(tr));
+                }
             }
 
-            // Append tool results as user role message for LLM continuation
+            // Tool calls must have matching results in model history. Private results are replaced
+            // by an explicit placeholder so their contents can never enter a later model request.
             let mut session = self.session.write().await;
             session.add_message(Message {
                 role: Role::User,

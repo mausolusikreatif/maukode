@@ -101,13 +101,31 @@ The `"security"` block governs sandbox boundaries and human-in-the-loop approval
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `permission_mode` | `string` | `"ask"` | Confirmation policy: `"ask"` prompts on dangerous commands (`rm`, `sudo`, `pkill`, git force actions); `"strict"` prompts on every command; `"trust"` auto-allows all commands (useful in isolated CI containers). |
+| `permission_mode` | `string` | `"ask"` | Confirmation policy: `"ask"` prompts on dangerous commands (`rm`, `sudo`, `pkill`, git force actions); `"review"` prompts for every tool and supports private results; `"strict"` prompts on every command; `"trust"` auto-allows all commands (useful in isolated CI containers). Runtime mode can be changed with `/permission review`, `/permission strict`, `/permission ask`, or `/permission trust`. |
 | `jail_path_traversal` | `bool` | `true` | When `true`, enforces strict workspace confinement. Prevents tools from accessing or modifying paths outside the active working directory. |
 | `bash_whitelist` | `array` | `[]` | List of glob patterns for safe bash commands that execute immediately without prompting for human approval. |
 
 ---
 
-## 🗜️ Compaction & Token Optimization
+## 🔐 Environment Variables and Secret Files
+
+MauKode does not load `.env` files automatically. Provider credentials are read from
+process environment variables only when the corresponding provider is configured;
+values in the explicit JSON configuration take precedence over environment fallbacks.
+Environment variables are inherited by local subprocesses, including Bash tools and
+configured MCP servers, but are never intentionally inserted into model messages.
+
+In the default `ask` permission mode, commands that appear to inspect secret-bearing
+files or variables require approval. This includes `.env*`, credential/secret files,
+private keys, `printenv`/`env`, and common API-key or access-token references. Use
+`review` when every tool call should be reviewed. `trust` disables these safeguards
+and should only be used in an isolated environment.
+
+Do not put secrets in prompts, tool arguments, checked-in configuration, or project
+files. If a tool output contains a secret, reject it or use private execution (`p`)
+so the result is withheld from the model and replaced with a placeholder in history.
+
+
 
 The `"compaction"` block manages context window limits and automatic summarization:
 

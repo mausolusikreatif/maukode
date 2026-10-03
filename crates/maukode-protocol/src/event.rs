@@ -25,6 +25,9 @@ pub struct TokenUsage {
 pub enum PermissionDecision {
     AllowOnce,
     AllowSession,
+    /// Execute the tool locally, show the result to the user, and do not send the result to the
+    /// model. The current agent turn stops after all pending tool calls have completed.
+    AllowPrivate,
     Deny,
 }
 
@@ -63,6 +66,8 @@ pub enum LLMEvent {
         tool_call: ToolCall,
     },
     ToolResult(ToolResult),
+    /// A real tool result shown only in the user's private-result popup.
+    PrivateToolResult(ToolResult),
     PermissionRequest(PermissionRequest),
     Usage(TokenUsage),
     ContextWarning {
