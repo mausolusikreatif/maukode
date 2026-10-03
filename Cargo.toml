@@ -68,6 +68,8 @@ ignore = "0.4"
 walkdir = "2.5"
 similar = "2.6"
 dirs = "7.0"
+pulldown-cmark = "0.13"
+tokio-util = "0.7"
 tempfile = "3.17"
 
 # Tree-sitter & AST Grammars

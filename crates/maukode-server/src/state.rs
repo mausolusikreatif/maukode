@@ -5,12 +5,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
+use tokio_util::sync::CancellationToken;
 
 pub struct ServerState {
     pub config: Arc<RwLock<AppConfig>>,
     pub store: Arc<SqliteSessionStore>,
     pub sessions: Arc<RwLock<HashMap<SessionId, Arc<RwLock<Session>>>>>,
     pub event_broadcasters: Arc<RwLock<HashMap<SessionId, broadcast::Sender<LLMEvent>>>>,
+    pub active_turns: Arc<RwLock<HashMap<SessionId, CancellationToken>>>,
     pub permission_manager: Arc<PermissionManager>,
     pub checkpoint_manager: Arc<maukode_core::CheckpointManager>,
     pub mcp_manager: Arc<maukode_core::McpManager>,
@@ -38,6 +40,7 @@ impl ServerState {
             store: Arc::new(store),
             sessions: Arc::new(RwLock::new(HashMap::new())),
             event_broadcasters: Arc::new(RwLock::new(HashMap::new())),
+            active_turns: Arc::new(RwLock::new(HashMap::new())),
             permission_manager,
             checkpoint_manager,
             mcp_manager,
@@ -67,6 +70,28 @@ impl ServerState {
         let mut sessions = self.sessions.write().await;
         sessions.insert(id, Arc::clone(&session_arc));
         session_arc
+    }
+
+    pub async fn register_active_turn(&self, id: SessionId) -> CancellationToken {
+        let token = CancellationToken::new();
+        let mut turns = self.active_turns.write().await;
+        turns.insert(id, token.clone());
+        token
+    }
+
+    pub async fn cancel_active_turn(&self, id: SessionId) -> bool {
+        let mut turns = self.active_turns.write().await;
+        if let Some(token) = turns.remove(&id) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn clear_active_turn(&self, id: SessionId) {
+        let mut turns = self.active_turns.write().await;
+        turns.remove(&id);
     }
 
     pub async fn get_event_sender(&self, id: SessionId) -> broadcast::Sender<LLMEvent> {

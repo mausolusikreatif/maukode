@@ -1,5 +1,7 @@
 pub mod app;
 pub mod event;
+pub mod markdown;
+pub mod render_cache;
 pub mod theme;
 pub mod ui;
 
@@ -67,20 +69,25 @@ async fn run_loop<B: ratatui::backend::Backend>(
 
     while !app.should_quit {
         if let Some(event) = events.next().await {
+            // Tick events only animate an active turn. Avoid redrawing the full terminal while idle.
+            let mut needs_draw = !matches!(&event, AppEvent::Tick) || app.is_running;
             handle_app_event(app, event);
 
             // Drain any pending events that arrived in the same batch
             // (e.g. streaming tokens, rapid typing, or tick queue)
             while let Some(buffered) = events.try_next() {
+                needs_draw |= !matches!(&buffered, AppEvent::Tick) || app.is_running;
                 handle_app_event(app, buffered);
                 if app.should_quit {
                     break;
                 }
             }
 
-            terminal
-                .draw(|f| ui::draw(f, app))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            if needs_draw {
+                terminal
+                    .draw(|f| ui::draw(f, app))
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+            }
         } else {
             break;
         }
@@ -656,21 +663,7 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                         app.context =
                             std::sync::Arc::new(maukode_core::ContextManager::new(&app.cwd));
                         app.session = std::sync::Arc::new(tokio::sync::RwLock::new(loaded_session));
-                        app.items.clear();
-                        for msg in &messages {
-                            let text = msg.text_content();
-                            if !text.is_empty() {
-                                let role = match msg.role {
-                                    maukode_protocol::Role::User => ChatRole::User,
-                                    maukode_protocol::Role::Assistant => ChatRole::Assistant,
-                                    maukode_protocol::Role::System => ChatRole::System,
-                                };
-                                app.items.push(crate::app::ChatItem {
-                                    role,
-                                    content: text,
-                                });
-                            }
-                        }
+                        app.items = crate::app::chat_items_from_messages(&messages);
                         app.set_status(format!(
                             "Loaded session {} ({})",
                             target_id,
@@ -861,7 +854,9 @@ fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
             app.cursor_pos += 1;
         }
         KeyCode::Esc => {
-            if !app.input.is_empty() {
+            if app.is_running {
+                app.cancel_current_turn();
+            } else if !app.input.is_empty() {
                 app.input.clear();
                 app.cursor_pos = 0;
             } else {

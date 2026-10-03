@@ -213,6 +213,19 @@ impl ServerClient {
         Ok(())
     }
 
+    pub async fn cancel_prompt(&self, id: SessionId) -> Result<()> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/sessions/{id}/cancel", self.base_url))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to cancel prompt: {err}"));
+        }
+        Ok(())
+    }
+
     pub async fn subscribe_events(
         &self,
         id: SessionId,
