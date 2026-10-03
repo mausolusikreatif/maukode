@@ -432,7 +432,7 @@ impl SessionRunner {
                                 tool_name: call.name.clone(),
                                 action_key: permission_key.clone().unwrap_or_default(),
                                 mode: perm_mgr.mode(),
-                                decision: decision.clone(),
+                                decision,
                                 risk_level: risk_level.clone(),
                                 result_visibility: visibility.to_string(),
                                 created_at: chrono::Utc::now(),
