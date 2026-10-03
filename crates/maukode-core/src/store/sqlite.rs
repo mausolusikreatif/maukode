@@ -1,7 +1,8 @@
+use crate::permission::PermissionMode;
 use crate::session::Session;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use maukode_protocol::{Message, SessionId, SessionState};
+use maukode_protocol::{Message, PermissionDecision, SessionId, SessionState};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -17,6 +18,44 @@ pub struct SessionSummary {
     pub provider: String,
     pub model: String,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PermissionAuditRecord {
+    pub session_id: SessionId,
+    pub turn_id: i64,
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub action_key: String,
+    pub mode: PermissionMode,
+    pub decision: PermissionDecision,
+    pub risk_level: String,
+    pub result_visibility: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PermissionModeAuditRecord {
+    pub session_id: SessionId,
+    pub turn_id: i64,
+    pub previous_mode: PermissionMode,
+    pub new_mode: PermissionMode,
+    pub source: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactionAuditRecord {
+    pub session_id: SessionId,
+    pub source_turn_start: i64,
+    pub source_turn_end: i64,
+    pub original_message_count: usize,
+    pub compacted_message_count: usize,
+    pub original_tokens: usize,
+    pub compacted_tokens: usize,
+    pub trigger: String,
+    pub summary: String,
+    pub created_at: DateTime<Utc>,
 }
 
 pub struct SqliteSessionStore {
@@ -87,6 +126,50 @@ impl SqliteSessionStore {
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_audit_session_id ON messages_audit(session_id);
+
+            CREATE TABLE IF NOT EXISTS permission_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                turn_id INTEGER NOT NULL,
+                tool_call_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                action_key TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                result_visibility TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_permission_audit_session_turn
+                ON permission_audit(session_id, turn_id);
+
+            CREATE TABLE IF NOT EXISTS permission_mode_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                turn_id INTEGER NOT NULL,
+                previous_mode TEXT NOT NULL,
+                new_mode TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS compaction_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                source_turn_start INTEGER NOT NULL,
+                source_turn_end INTEGER NOT NULL,
+                original_message_count INTEGER NOT NULL,
+                compacted_message_count INTEGER NOT NULL,
+                original_tokens INTEGER NOT NULL,
+                compacted_tokens INTEGER NOT NULL,
+                trigger TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
             ",
         )?;
 
@@ -226,6 +309,73 @@ impl SqliteSessionStore {
         Ok(messages)
     }
 
+    pub async fn record_permission(&self, record: &PermissionAuditRecord) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO permission_audit
+             (session_id, turn_id, tool_call_id, tool_name, action_key, mode, decision,
+              risk_level, result_visibility, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                record.session_id.to_string(),
+                record.turn_id,
+                record.tool_call_id,
+                record.tool_name,
+                record.action_key,
+                serde_json::to_string(&record.mode)?,
+                serde_json::to_string(&record.decision)?,
+                record.risk_level,
+                record.result_visibility,
+                record.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub async fn record_permission_mode_change(
+        &self,
+        record: &PermissionModeAuditRecord,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO permission_mode_audit
+             (session_id, turn_id, previous_mode, new_mode, source, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                record.session_id.to_string(),
+                record.turn_id,
+                serde_json::to_string(&record.previous_mode)?,
+                serde_json::to_string(&record.new_mode)?,
+                record.source,
+                record.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub async fn record_compaction(&self, record: &CompactionAuditRecord) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO compaction_audit
+             (session_id, source_turn_start, source_turn_end, original_message_count,
+              compacted_message_count, original_tokens, compacted_tokens, trigger, summary,
+              created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                record.session_id.to_string(),
+                record.source_turn_start,
+                record.source_turn_end,
+                record.original_message_count as i64,
+                record.compacted_message_count as i64,
+                record.original_tokens as i64,
+                record.compacted_tokens as i64,
+                record.trigger,
+                record.summary,
+                record.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
     pub async fn load_session(&self, id: SessionId) -> Result<Option<Session>> {
         let conn = self.conn.lock().await;
         let id_str = id.to_string();
