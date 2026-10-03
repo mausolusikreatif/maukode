@@ -175,6 +175,23 @@ impl SessionRunner {
                     .await
                     {
                         pruned_messages = pruner.prune_messages(&session_write.messages);
+                        if let Some(store) = &self.permission_store {
+                            let audit = crate::store::sqlite::CompactionAuditRecord {
+                                session_id,
+                                source_turn_start: 0,
+                                source_turn_end: turn_idx as i64,
+                                original_message_count: compact_res.original_message_count,
+                                compacted_message_count: compact_res.compacted_message_count,
+                                original_tokens: compact_res.original_tokens,
+                                compacted_tokens: compact_res.compacted_tokens,
+                                trigger: "automatic_threshold".to_string(),
+                                summary: compact_res.summary.clone(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            if let Err(error) = store.record_compaction(&audit).await {
+                                tracing::warn!(%error, "Failed to persist compaction audit record");
+                            }
+                        }
                         tracing::info!(
                             "Auto-compacted session from {} to {} messages ({} tokens saved)",
                             compact_res.original_message_count,
