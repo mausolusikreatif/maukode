@@ -1,41 +1,38 @@
-use maukode_server::{run_server, ServerClient, ServerConfig};
-use std::net::SocketAddr;
-use std::time::Duration;
+use maukode_server::{routes, ServerClient, ServerState};
+use std::path::Path;
+use std::sync::Arc;
 use tempfile::tempdir;
+use tokio::net::TcpListener;
+
+async fn start_test_server(directory: &Path) -> (String, tokio::task::JoinHandle<()>) {
+    let state = Arc::new(
+        ServerState::new(Some("secret123".to_string()), Some(directory.to_path_buf()))
+            .await
+            .unwrap(),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, routes::create_router(state))
+            .await
+            .unwrap();
+    });
+    (url, handle)
+}
 
 #[tokio::test]
 async fn test_server_health_and_sessions() {
-    let port = 14096;
-    let bind_addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     let temp_dir = tempdir().unwrap();
-
-    let server_config = ServerConfig {
-        bind_addr,
-        auth_token: Some("secret123".to_string()),
-        default_dir: Some(temp_dir.path().to_path_buf()),
-    };
-
-    let _handle = tokio::spawn(async move {
-        if let Err(e) = run_server(server_config).await {
-            eprintln!("SERVER RUN ERROR: {e:?}");
-        }
-    });
-
-    // Wait for server to start
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (url, _handle) = start_test_server(temp_dir.path()).await;
 
     // Test unauthorized client
-    let unauth_client = ServerClient::new(format!("http://127.0.0.1:{port}"), None).unwrap();
+    let unauth_client = ServerClient::new(&url, None).unwrap();
     assert!(unauth_client.health().await.unwrap()); // health check is public
     let unauth_sessions = unauth_client.list_sessions(None, true).await;
     assert!(unauth_sessions.is_err()); // protected route fails without token!
 
     // Test authorized client
-    let client = ServerClient::new(
-        format!("http://127.0.0.1:{port}"),
-        Some("secret123".to_string()),
-    )
-    .unwrap();
+    let client = ServerClient::new(&url, Some("secret123".to_string())).unwrap();
     assert!(client.health().await.unwrap());
 
     // Test create session with directory
@@ -71,27 +68,9 @@ async fn test_server_health_and_sessions() {
 
 #[tokio::test]
 async fn test_permission_endpoint() {
-    let port = 14097;
-    let bind_addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     let temp_dir = tempdir().unwrap();
-
-    let server_config = ServerConfig {
-        bind_addr,
-        auth_token: Some("secret123".to_string()),
-        default_dir: Some(temp_dir.path().to_path_buf()),
-    };
-
-    let _handle = tokio::spawn(async move {
-        let _ = run_server(server_config).await;
-    });
-
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    let client = ServerClient::new(
-        format!("http://127.0.0.1:{port}"),
-        Some("secret123".to_string()),
-    )
-    .unwrap();
+    let (url, _handle) = start_test_server(temp_dir.path()).await;
+    let client = ServerClient::new(&url, Some("secret123".to_string())).unwrap();
     let meta = client
         .create_session(Some(temp_dir.path()), None)
         .await
@@ -110,27 +89,9 @@ async fn test_permission_endpoint() {
 
 #[tokio::test]
 async fn test_diff_and_undo_endpoints() {
-    let port = 14098;
-    let bind_addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     let temp_dir = tempdir().unwrap();
-
-    let server_config = ServerConfig {
-        bind_addr,
-        auth_token: Some("secret123".to_string()),
-        default_dir: Some(temp_dir.path().to_path_buf()),
-    };
-
-    let _handle = tokio::spawn(async move {
-        let _ = run_server(server_config).await;
-    });
-
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    let client = ServerClient::new(
-        format!("http://127.0.0.1:{port}"),
-        Some("secret123".to_string()),
-    )
-    .unwrap();
+    let (url, _handle) = start_test_server(temp_dir.path()).await;
+    let client = ServerClient::new(&url, Some("secret123".to_string())).unwrap();
     let meta = client
         .create_session(Some(temp_dir.path()), None)
         .await

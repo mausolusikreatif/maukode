@@ -115,14 +115,12 @@ pub async fn run_remote_turn(
                     break;
                 }
                 LLMEvent::Error { message } => {
-                    eprintln!("\n\x1b[1;31mServer Error:\x1b[0m {message}");
-                    break;
+                    return Err(anyhow::anyhow!("Server error: {message}"));
                 }
                 _ => {}
             },
             Err(e) => {
-                eprintln!("\n\x1b[1;31mConnection Error:\x1b[0m {e}");
-                break;
+                return Err(e);
             }
         }
     }

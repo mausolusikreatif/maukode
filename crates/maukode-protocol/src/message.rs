@@ -26,8 +26,16 @@ pub struct ToolResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentPart {
-    Text { text: String },
-    Reasoning { text: String },
+    Text {
+        text: String,
+    },
+    Reasoning {
+        text: String,
+    },
+    /// Provider-owned response item retained verbatim for stateless continuation.
+    ProviderItem {
+        value: serde_json::Value,
+    },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
 }

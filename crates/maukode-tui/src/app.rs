@@ -4,7 +4,8 @@ use maukode_core::{
     RunnerConfig, Session, SessionRunner, SessionSummary, SqliteSessionStore,
 };
 use maukode_protocol::{
-    ContentPart, LLMEvent, PermissionDecision, PermissionRequest, Role, SessionId, TokenUsage,
+    ContentPart, FinishReason, LLMEvent, PermissionDecision, PermissionRequest, Role, SessionId,
+    TokenUsage,
 };
 use maukode_server::ServerClient;
 use maukode_tools::{
@@ -51,6 +52,18 @@ pub(crate) fn append_stream_delta(items: &mut Vec<ChatItem>, role: ChatRole, tex
         role,
         content: text,
     });
+}
+
+fn remote_turn_result(event: &LLMEvent) -> Option<Result<(), String>> {
+    match event {
+        LLMEvent::Error { message } => Some(Err(message.clone())),
+        LLMEvent::Finish { reason } => match reason {
+            FinishReason::ToolUse => None,
+            FinishReason::Error => Some(Err("Provider ended the turn with an error".into())),
+            _ => Some(Ok(())),
+        },
+        _ => None,
+    }
 }
 
 fn finish_tool_call(items: &mut [ChatItem], call: &maukode_protocol::ToolCall) {
@@ -501,7 +514,13 @@ impl App {
                     self.open_provider_modal();
                 } else if parts.len() >= 3 && parts[1] == "use" {
                     let id = parts[2];
-                    if let Ok(()) = self.config.set_active_provider(id) {
+                    if let Err(err) = self.config.set_active_provider(id) {
+                        self.set_status(err.to_string());
+                        self.items.push(ChatItem {
+                            role: ChatRole::System,
+                            content: err.to_string(),
+                        });
+                    } else {
                         if let Some(client) = self.server_client.clone() {
                             let id_s = id.to_string();
                             tokio::spawn(async move {
@@ -516,8 +535,6 @@ impl App {
                                 id, self.config.active_model
                             ),
                         });
-                    } else {
-                        self.set_status(format!("Provider '{id}' not found"));
                     }
                 } else if parts.len() >= 4 && parts[1] == "add" {
                     let name = parts[2];
@@ -684,23 +701,39 @@ impl App {
                 }
 
                 // 3. Process events until completed
+                let mut completed = false;
                 use futures::StreamExt;
                 while let Some(event_res) = stream.next().await {
                     match event_res {
-                        Ok(event) => {
-                            let is_finish = matches!(event, LLMEvent::Finish { .. });
-                            let _ = app_event_tx.send(AppEvent::LLM(event));
-                            if is_finish {
+                        Ok(event) => match remote_turn_result(&event) {
+                            Some(Err(message)) => {
+                                let _ = app_event_tx.send(AppEvent::TurnFinished(Err(message)));
+                                completed = true;
                                 break;
                             }
-                        }
+                            Some(Ok(())) => {
+                                let _ = app_event_tx.send(AppEvent::LLM(event));
+                                let _ = app_event_tx.send(AppEvent::TurnFinished(Ok(())));
+                                return;
+                            }
+                            None => {
+                                let _ = app_event_tx.send(AppEvent::LLM(event));
+                            }
+                        },
                         Err(e) => {
                             tracing::warn!("Stream parse error: {e}");
+                            let _ = app_event_tx
+                                .send(AppEvent::TurnFinished(Err(format!("Stream error: {e}"))));
+                            completed = true;
                             break;
                         }
                     }
                 }
-                let _ = app_event_tx.send(AppEvent::TurnFinished(Ok(())));
+                if !completed {
+                    let _ = app_event_tx.send(AppEvent::TurnFinished(Err(
+                        "Event stream ended before the turn completed".into(),
+                    )));
+                }
             });
             return;
         }
@@ -1157,6 +1190,28 @@ impl App {
 mod stream_tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn remote_turn_finishes_on_errors_but_keeps_tool_use_streaming() {
+        assert_eq!(
+            remote_turn_result(&LLMEvent::Error {
+                message: "provider unavailable".into(),
+            }),
+            Some(Err("provider unavailable".into()))
+        );
+        assert_eq!(
+            remote_turn_result(&LLMEvent::Finish {
+                reason: FinishReason::ToolUse,
+            }),
+            None
+        );
+        assert_eq!(
+            remote_turn_result(&LLMEvent::Finish {
+                reason: FinishReason::EndTurn,
+            }),
+            Some(Ok(()))
+        );
+    }
 
     #[test]
     fn deterministic_stream_burst_coalesces_chunks_within_ci_budget() {

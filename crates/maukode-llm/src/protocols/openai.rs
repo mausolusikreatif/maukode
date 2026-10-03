@@ -178,6 +178,7 @@ impl LLMClient for OpenAIClient {
                 match part {
                     ContentPart::Text { text: t } => text.push_str(t),
                     ContentPart::Reasoning { .. } => {}
+                    ContentPart::ProviderItem { .. } => {}
                     ContentPart::ToolCall(tc) => {
                         tool_calls.push(json!({
                             "id": tc.id,
@@ -288,7 +289,7 @@ impl LLMClient for OpenAIClient {
                         }
                     };
                     if event.data == "[DONE]" {
-                        continue;
+                        return None;
                     }
                     let value: serde_json::Value = match serde_json::from_str(&event.data) {
                         Ok(value) => value,
@@ -438,10 +439,10 @@ mod tests {
                 .collect::<String>()
                 + "data: [DONE]\n\n";
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
-                payload.len()
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n{payload}"
             );
             socket.write_all(response.as_bytes()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         });
 
         let client = OpenAIClient::new("test-key").with_base_url(format!("http://{address}"));
@@ -451,8 +452,13 @@ mod tests {
                 description: "Search text".into(),
                 parameters: json!({"type": "object"}),
             }]);
-        let events: Vec<_> = client.stream(request).await.unwrap().collect().await;
-        server.await.unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.stream(request).await.unwrap().collect::<Vec<_>>(),
+        )
+        .await;
+        server.abort();
+        let events = result.expect("[DONE] should end the stream before the server closes");
         assert!(events.iter().any(|event| matches!(event, Ok(LLMEvent::ToolCallFinish { tool_call }) if tool_call.name == "grep")));
     }
 }

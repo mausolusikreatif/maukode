@@ -3,21 +3,22 @@
 ## Current baseline (2026-10-03)
 
 The `Rust CI` workflow runs `cargo test --workspace --locked` and Clippy on
-`ubuntu-latest` for every push and pull request. All 44 current tests pass:
+`ubuntu-latest` for every push and pull request. All 56 current tests pass:
 
 | Crate | Tests | Current coverage |
 | --- | ---: | --- |
-| `maukode-core` | 18 | Compaction, memory discovery, repository map parsing, MCP mock handshake, one checkpoint lifecycle, audit retention |
+| `maukode-core` | 30 | Compaction, memory discovery, repository map parsing, MCP mock handshake, checkpoint and audit retention, local OAuth callback/token/JWKS/refresh/logout fixtures and credential locking, Responses SSE errors and tool replay |
 | `maukode-tools` | 10 | Command risk classification, basic path jail, registry aliases and unknown names, HTML parsing |
 | `maukode-server` | 3 | Health/auth and session creation, unknown permission reply, selected read endpoints |
 | `maukode-tui` | 9 | Chat wrap/scroll, input and dialog wrap, event-to-render path, tool-call completion, streaming smoke budget |
 | `maukode-llm` | 4 | OpenAI-compatible fragmented names/arguments, multiple calls, invalid arguments, local SSE fixture |
 | `maukode-protocol`, `maukode-cli` | 0 | No direct tests |
 
-The server tests use fixed ports `14096`–`14098` and 300 ms startup sleeps.
-`ServerState` and the TUI construct config/database paths from the user's XDG
-directories. Tests should isolate these paths and choose an ephemeral port to
-avoid collisions and shared state. No test should require a live LLM account.
+The server tests bind ephemeral loopback ports before starting the router, so
+they do not depend on fixed ports or startup sleeps. `ServerState` and the TUI
+construct config/database paths from the user's XDG directories. Tests should
+isolate these paths to avoid shared state. No test should require a live LLM
+account.
 
 The audit found preexisting formatting drift in
 `crates/maukode-core/src/compaction/estimator.rs` and

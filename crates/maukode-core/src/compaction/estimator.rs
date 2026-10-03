@@ -37,6 +37,9 @@ impl TokenEstimator {
                     ContentPart::Reasoning { text } => {
                         total += Self::estimate_text(text);
                     }
+                    ContentPart::ProviderItem { value } => {
+                        total += Self::estimate_text(&value.to_string());
+                    }
                     ContentPart::ToolCall(call) => {
                         total += Self::estimate_text(&call.name);
                         total += Self::estimate_text(&call.arguments.to_string());

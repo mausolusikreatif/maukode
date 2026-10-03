@@ -100,6 +100,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    #[command(about = "Manage Sign in with ChatGPT")]
+    Auth {
+        #[command(subcommand)]
+        action: AuthAction,
+    },
     #[command(about = "Run a single prompt and exit when done")]
     Run {
         #[arg(required = true, help = "The prompt instruction for MauKode")]
@@ -134,6 +139,71 @@ enum Commands {
         #[arg(short = 'd', long, help = "Default root directory for workspaces")]
         dir: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum AuthAction {
+    #[command(about = "Sign in and allow MauKode to use your ChatGPT plan")]
+    Login {
+        #[arg(long, help = "Connect a different ChatGPT account or workspace")]
+        new_account: bool,
+    },
+    #[command(about = "Show the connected ChatGPT account")]
+    Status,
+    #[command(about = "List saved ChatGPT accounts")]
+    Accounts,
+    #[command(about = "Switch to a saved ChatGPT account")]
+    Use { client_id: String },
+    #[command(about = "Revoke and remove the active ChatGPT session")]
+    Logout,
+}
+
+async fn activate_chatgpt_provider() -> anyhow::Result<String> {
+    let mut config = AppConfig::load();
+    let models = config.fetch_models_for_provider("chatgpt").await?;
+    let model = models
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("No ChatGPT models are available for this account"))?
+        .clone();
+    if let Some(provider) = config.providers.iter_mut().find(|p| p.id == "chatgpt") {
+        provider.default_model = Some(model.clone());
+    }
+    config.set_active_provider("chatgpt")?;
+    if let Some(info) = maukode_server::get_daemon_status().await? {
+        let client = maukode_server::ServerClient::new(&info.url, info.token)?;
+        if let Some(provider) = config.get_provider("chatgpt") {
+            if let Err(error) = client.add_or_update_provider(provider).await {
+                if error.to_string().contains("unknown variant `chat_gpt`") {
+                    anyhow::bail!(
+                        "The running MauKode daemon is from an older version. Run `maukode server restart`; your ChatGPT sign-in is already saved."
+                    );
+                }
+                return Err(error);
+            }
+        }
+        client.set_active_provider("chatgpt").await?;
+        client.set_active_model(&model).await?;
+    }
+    Ok(model)
+}
+
+fn open_sign_in_browser(url: &str) {
+    #[cfg(target_os = "linux")]
+    let command = std::process::Command::new("xdg-open").arg(url).spawn();
+    #[cfg(target_os = "macos")]
+    let command = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let command = std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .spawn();
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    let command: std::io::Result<std::process::Child> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Browser launch is unsupported on this platform",
+    ));
+    if command.is_err() {
+        println!("Open the sign-in link above in a browser on this machine.");
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -173,6 +243,40 @@ async fn main() -> anyhow::Result<()> {
     let cwd = cli
         .cwd
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    if let Some(Commands::Auth { action }) = &cli.command {
+        let auth = maukode_core::ChatGptAuth::new()?;
+        match action {
+            AuthAction::Login { new_account } => {
+                let attempt = auth.begin_login(*new_account).await?;
+                println!("Continue with ChatGPT: {}", attempt.url);
+                open_sign_in_browser(&attempt.url);
+                let email = auth.finish_login(attempt).await?;
+                let model = activate_chatgpt_provider().await?;
+                println!("Signed in as {email}. Using ChatGPT plan with model {model}.");
+                println!("Manage app usage in ChatGPT Settings → Usage.");
+            }
+            AuthAction::Status => match auth.status()? {
+                Some(email) => println!("ChatGPT plan connected: {email}"),
+                None => println!("No ChatGPT account connected. Run: maukode auth login"),
+            },
+            AuthAction::Accounts => {
+                for (id, email, active) in auth.accounts()? {
+                    println!("{} {email} ({id})", if active { "*" } else { " " });
+                }
+            }
+            AuthAction::Use { client_id } => {
+                auth.use_account(client_id)?;
+                let model = activate_chatgpt_provider().await?;
+                println!("Using ChatGPT account {client_id} with model {model}.");
+            }
+            AuthAction::Logout => {
+                auth.logout().await?;
+                println!("ChatGPT session revoked and removed from MauKode.");
+            }
+        }
+        return Ok(());
+    }
 
     // Handle "init" subcommand
     if let Some(Commands::Init { force }) = cli.command {
@@ -314,6 +418,12 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some((url, token)) = remote_url_to_use {
         let client = Arc::new(maukode_server::ServerClient::new(&url, token)?);
+        if let Some(provider) = &cli.provider {
+            client.set_active_provider(provider).await?;
+        }
+        if let Some(model) = &cli.model {
+            client.set_active_model(model).await?;
+        }
         let is_remote_vps = cli.remote.is_some();
         let label = if is_remote_vps {
             "remote server"

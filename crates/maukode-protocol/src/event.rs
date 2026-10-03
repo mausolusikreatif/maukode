@@ -47,6 +47,9 @@ pub enum LLMEvent {
     ReasoningDelta {
         text: String,
     },
+    ProviderItem {
+        item: serde_json::Value,
+    },
     ToolCallStart {
         id: String,
         name: String,
