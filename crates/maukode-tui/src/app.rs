@@ -139,6 +139,7 @@ pub struct App {
     pub active_modal: ActiveModal,
     pub token_usage: Option<TokenUsage>,
     pub status_message: Option<(String, Instant)>,
+    pub animation_frame: usize,
     pub should_quit: bool,
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
     pub server_client: Option<Arc<ServerClient>>,
@@ -304,6 +305,7 @@ impl App {
             active_modal: ActiveModal::None,
             token_usage: None,
             status_message: None,
+            animation_frame: 0,
             should_quit: false,
             event_tx,
             server_client,
@@ -335,6 +337,17 @@ impl App {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = Some((msg.into(), Instant::now()));
+    }
+
+    /// Advance time-based visual indicators by one event-loop tick.
+    pub fn tick(&mut self) {
+        self.animation_frame = self.animation_frame.wrapping_add(1);
+    }
+
+    pub fn spinner(&self) -> &'static str {
+        const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+        FRAMES[self.animation_frame % FRAMES.len()]
     }
 
     pub fn open_provider_modal(&mut self) {

@@ -42,7 +42,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.auto_scroll,
         chunks[1],
     );
-    draw_input(f, &app.input, app.cursor_pos, app.is_running, chunks[2]);
+    draw_input(
+        f,
+        &app.input,
+        app.cursor_pos,
+        app.is_running,
+        app.spinner(),
+        chunks[2],
+    );
 
     // Active modal overlays
     let mut permission_max_scroll = None;
@@ -441,7 +448,14 @@ fn wrapped_input(input: &str, cursor_pos: usize, width: u16) -> (Vec<String>, us
     (rows, cursor.0, cursor.1.min(width.saturating_sub(1)))
 }
 
-fn draw_input(f: &mut Frame, input: &str, cursor_pos: usize, is_busy: bool, area: Rect) {
+fn draw_input(
+    f: &mut Frame,
+    input: &str,
+    cursor_pos: usize,
+    is_busy: bool,
+    spinner: &str,
+    area: Rect,
+) {
     let input_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -453,7 +467,7 @@ fn draw_input(f: &mut Frame, input: &str, cursor_pos: usize, is_busy: bool, area
 
     let title = if is_busy {
         Span::styled(
-            " ⠋ MauKode is thinking... (press Esc to cancel) ",
+            format!(" {spinner} MauKode is thinking... (press Esc to cancel) "),
             Style::default().fg(COLOR_AMBER),
         )
     } else {
@@ -623,9 +637,12 @@ fn draw_model_modal(
     f.render_widget(filter_p, inner[0]);
 
     if is_loading {
-        let loading_p = Paragraph::new("\n  ⏳ Fetching models from provider API...")
-            .style(theme::thinking_style())
-            .alignment(Alignment::Center);
+        let loading_p = Paragraph::new(format!(
+            "\n  {} Fetching models from provider API...",
+            app.spinner()
+        ))
+        .style(theme::thinking_style())
+        .alignment(Alignment::Center);
         f.render_widget(loading_p, inner[1]);
         return;
     }
@@ -1537,7 +1554,16 @@ mod chat_viewport_tests {
 
         let mut terminal = Terminal::new(TestBackend::new(12, 5)).unwrap();
         terminal
-            .draw(|frame| draw_input(frame, "a long input that wraps", 23, false, frame.area()))
+            .draw(|frame| {
+                draw_input(
+                    frame,
+                    "a long input that wraps",
+                    23,
+                    false,
+                    "⠋",
+                    frame.area(),
+                )
+            })
             .unwrap();
         let buffer = terminal.backend().buffer();
         let screen = (0..buffer.area.height)
