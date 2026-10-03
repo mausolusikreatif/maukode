@@ -163,7 +163,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
             },
             _ => {}
         },
-        AppEvent::Tick => {}
+        AppEvent::Tick => {
+            app.tick();
+        }
         AppEvent::LLM(llm_event) => {
             app.handle_llm_event(llm_event);
         }
