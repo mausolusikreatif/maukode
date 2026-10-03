@@ -166,6 +166,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 ActiveModal::PermissionConfirmation { scroll, .. } => {
                     *scroll = scroll.saturating_add(3);
                 }
+                ActiveModal::AuditViewer { scroll, .. } => {
+                    *scroll = scroll.saturating_add(3);
+                }
                 _ => app.scroll_down(3),
             },
             _ => {}
@@ -176,6 +179,12 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
         AppEvent::LLM(llm_event) => {
             app.handle_llm_event(llm_event);
         }
+        AppEvent::AuditLoaded(result) => match result {
+            Ok(content) => {
+                app.active_modal = ActiveModal::AuditViewer { content, scroll: 0 };
+            }
+            Err(error) => app.set_status(format!("Audit failed: {error}")),
+        },
         AppEvent::TurnFinished(result) => {
             app.handle_turn_finished(result);
         }
@@ -703,6 +712,17 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.active_modal = ActiveModal::None;
                 app.undo_turn(None);
             }
+            _ => {}
+        },
+        ActiveModal::AuditViewer { scroll, .. } => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                app.active_modal = ActiveModal::None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => *scroll += 1,
+            KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
+            KeyCode::PageDown => *scroll += 10,
+            KeyCode::Home => *scroll = 0,
             _ => {}
         },
         ActiveModal::CodebaseMapViewer {

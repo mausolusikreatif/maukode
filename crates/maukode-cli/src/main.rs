@@ -660,7 +660,9 @@ async fn main() -> anyhow::Result<()> {
         config.set_active_model(m);
     }
 
-    let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
+    let store = Arc::new(SqliteSessionStore::new(
+        SqliteSessionStore::default_db_path(),
+    )?);
 
     // If single prompt is supplied, run headless turn and persist
     if let Some(prompt) = prompt_to_run {
@@ -721,6 +723,7 @@ async fn main() -> anyhow::Result<()> {
             runner_config,
         )
         .with_permission_manager(Arc::clone(&perm_mgr))
+        .with_permission_store(Arc::clone(&store))
         .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
 
         execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(prompt)).await?;
@@ -798,6 +801,7 @@ async fn main() -> anyhow::Result<()> {
             },
         )
         .with_permission_manager(Arc::clone(&perm_mgr))
+        .with_permission_store(Arc::clone(&store))
         .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
 
         loop {

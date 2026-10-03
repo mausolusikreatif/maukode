@@ -1,6 +1,7 @@
 use crate::context::ContextManager;
 use crate::permission::{PermissionManager, PermissionMode};
 use crate::session::Session;
+use crate::store::sqlite::{PermissionAuditRecord, SqliteSessionStore};
 use futures::StreamExt;
 use maukode_llm::{LLMClient, LLMRequest};
 use maukode_protocol::{
@@ -36,6 +37,7 @@ pub struct SessionRunner {
     context: Arc<ContextManager>,
     config: RunnerConfig,
     permission_manager: Option<Arc<PermissionManager>>,
+    permission_store: Option<Arc<SqliteSessionStore>>,
     checkpoint_manager: Option<Arc<crate::checkpoint::CheckpointManager>>,
 }
 
@@ -54,12 +56,18 @@ impl SessionRunner {
             context,
             config,
             permission_manager: None,
+            permission_store: None,
             checkpoint_manager: None,
         }
     }
 
     pub fn with_permission_manager(mut self, pm: Arc<PermissionManager>) -> Self {
         self.permission_manager = Some(pm);
+        self
+    }
+
+    pub fn with_permission_store(mut self, store: Arc<SqliteSessionStore>) -> Self {
+        self.permission_store = Some(store);
         self
     }
 
@@ -89,14 +97,20 @@ impl SessionRunner {
         event_tx: mpsc::UnboundedSender<LLMEvent>,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> anyhow::Result<()> {
-        let (session_id_str, turn_idx) = {
+        let (session_id, session_id_str, mut turn_idx) = {
             let mut session = self.session.write().await;
             if let Some(ref prompt) = user_prompt {
                 session.add_message(Message::user(prompt.clone()));
             }
             session.state = SessionState::Running;
-            (session.id.to_string(), session.messages.len())
+            (session.id, session.id.to_string(), session.messages.len())
         };
+
+        if let Some(store) = &self.permission_store {
+            if let Ok(stable_turn_id) = store.start_turn(session_id, turn_idx as i64).await {
+                turn_idx = stable_turn_id as usize;
+            }
+        }
 
         // Automatic pre-turn shadow git snapshot before any agent tool modifications
         if let Some(ref cm) = self.checkpoint_manager {
@@ -167,6 +181,23 @@ impl SessionRunner {
                     .await
                     {
                         pruned_messages = pruner.prune_messages(&session_write.messages);
+                        if let Some(store) = &self.permission_store {
+                            let audit = crate::store::sqlite::CompactionAuditRecord {
+                                session_id,
+                                source_turn_start: 0,
+                                source_turn_end: turn_idx as i64,
+                                original_message_count: compact_res.original_message_count,
+                                compacted_message_count: compact_res.compacted_message_count,
+                                original_tokens: compact_res.original_tokens,
+                                compacted_tokens: compact_res.compacted_tokens,
+                                trigger: "automatic_threshold".to_string(),
+                                summary: compact_res.summary.clone(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            if let Err(error) = store.record_compaction(&audit).await {
+                                tracing::warn!(%error, "Failed to persist compaction audit record");
+                            }
+                        }
                         tracing::info!(
                             "Auto-compacted session from {} to {} messages ({} tokens saved)",
                             compact_res.original_message_count,
@@ -371,7 +402,7 @@ impl SessionRunner {
                             tool_name: call.name.clone(),
                             command: command.clone(),
                             path: None,
-                            risk_level,
+                            risk_level: risk_level.clone(),
                             description,
                         };
 
@@ -390,6 +421,32 @@ impl SessionRunner {
                                     maukode_protocol::PermissionDecision::Deny
                                 }
                             };
+
+                        if let Some(store) = &self.permission_store {
+                            let visibility =
+                                if decision == maukode_protocol::PermissionDecision::AllowPrivate {
+                                    "user_only"
+                                } else if decision == maukode_protocol::PermissionDecision::Deny {
+                                    "none"
+                                } else {
+                                    "model"
+                                };
+                            let audit = PermissionAuditRecord {
+                                session_id,
+                                turn_id: turn_idx as i64,
+                                tool_call_id: call.id.clone(),
+                                tool_name: call.name.clone(),
+                                action_key: permission_key.clone().unwrap_or_default(),
+                                mode: perm_mgr.mode(),
+                                decision,
+                                risk_level: risk_level.clone(),
+                                result_visibility: visibility.to_string(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            if let Err(error) = store.record_permission(&audit).await {
+                                tracing::warn!(%error, "Failed to persist permission audit record");
+                            }
+                        }
 
                         match decision {
                             maukode_protocol::PermissionDecision::AllowOnce => {

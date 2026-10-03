@@ -177,6 +177,10 @@ pub enum ActiveModal {
         scroll: usize,
         max_scroll: usize,
     },
+    AuditViewer {
+        content: String,
+        scroll: usize,
+    },
     Help,
     PrivateResult {
         tool_name: String,
@@ -662,10 +666,27 @@ impl App {
                 };
 
                 if let Some(mode) = mode {
+                    let previous_mode = self.permission_manager.mode();
                     self.permission_manager.set_mode(mode);
                     self.config.security.permission_mode = mode;
                     if let Err(error) = self.config.save() {
                         tracing::warn!("Failed to save permission mode: {error}");
+                    }
+                    if let Ok(session) = self.session.try_read() {
+                        let record = maukode_core::store::sqlite::PermissionModeAuditRecord {
+                            session_id: session.id,
+                            turn_id: session.messages.len() as i64,
+                            previous_mode,
+                            new_mode: mode,
+                            source: "tui_command".to_string(),
+                            created_at: chrono::Utc::now(),
+                        };
+                        let store = self.store.clone();
+                        tokio::spawn(async move {
+                            if let Err(error) = store.record_permission_mode_change(&record).await {
+                                tracing::warn!("Failed to persist permission mode audit: {error}");
+                            }
+                        });
                     }
                     if let Some(client) = self.server_client.clone() {
                         tokio::spawn(async move {
@@ -685,6 +706,25 @@ impl App {
                         content: message.clone(),
                     });
                     self.set_status(message);
+                }
+            }
+            "/audit" => {
+                let store = self.store.clone();
+                let tx = self.event_tx.clone();
+                let session_id = self.session.try_read().ok().map(|session| session.id);
+                self.set_status("Loading audit history...");
+                if let Some(session_id) = session_id {
+                    tokio::spawn(async move {
+                        let result = store
+                            .audit_summary(session_id)
+                            .await
+                            .map_err(|error| error.to_string());
+                        let _ = tx.send(AppEvent::AuditLoaded(result));
+                    });
+                } else {
+                    let _ = self.event_tx.send(AppEvent::AuditLoaded(Err(
+                        "Session is currently unavailable".to_string(),
+                    )));
                 }
             }
             "/diff" => {
@@ -878,6 +918,7 @@ impl App {
 
         let runner = SessionRunner::new(session, llm_client, tools, context, runner_config)
             .with_permission_manager(Arc::clone(&self.permission_manager))
+            .with_permission_store(Arc::new(self.store.clone()))
             .with_checkpoint_manager(Arc::clone(&self.checkpoint_manager));
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let app_event_tx = self.event_tx.clone();

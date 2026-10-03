@@ -19,6 +19,7 @@ pub enum AppEvent {
     InitProjectCompleted(Result<maukode_protocol::InitProjectResponse, String>),
     McpStatusFetched(Result<maukode_protocol::McpListResponse, String>),
     SessionCompacted(Result<maukode_protocol::CompactResponse, String>),
+    AuditLoaded(Result<String, String>),
 }
 
 pub struct EventHandler {
