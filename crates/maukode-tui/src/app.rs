@@ -662,10 +662,27 @@ impl App {
                 };
 
                 if let Some(mode) = mode {
+                    let previous_mode = self.permission_manager.mode();
                     self.permission_manager.set_mode(mode);
                     self.config.security.permission_mode = mode;
                     if let Err(error) = self.config.save() {
                         tracing::warn!("Failed to save permission mode: {error}");
+                    }
+                    if let Ok(session) = self.session.try_read() {
+                        let record = maukode_core::store::sqlite::PermissionModeAuditRecord {
+                            session_id: session.id,
+                            turn_id: session.messages.len() as i64,
+                            previous_mode,
+                            new_mode: mode,
+                            source: "tui_command".to_string(),
+                            created_at: chrono::Utc::now(),
+                        };
+                        let store = self.store.clone();
+                        tokio::spawn(async move {
+                            if let Err(error) = store.record_permission_mode_change(&record).await {
+                                tracing::warn!("Failed to persist permission mode audit: {error}");
+                            }
+                        });
                     }
                     if let Some(client) = self.server_client.clone() {
                         tokio::spawn(async move {
