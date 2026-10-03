@@ -312,6 +312,38 @@ pub fn assess_bash_command(command: &str) -> RiskAssessment {
     }
 
     let lower = trimmed.to_lowercase();
+
+    // Never treat likely secret-bearing files or environment variables as ordinary
+    // reads. This keeps `ask` mode human-in-the-loop for commands such as
+    // `cat .env`, `printenv OPENAI_API_KEY`, and private-key inspection. Review
+    // and trust modes remain explicit opt-outs chosen by the user.
+    let sensitive_reference = lower.split_whitespace().any(|token| {
+        let token = token.trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '\'' | '"' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ';' | ',' | '$'
+            )
+        });
+        token == ".env"
+            || token.starts_with(".env.")
+            || token.contains("credentials")
+            || token.contains("secret")
+            || token.contains("private.key")
+            || token.contains("id_rsa")
+            || token.contains("id_ed25519")
+            || token.contains("api_key")
+            || token.contains("access_token")
+            || token.contains("access_key")
+            || token == "printenv"
+            || token == "env"
+    });
+    if sensitive_reference {
+        return RiskAssessment {
+            level: RiskLevel::Danger,
+            reason: "Access to a likely secret or environment variable".to_string(),
+        };
+    }
+
     let mut warning_candidate: Option<RiskAssessment> = None;
 
     // Check remote script pipe pattern across full pipeline
@@ -810,6 +842,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_risk_assessment_sensitive_environment_access() {
+        for command in [
+            "cat .env",
+            "cat .env.production",
+            "printenv OPENAI_API_KEY",
+            "echo $AWS_ACCESS_KEY_ID",
+            "ssh-add ~/.ssh/id_ed25519",
+        ] {
+            assert_eq!(
+                assess_bash_command(command).level,
+                RiskLevel::Danger,
+                "expected sensitive command to require approval: {command}"
+            );
+        }
+    }
     #[test]
     fn test_risk_assessment_safe() {
         assert_eq!(
