@@ -12,7 +12,7 @@ use axum::{
 use futures::Stream;
 use maukode_core::worktree::{self, WorktreeError, WorktreeInfo};
 use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner};
-use maukode_protocol::{GlobalEvent, LLMEvent, Message, SessionId, SessionState};
+use maukode_protocol::{GlobalEvent, LLMEvent, Message, SessionId, SessionState, StopReason};
 use maukode_tools::create_default_registry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -446,7 +446,6 @@ async fn start_turn(
     }
 
     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
-    let token_for_status = cancellation_token.clone();
 
     state.emit(GlobalEvent::TurnStarted { session_id: id });
 
@@ -460,7 +459,11 @@ async fn start_turn(
         // Forward stream events; checkpoint progress to SQLite at most every 2s so a crash
         // costs seconds of work rather than the whole turn.
         let mut last_save = std::time::Instant::now();
+        let mut stopped: Option<(StopReason, Option<String>)> = None;
         while let Some(event) = llm_rx.recv().await {
+            if let LLMEvent::TurnStopped { reason, message } = &event {
+                stopped = Some((*reason, message.clone()));
+            }
             let save_now = matches!(event, LLMEvent::ToolResult(_))
                 && last_save.elapsed() >= std::time::Duration::from_secs(2);
             state.publish_event(id, event).await;
@@ -470,10 +473,28 @@ async fn start_turn(
             }
         }
 
-        let error = match run_handle.await {
-            Ok(Ok(())) => None,
-            Ok(Err(e)) => Some(e.to_string()),
-            Err(e) => Some(e.to_string()),
+        let join = run_handle.await;
+        // The runner always closes a turn with `TurnStopped`; if it did not (the task panicked),
+        // synthesize it so clients are never left waiting on a dead turn.
+        let (reason, message) = match stopped {
+            Some(done) => done,
+            None => {
+                let message = match join {
+                    Err(e) => format!("Agent task crashed: {e}"),
+                    Ok(_) => "Agent turn ended unexpectedly".to_string(),
+                };
+                session_arc.write().await.state = SessionState::Failed(message.clone());
+                let error = LLMEvent::Error {
+                    message: message.clone(),
+                };
+                state.publish_event(id, error).await;
+                let stop = LLMEvent::TurnStopped {
+                    reason: StopReason::Error,
+                    message: Some(message.clone()),
+                };
+                state.publish_event(id, stop).await;
+                (StopReason::Error, Some(message))
+            }
         };
 
         // Free the turn slot first so the next prompt can proceed, then persist final state.
@@ -482,8 +503,8 @@ async fn start_turn(
         persist_session(&state, id, &session_arc, &provider_id, &model).await;
         state.emit(GlobalEvent::TurnFinished {
             session_id: id,
-            cancelled: token_for_status.is_cancelled(),
-            error,
+            reason,
+            message,
         });
     });
 

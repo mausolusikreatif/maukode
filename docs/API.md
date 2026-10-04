@@ -20,7 +20,7 @@ bodies with a 4xx/5xx status.
 | POST | `/providers/active` | `{provider_id}` | |
 | GET | `/models?provider=` | | |
 | POST | `/models/active` | `{model}` | |
-| GET/POST | `/config/agent` | `{max_steps?, max_tokens?}` | `1..=200` / `1..=200000`; persisted |
+| GET/POST | `/config/agent` | `{max_steps?, max_tokens?}` | `1..=200` / `1..=200000`; persisted; defaults 50 steps / 8192 tokens |
 | GET | `/permissions/mode?session_id=` | | per-session if given |
 | POST | `/permissions/mode` | `{mode, session_id?}` | with `session_id` only that session changes; without, default **and all** sessions change |
 | GET | `/sessions` | `?directory=&all=` | items add `running`, `pending_permission_count`, `project_dir`, `worktree_branch`; header `X-Event-Seq` (see Global feed) |
@@ -57,7 +57,7 @@ conflict with each other — the server does not serialize them.
 
 ## Global feed (`GET /events`)
 SSE of `GlobalEvent` (`type`: `session_created`, `session_updated`, `session_deleted`,
-`turn_started`, `turn_finished {cancelled, error}`, `permission_requested {request}`,
+`turn_started`, `turn_finished {reason, message}`, `permission_requested {request}`,
 `permission_resolved`), each with `session_id`; same `id`/replay rules as session events.
 Bootstrap a dashboard with `GET /sessions?all=true`, then connect with `?since=<X-Event-Seq>`.
 
@@ -77,6 +77,13 @@ Each message: `id: <seq>` and `data: <LLMEvent JSON>` (`type` tag: `text_delta`,
 `tool_call_start|delta|finish`, `tool_result`, `private_tool_result`, `permission_request`, `usage`,
 `context_warning`, `finish`, `error`, …). `seq` is per-session and monotonically increasing.
 
+- **A turn is over only at `turn_stopped {reason, message}`** (always the last event of a turn).
+  `finish` events are per provider response — a turn has many — and `error` precedes
+  `turn_stopped {reason: "error"}`. `reason`: `completed`, `max_tokens` (output cut off, auto-continue
+  exhausted), `max_steps` (step limit hit), `cancelled`, `error`. For `max_tokens`/`max_steps` the
+  task is likely unfinished: show `message` and offer "Continue". The same reason arrives on the
+  global feed as `turn_finished`.
+- Responses cut off by the output limit are resumed automatically (up to 2 times) before stopping.
 - Without `since`/`Last-Event-ID` you receive live events only.
 - With either, the server first replays logged events with `seq > since`, then goes live. The log is
   in-memory, last 2000 events per session, and is lost on server restart (use the snapshot then).

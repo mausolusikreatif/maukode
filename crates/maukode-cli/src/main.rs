@@ -58,7 +58,7 @@ struct Cli {
 
     #[arg(
         long,
-        default_value_t = 25,
+        default_value_t = 50,
         help = "Maximum turns of tool execution loop"
     )]
     max_steps: usize,
@@ -710,7 +710,7 @@ async fn main() -> anyhow::Result<()> {
         let runner_config = RunnerConfig {
             model: config.active_model.clone(),
             max_steps: cli.max_steps,
-            max_tokens: Some(4096),
+            max_tokens: Some(config.agent.max_tokens),
             temperature: None,
         };
 
@@ -796,7 +796,7 @@ async fn main() -> anyhow::Result<()> {
             RunnerConfig {
                 model: config.active_model.clone(),
                 max_steps: cli.max_steps,
-                max_tokens: Some(4096),
+                max_tokens: Some(config.agent.max_tokens),
                 temperature: None,
             },
         )
@@ -1111,6 +1111,12 @@ async fn execute_turn(
                 }
                 LLMEvent::Error { message } => {
                     eprintln!("\n\x1b[1;31m❌ Error: {message}\x1b[0m");
+                }
+                LLMEvent::TurnStopped { reason, message } if reason.needs_continue() => {
+                    println!(
+                        "\n\x1b[1;33m⚠️  {}\x1b[0m",
+                        message.unwrap_or_else(|| "Stopped before finishing.".into())
+                    );
                 }
                 _ => {}
             }

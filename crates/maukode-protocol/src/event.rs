@@ -13,6 +13,29 @@ pub enum FinishReason {
     Error,
 }
 
+/// Why an agent turn ended. Exactly one `LLMEvent::TurnStopped` closes every turn; per-step
+/// `Finish` events are provider-level and must not be used to decide the turn is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopReason {
+    /// The model finished its answer.
+    Completed,
+    /// The output limit cut the response off (auto-continue was exhausted).
+    MaxTokens,
+    /// The step limit was reached with work possibly unfinished.
+    MaxSteps,
+    Cancelled,
+    /// Provider/stream failure or an empty model response; see the message.
+    Error,
+}
+
+impl StopReason {
+    /// True when the user probably needs to send "continue" to finish the task.
+    pub fn needs_continue(self) -> bool {
+        matches!(self, Self::MaxTokens | Self::MaxSteps)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: u64,
@@ -77,11 +100,17 @@ pub enum LLMEvent {
         percent: u32,
         message: String,
     },
+    /// A single provider response ended (one step of a possibly multi-step turn).
     Finish {
         reason: FinishReason,
     },
     Error {
         message: String,
+    },
+    /// The whole agent turn is over. Always the last event of a turn.
+    TurnStopped {
+        reason: StopReason,
+        message: Option<String>,
     },
 }
 
@@ -225,8 +254,8 @@ pub enum GlobalEvent {
     },
     TurnFinished {
         session_id: SessionId,
-        cancelled: bool,
-        error: Option<String>,
+        reason: StopReason,
+        message: Option<String>,
     },
     PermissionRequested {
         session_id: SessionId,
