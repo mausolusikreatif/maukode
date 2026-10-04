@@ -27,18 +27,37 @@ pub struct GetModelsQuery {
 
 pub async fn list_providers(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let config = state.config.read().await;
+    // Never ship stored secrets to clients; expose only whether a key is set.
+    let providers: Vec<_> = config
+        .providers
+        .iter()
+        .map(|p| {
+            let mut value = serde_json::to_value(p).unwrap_or_default();
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("has_api_key".into(), json!(p.api_key.is_some()));
+                obj.insert("api_key".into(), serde_json::Value::Null);
+            }
+            value
+        })
+        .collect();
     Json(json!({
         "active_provider": config.active_provider,
         "active_model": config.active_model,
-        "providers": config.providers,
+        "providers": providers,
     }))
 }
 
 pub async fn add_or_update_provider(
     State(state): State<Arc<ServerState>>,
-    Json(payload): Json<ProviderConfig>,
+    Json(mut payload): Json<ProviderConfig>,
 ) -> impl IntoResponse {
     let mut config = state.config.write().await;
+    // Clients receive redacted keys, so a missing key means "keep the stored one".
+    if payload.api_key.is_none() {
+        payload.api_key = config
+            .get_provider(&payload.id)
+            .and_then(|p| p.api_key.clone());
+    }
     config.add_or_update_provider(payload);
     Json(json!({ "status": "ok" }))
 }

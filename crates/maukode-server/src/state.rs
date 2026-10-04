@@ -72,11 +72,15 @@ impl ServerState {
         session_arc
     }
 
-    pub async fn register_active_turn(&self, id: SessionId) -> CancellationToken {
-        let token = CancellationToken::new();
+    /// Atomically claim the session's turn slot; `None` if a turn is already running.
+    pub async fn try_register_active_turn(&self, id: SessionId) -> Option<CancellationToken> {
         let mut turns = self.active_turns.write().await;
+        if turns.contains_key(&id) {
+            return None;
+        }
+        let token = CancellationToken::new();
         turns.insert(id, token.clone());
-        token
+        Some(token)
     }
 
     pub async fn cancel_active_turn(&self, id: SessionId) -> bool {

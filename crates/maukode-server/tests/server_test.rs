@@ -139,3 +139,98 @@ async fn test_diff_and_undo_endpoints() {
     assert_eq!(compact_resp.session_id, meta.id.to_string());
     assert!(compact_resp.compacted_messages <= 4);
 }
+
+#[tokio::test]
+async fn test_desktop_backend_hardening() {
+    let temp_dir = tempdir().unwrap();
+    let (url, _handle) = start_test_server(temp_dir.path()).await;
+    let http = reqwest::Client::new();
+    let auth = "Bearer secret123";
+
+    // Provider listing must never include stored API keys.
+    let body: serde_json::Value = http
+        .get(format!("{url}/api/v1/providers"))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    for p in body["providers"].as_array().unwrap() {
+        assert!(p["api_key"].is_null());
+        assert!(p["has_api_key"].is_boolean());
+    }
+
+    // Permission mode is readable.
+    let mode: serde_json::Value = http
+        .get(format!("{url}/api/v1/permissions/mode"))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(mode["mode"].is_string());
+
+    // Audit + delete lifecycle.
+    let client = ServerClient::new(&url, Some("secret123".to_string())).unwrap();
+    let meta = client
+        .create_session(Some(temp_dir.path()), None)
+        .await
+        .unwrap();
+    let audit = http
+        .get(format!("{url}/api/v1/sessions/{}/audit", meta.id))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap();
+    assert!(audit.status().is_success());
+    let del = http
+        .delete(format!("{url}/api/v1/sessions/{}", meta.id))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap();
+    assert!(del.status().is_success());
+    let again = http
+        .delete(format!("{url}/api/v1/sessions/{}", meta.id))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(again.status(), 404);
+}
+
+#[tokio::test]
+async fn test_tokenless_server_rejects_foreign_origin() {
+    let temp_dir = tempdir().unwrap();
+    let state = Arc::new(
+        ServerState::new(None, Some(temp_dir.path().to_path_buf()))
+            .await
+            .unwrap(),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        axum::serve(listener, routes::create_router(state))
+            .await
+            .unwrap();
+    });
+    let http = reqwest::Client::new();
+    let evil = http
+        .get(format!("{url}/api/v1/sessions?all=true"))
+        .header("origin", "https://evil.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(evil.status(), 403);
+    let local = http
+        .get(format!("{url}/api/v1/sessions?all=true"))
+        .header("origin", "http://localhost:1420")
+        .send()
+        .await
+        .unwrap();
+    assert!(local.status().is_success());
+}

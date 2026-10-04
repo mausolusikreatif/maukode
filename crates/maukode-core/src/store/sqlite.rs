@@ -209,8 +209,8 @@ impl SqliteSessionStore {
             .first()
             .map(|m| {
                 let text = m.text_content();
-                if text.len() > 40 {
-                    format!("{}...", &text[..40])
+                if text.chars().count() > 40 {
+                    format!("{}...", text.chars().take(40).collect::<String>())
                 } else {
                     text
                 }
@@ -319,6 +319,29 @@ impl SqliteSessionStore {
         }
 
         Ok(messages)
+    }
+
+    /// Delete a session and its dependent rows. Returns whether the session existed.
+    pub async fn delete_session(&self, id: SessionId) -> Result<bool> {
+        let mut conn = self.conn.lock().await;
+        let id = id.to_string();
+        let tx = conn.transaction()?;
+        for table in [
+            "messages",
+            "messages_audit",
+            "session_turns",
+            "permission_audit",
+            "permission_mode_audit",
+            "compaction_audit",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE session_id = ?1"),
+                params![id],
+            )?;
+        }
+        let deleted = tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(deleted > 0)
     }
 
     pub async fn audit_summary(&self, session_id: SessionId) -> Result<String> {

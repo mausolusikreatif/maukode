@@ -141,10 +141,22 @@ pub async fn submit_prompt(
         }
     }
 
+    let cancellation_token = state.try_register_active_turn(id).await.ok_or_else(|| {
+        (
+            StatusCode::CONFLICT,
+            "Agent is already executing a turn for this session".to_string(),
+        )
+    })?;
+
     let config_guard = state.config.read().await;
-    let llm_client = config_guard
-        .create_active_llm_client()
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let llm_client = match config_guard.create_active_llm_client() {
+        Ok(client) => client,
+        Err(e) => {
+            drop(config_guard);
+            state.clear_active_turn(id).await;
+            return Err((StatusCode::BAD_REQUEST, e.to_string()));
+        }
+    };
 
     let runner_config = RunnerConfig {
         model: config_guard.active_model.clone(),
@@ -187,7 +199,6 @@ pub async fn submit_prompt(
     .with_checkpoint_manager(Arc::clone(&state.checkpoint_manager));
 
     let event_broadcast_tx = state.get_event_sender(id).await;
-    let cancellation_token = state.register_active_turn(id).await;
     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
     let store = Arc::clone(&state.store);
     let session_for_persist = Arc::clone(&session_arc);
@@ -492,4 +503,39 @@ pub async fn compact_session(
         compacted_tokens: result.compacted_tokens,
         summary: result.summary,
     }))
+}
+
+pub async fn get_permission_mode(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    Json(json!({ "mode": state.permission_manager.mode() }))
+}
+
+pub async fn delete_session(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    state.cancel_active_turn(id).await;
+    let existed = state
+        .store
+        .delete_session(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.sessions.write().await.remove(&id);
+    state.event_broadcasters.write().await.remove(&id);
+    if existed {
+        Ok(Json(json!({ "status": "deleted", "session_id": id })))
+    } else {
+        Err((StatusCode::NOT_FOUND, "Session not found".to_string()))
+    }
+}
+
+pub async fn get_session_audit(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let summary = state
+        .store
+        .audit_summary(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(json!({ "session_id": id, "summary": summary })))
 }
