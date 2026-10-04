@@ -109,3 +109,41 @@ pub async fn set_active_model(
         "active_model": config.active_model,
     }))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct SetAgentConfigRequest {
+    pub max_steps: Option<usize>,
+    pub max_tokens: Option<u32>,
+}
+
+pub async fn get_agent_config(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    Json(state.config.read().await.agent)
+}
+
+pub async fn set_agent_config(
+    State(state): State<Arc<ServerState>>,
+    Json(payload): Json<SetAgentConfigRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut config = state.config.write().await;
+    let mut agent = config.agent;
+    if let Some(steps) = payload.max_steps {
+        if !(1..=200).contains(&steps) {
+            return Err((StatusCode::BAD_REQUEST, "max_steps must be 1..=200".into()));
+        }
+        agent.max_steps = steps;
+    }
+    if let Some(tokens) = payload.max_tokens {
+        if !(1..=200_000).contains(&tokens) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "max_tokens must be 1..=200000".into(),
+            ));
+        }
+        agent.max_tokens = tokens;
+    }
+    config.agent = agent;
+    config
+        .save()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(agent))
+}

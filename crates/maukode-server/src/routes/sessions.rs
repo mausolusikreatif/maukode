@@ -1,7 +1,7 @@
-use crate::state::ServerState;
+use crate::state::{SeqEvent, ServerState, SessionChannel};
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse,
@@ -14,12 +14,12 @@ use maukode_protocol::{LLMEvent, Message, SessionId, SessionState};
 use maukode_tools::create_default_registry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::StreamExt;
 
 #[derive(Debug, Deserialize)]
 pub struct ListSessionsQuery {
@@ -34,6 +34,18 @@ pub struct CreateSessionRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct EventsQuery {
+    /// Replay events with a sequence number greater than this (alternative to `Last-Event-ID`).
+    pub since: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateSessionRequest {
+    /// New title; null or blank restores the automatic title.
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PromptRequest {
     pub prompt: String,
 }
@@ -41,6 +53,12 @@ pub struct PromptRequest {
 #[derive(Debug, Serialize)]
 pub struct SessionDetailResponse {
     pub id: SessionId,
+    pub title: Option<String>,
+    /// True while an agent turn is executing.
+    pub running: bool,
+    /// Sequence number of the newest event; pass to `/events?since=` to resume without gaps.
+    pub last_event_seq: u64,
+    pub pending_permissions: Vec<maukode_protocol::PermissionRequest>,
     pub directory: String,
     pub state: SessionState,
     pub messages: Vec<Message>,
@@ -92,6 +110,21 @@ pub async fn create_session(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    let mut meta = meta;
+    if let Some(title) = payload
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        state
+            .store
+            .set_session_title(meta.id, Some(title))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        meta.title = Some(title.to_string());
+    }
+
     state.register_new_session(session).await;
 
     Ok(Json(meta))
@@ -107,9 +140,17 @@ pub async fn get_session(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
 
+    let title = state.store.session_title(id).await.ok().flatten();
+    let running = state.active_turns.read().await.contains_key(&id);
+    let last_event_seq = state.channel(id).await.last_seq();
+    let pending_permissions = state.pending_permissions_for(id).await;
     let session = session_arc.read().await;
     let detail = SessionDetailResponse {
         id: session.id,
+        title,
+        running,
+        last_event_seq,
+        pending_permissions,
         directory: session.directory.to_string_lossy().to_string(),
         state: session.state.clone(),
         messages: session.messages.clone(),
@@ -160,8 +201,8 @@ pub async fn submit_prompt(
 
     let runner_config = RunnerConfig {
         model: config_guard.active_model.clone(),
-        max_steps: 25,
-        max_tokens: Some(4096),
+        max_steps: config_guard.agent.max_steps,
+        max_tokens: Some(config_guard.agent.max_tokens),
         temperature: None,
     };
     let active_provider = config_guard.active_provider.clone();
@@ -194,11 +235,11 @@ pub async fn submit_prompt(
         context,
         runner_config,
     )
-    .with_permission_manager(Arc::clone(&state.permission_manager))
+    .with_permission_manager(state.permission_manager_for(id).await)
     .with_permission_store(Arc::clone(&state.store))
     .with_checkpoint_manager(Arc::clone(&state.checkpoint_manager));
 
-    let event_broadcast_tx = state.get_event_sender(id).await;
+    let state_for_task = Arc::clone(&state);
     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
     let store = Arc::clone(&state.store);
     let session_for_persist = Arc::clone(&session_arc);
@@ -215,13 +256,18 @@ pub async fn submit_prompt(
 
         // Forward stream events to broadcast subscribers
         while let Some(event) = llm_rx.recv().await {
-            let _ = event_broadcast_tx.send(event);
+            state_for_task.publish_event(id, event).await;
         }
 
         let _ = run_handle.await;
 
         // Clear the active turn marker so future prompts can proceed.
         active_turns.write().await.remove(&clear_session_id);
+        state_for_task
+            .pending_permissions
+            .write()
+            .await
+            .remove(&clear_session_id);
 
         // Persist final session state to SQLite
         let guard = session_for_persist.read().await;
@@ -239,19 +285,57 @@ pub async fn submit_prompt(
 pub async fn stream_session_events(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<SessionId>,
+    Query(query): Query<EventsQuery>,
+    headers: HeaderMap,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
-    let broadcaster = state.get_event_sender(id).await;
-    let rx = broadcaster.subscribe();
+    let since = query.since.or_else(|| {
+        headers
+            .get("last-event-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse().ok())
+    });
+    let channel = state.channel(id).await;
+    let (backlog, rx, last) = channel.subscribe(since);
 
-    let stream = BroadcastStream::new(rx).filter_map(|item| match item {
-        Ok(llm_event) => {
-            let json_str = serde_json::to_string(&llm_event).unwrap_or_default();
-            Some(Ok(Event::default().data(json_str)))
+    struct Sse_ {
+        rx: tokio::sync::broadcast::Receiver<SeqEvent>,
+        backlog: VecDeque<SeqEvent>,
+        last: u64,
+        channel: Arc<SessionChannel>,
+    }
+
+    let init = Sse_ {
+        rx,
+        backlog: backlog.into(),
+        last,
+        channel,
+    };
+    let stream = futures::stream::unfold(init, |mut st| async move {
+        loop {
+            if let Some(ev) = st.backlog.pop_front() {
+                st.last = ev.seq;
+                return Some((Ok(to_sse_event(&ev)), st));
+            }
+            match st.rx.recv().await {
+                Ok(ev) if ev.seq <= st.last => continue,
+                Ok(ev) => {
+                    st.last = ev.seq;
+                    return Some((Ok(to_sse_event(&ev)), st));
+                }
+                // Slow consumer: refill from the replay log instead of silently dropping events.
+                Err(RecvError::Lagged(_)) => st.backlog = st.channel.replay_after(st.last).into(),
+                Err(RecvError::Closed) => return None,
+            }
         }
-        Err(_) => None,
     });
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+fn to_sse_event(ev: &SeqEvent) -> Event {
+    Event::default()
+        .id(ev.seq.to_string())
+        .data(serde_json::to_string(&ev.event).unwrap_or_default())
 }
 
 pub async fn cancel_prompt(
@@ -273,15 +357,47 @@ pub async fn cancel_prompt(
 #[derive(Debug, Deserialize)]
 pub struct SetPermissionModeRequest {
     pub mode: maukode_core::PermissionMode,
+    /// With a session id only that session changes; without one the default for new sessions
+    /// and every existing session is updated.
     pub session_id: Option<maukode_protocol::SessionId>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetPermissionModeQuery {
+    pub session_id: Option<maukode_protocol::SessionId>,
+}
+
+pub async fn get_permission_mode(
+    State(state): State<Arc<ServerState>>,
+    Query(query): Query<GetPermissionModeQuery>,
+) -> impl IntoResponse {
+    let mode = match query.session_id {
+        Some(id) => state.permission_manager_for(id).await.mode(),
+        None => state.permission_manager.mode(),
+    };
+    Json(json!({ "mode": mode }))
 }
 
 pub async fn set_permission_mode(
     State(state): State<Arc<ServerState>>,
     Json(payload): Json<SetPermissionModeRequest>,
 ) -> impl IntoResponse {
-    let previous_mode = state.permission_manager.mode();
-    state.permission_manager.set_mode(payload.mode);
+    let previous_mode = match payload.session_id {
+        Some(id) => {
+            let manager = state.permission_manager_for(id).await;
+            let previous = manager.mode();
+            manager.set_mode(payload.mode);
+            previous
+        }
+        None => {
+            let previous = state.permission_manager.mode();
+            state.permission_manager.set_mode(payload.mode);
+            for manager in state.session_permissions.read().await.values() {
+                manager.set_mode(payload.mode);
+            }
+            previous
+        }
+    };
     if let Some(session_id) = payload.session_id {
         let session = state.sessions.read().await.get(&session_id).cloned();
         let turn_id = match session {
@@ -310,12 +426,15 @@ pub struct RespondPermissionRequest {
 
 pub async fn respond_permission(
     State(state): State<Arc<ServerState>>,
-    Path((_session_id, request_id)): Path<(SessionId, String)>,
+    Path((session_id, request_id)): Path<(SessionId, String)>,
     Json(payload): Json<RespondPermissionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let handled = state
         .permission_manager
         .respond(&request_id, payload.decision)
+        .await;
+    state
+        .resolve_pending_permission(session_id, &request_id)
         .await;
     if handled {
         Ok(Json(json!({ "status": "ok", "request_id": request_id })))
@@ -505,10 +624,6 @@ pub async fn compact_session(
     }))
 }
 
-pub async fn get_permission_mode(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
-    Json(json!({ "mode": state.permission_manager.mode() }))
-}
-
 pub async fn delete_session(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<SessionId>,
@@ -519,8 +634,7 @@ pub async fn delete_session(
         .delete_session(id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    state.sessions.write().await.remove(&id);
-    state.event_broadcasters.write().await.remove(&id);
+    state.forget_session(id).await;
     if existed {
         Ok(Json(json!({ "status": "deleted", "session_id": id })))
     } else {
@@ -537,5 +651,36 @@ pub async fn get_session_audit(
         .audit_summary(id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(Json(json!({ "session_id": id, "summary": summary })))
+    let report = state
+        .store
+        .audit_report(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(
+        json!({ "session_id": id, "summary": summary, "report": report }),
+    ))
+}
+
+pub async fn update_session(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<UpdateSessionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let title = payload
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    let found = state
+        .store
+        .set_session_title(id, title)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if !found {
+        return Err((StatusCode::NOT_FOUND, "Session not found".to_string()));
+    }
+    let title = state.store.session_title(id).await.ok().flatten();
+    Ok(Json(
+        json!({ "status": "ok", "session_id": id, "title": title }),
+    ))
 }

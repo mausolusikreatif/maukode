@@ -3,7 +3,7 @@ use crate::session::Session;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use maukode_protocol::{Message, PermissionDecision, SessionId, SessionState};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -56,6 +56,25 @@ pub struct CompactionAuditRecord {
     pub trigger: String,
     pub summary: String,
     pub created_at: DateTime<Utc>,
+}
+
+/// Structured provenance for a session, newest records first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditReport {
+    pub permission_count: usize,
+    pub mode_change_count: usize,
+    pub compaction_count: usize,
+    pub permissions: Vec<PermissionAuditRecord>,
+    pub mode_changes: Vec<PermissionModeAuditRecord>,
+    pub compactions: Vec<CompactionAuditRecord>,
+}
+
+const AUDIT_REPORT_LIMIT: usize = 200;
+
+fn parse_ts(value: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_default()
 }
 
 #[derive(Clone)]
@@ -190,6 +209,7 @@ impl SqliteSessionStore {
             "ALTER TABLE sessions ADD COLUMN directory TEXT NOT NULL DEFAULT '';",
             [],
         );
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN custom_title TEXT;", []);
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sessions_directory ON sessions(directory);",
             [],
@@ -319,6 +339,133 @@ impl SqliteSessionStore {
         }
 
         Ok(messages)
+    }
+
+    /// Set (or clear, with `None`) a user-chosen title. Returns whether the session exists.
+    pub async fn set_session_title(&self, id: SessionId, title: Option<&str>) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let updated = conn.execute(
+            "UPDATE sessions SET custom_title = ?1 WHERE id = ?2",
+            params![title, id.to_string()],
+        )?;
+        Ok(updated > 0)
+    }
+
+    pub async fn session_title(&self, id: SessionId) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let title = conn
+            .query_row(
+                "SELECT COALESCE(custom_title, title) FROM sessions WHERE id = ?1",
+                params![id.to_string()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        Ok(title.flatten())
+    }
+
+    /// Machine-readable audit data (permission decisions, mode changes, compactions).
+    pub async fn audit_report(&self, session_id: SessionId) -> Result<AuditReport> {
+        let conn = self.conn.lock().await;
+        let id = session_id.to_string();
+        let count = |table: &str| -> Result<usize> {
+            let n: i64 = conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE session_id = ?1"),
+                params![id],
+                |row| row.get(0),
+            )?;
+            Ok(n as usize)
+        };
+        let mut report = AuditReport {
+            permission_count: count("permission_audit")?,
+            mode_change_count: count("permission_mode_audit")?,
+            compaction_count: count("compaction_audit")?,
+            ..Default::default()
+        };
+
+        let mut stmt = conn.prepare(
+            "SELECT turn_id, tool_call_id, tool_name, action_key, mode, decision, risk_level,
+                    result_visibility, created_at
+             FROM permission_audit WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, AUDIT_REPORT_LIMIT as i64], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+            ))
+        })?;
+        for row in rows {
+            let (turn_id, tool_call_id, tool_name, action_key, mode, decision, risk, vis, ts) =
+                row?;
+            report.permissions.push(PermissionAuditRecord {
+                session_id,
+                turn_id,
+                tool_call_id,
+                tool_name,
+                action_key,
+                mode: serde_json::from_str(&mode)?,
+                decision: serde_json::from_str(&decision)?,
+                risk_level: risk,
+                result_visibility: vis,
+                created_at: parse_ts(&ts),
+            });
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT turn_id, previous_mode, new_mode, source, created_at
+             FROM permission_mode_audit WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, AUDIT_REPORT_LIMIT as i64], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (turn_id, previous, new, source, ts) = row?;
+            report.mode_changes.push(PermissionModeAuditRecord {
+                session_id,
+                turn_id,
+                previous_mode: serde_json::from_str(&previous)?,
+                new_mode: serde_json::from_str(&new)?,
+                source,
+                created_at: parse_ts(&ts),
+            });
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT source_turn_start, source_turn_end, original_message_count,
+                    compacted_message_count, original_tokens, compacted_tokens, trigger, summary,
+                    created_at
+             FROM compaction_audit WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, AUDIT_REPORT_LIMIT as i64], |row| {
+            Ok(CompactionAuditRecord {
+                session_id,
+                source_turn_start: row.get(0)?,
+                source_turn_end: row.get(1)?,
+                original_message_count: row.get::<_, i64>(2)? as usize,
+                compacted_message_count: row.get::<_, i64>(3)? as usize,
+                original_tokens: row.get::<_, i64>(4)? as usize,
+                compacted_tokens: row.get::<_, i64>(5)? as usize,
+                trigger: row.get(6)?,
+                summary: row.get(7)?,
+                created_at: parse_ts(&row.get::<_, String>(8)?),
+            })
+        })?;
+        for row in rows {
+            report.compactions.push(row?);
+        }
+        Ok(report)
     }
 
     /// Delete a session and its dependent rows. Returns whether the session existed.
@@ -536,7 +683,7 @@ impl SqliteSessionStore {
     pub async fn list_all_sessions(&self) -> Result<Vec<SessionSummary>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.directory, s.title, s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count
+            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count
              FROM sessions s
              LEFT JOIN messages m ON s.id = m.session_id
              GROUP BY s.id
@@ -589,7 +736,7 @@ impl SqliteSessionStore {
         let dir_str = dir.to_string_lossy().to_string();
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.directory, s.title, s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count
+            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count
              FROM sessions s
              LEFT JOIN messages m ON s.id = m.session_id
              WHERE s.directory = ?1

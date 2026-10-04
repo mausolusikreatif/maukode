@@ -234,3 +234,145 @@ async fn test_tokenless_server_rejects_foreign_origin() {
         .unwrap();
     assert!(local.status().is_success());
 }
+
+#[tokio::test]
+async fn test_sse_replay_session_mode_title_and_limits() {
+    let temp_dir = tempdir().unwrap();
+    let state = Arc::new(
+        ServerState::new(
+            Some("secret123".to_string()),
+            Some(temp_dir.path().to_path_buf()),
+        )
+        .await
+        .unwrap(),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let app_state = Arc::clone(&state);
+    tokio::spawn(async move {
+        axum::serve(listener, routes::create_router(app_state))
+            .await
+            .unwrap();
+    });
+    let http = reqwest::Client::new();
+    let auth = "Bearer secret123";
+    let client = ServerClient::new(&url, Some("secret123".to_string())).unwrap();
+
+    // Titles: set on create, rename, clear.
+    let a = client
+        .create_session(Some(temp_dir.path()), Some("  Mine "))
+        .await
+        .unwrap();
+    let b = client
+        .create_session(Some(temp_dir.path()), None)
+        .await
+        .unwrap();
+    let detail: serde_json::Value = http
+        .get(format!("{url}/api/v1/sessions/{}", a.id))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail["title"], "Mine");
+    assert_eq!(detail["running"], false);
+    http.patch(format!("{url}/api/v1/sessions/{}", a.id))
+        .header("authorization", auth)
+        .json(&serde_json::json!({ "title": "Renamed" }))
+        .send()
+        .await
+        .unwrap();
+    let listed = client
+        .list_sessions(Some(temp_dir.path()), false)
+        .await
+        .unwrap();
+    assert!(listed.iter().any(|s| s.title == "Renamed"));
+
+    // Permission mode is isolated per session.
+    http.post(format!("{url}/api/v1/permissions/mode"))
+        .header("authorization", auth)
+        .json(&serde_json::json!({ "mode": "trust", "session_id": a.id }))
+        .send()
+        .await
+        .unwrap();
+    let mode_of = |id: maukode_protocol::SessionId| {
+        let http = http.clone();
+        let url = url.clone();
+        async move {
+            let v: serde_json::Value = http
+                .get(format!("{url}/api/v1/permissions/mode?session_id={id}"))
+                .header("authorization", auth)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            v["mode"].as_str().unwrap().to_string()
+        }
+    };
+    assert_eq!(mode_of(a.id).await, "trust");
+    assert_ne!(mode_of(b.id).await, "trust");
+
+    // SSE replay: events 1..=3 published, resume after 1 yields ids 2 and 3.
+    for i in 0..3 {
+        state
+            .publish_event(
+                a.id,
+                maukode_protocol::LLMEvent::TextDelta {
+                    text: format!("t{i}"),
+                },
+            )
+            .await;
+    }
+    let mut resp = http
+        .get(format!("{url}/api/v1/sessions/{}/events?since=1", a.id))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap();
+    let mut body = String::new();
+    while !(body.contains("id: 3") || body.contains("id:3")) {
+        let chunk = tokio::time::timeout(std::time::Duration::from_secs(5), resp.chunk())
+            .await
+            .expect("sse timed out")
+            .unwrap()
+            .expect("stream ended");
+        body.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    assert!(body.contains("t1") && body.contains("t2") && !body.contains("t0"));
+    let detail: serde_json::Value = http
+        .get(format!("{url}/api/v1/sessions/{}", a.id))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail["last_event_seq"], 3);
+
+    // Agent limits are validated.
+    let bad = http
+        .post(format!("{url}/api/v1/config/agent"))
+        .header("authorization", auth)
+        .json(&serde_json::json!({ "max_steps": 0 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+
+    // Structured audit report is present.
+    let audit: serde_json::Value = http
+        .get(format!("{url}/api/v1/sessions/{}/audit", a.id))
+        .header("authorization", auth)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(audit["report"]["mode_changes"].as_array().unwrap().len(), 1);
+}

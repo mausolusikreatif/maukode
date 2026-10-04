@@ -19,7 +19,8 @@ pub use compaction::{
     CompactionResult, ContextPruner, ContextUsage, ConversationCompactor, TokenEstimator,
 };
 pub use config::{
-    AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig, WebSearchConfig,
+    AgentConfig, AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig,
+    WebSearchConfig,
 };
 pub use context::ContextManager;
 pub use mcp::{McpClient, McpManager, McpTool};

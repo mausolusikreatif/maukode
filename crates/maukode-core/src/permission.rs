@@ -68,6 +68,17 @@ impl PermissionManager {
         self
     }
 
+    /// Create a manager with its own independent mode that still shares pending requests and
+    /// whitelists with `self`, so responses to prompts keep working across forks.
+    pub fn fork(&self) -> Self {
+        Self {
+            mode: Arc::new(AtomicU8::new(self.mode.load(Ordering::Relaxed))),
+            pending: Arc::clone(&self.pending),
+            session_whitelists: Arc::clone(&self.session_whitelists),
+            static_whitelist: Arc::clone(&self.static_whitelist),
+        }
+    }
+
     pub fn mode(&self) -> PermissionMode {
         PermissionMode::from_u8(self.mode.load(Ordering::Relaxed))
     }

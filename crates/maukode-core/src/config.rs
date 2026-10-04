@@ -5,6 +5,32 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Agent loop limits applied to every turn started through the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfig {
+    #[serde(default = "default_max_steps")]
+    pub max_steps: usize,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+}
+
+fn default_max_steps() -> usize {
+    25
+}
+
+fn default_max_tokens() -> u32 {
+    4096
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            max_steps: default_max_steps(),
+            max_tokens: default_max_tokens(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
@@ -113,6 +139,8 @@ pub struct AppConfig {
     pub mcp_servers: std::collections::HashMap<String, McpServerConfig>,
     #[serde(default)]
     pub web_search: WebSearchConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 impl Default for AppConfig {
@@ -176,6 +204,7 @@ impl Default for AppConfig {
                 },
             ],
             security: SecurityConfig::default(),
+            agent: AgentConfig::default(),
         };
         Self::sync_from_opencode_if_present(&mut cfg);
         cfg

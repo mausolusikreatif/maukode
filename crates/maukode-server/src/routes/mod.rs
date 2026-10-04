@@ -68,6 +68,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/providers/active",
             post(providers::set_active_provider),
         )
+        .route(
+            "/api/v1/config/agent",
+            get(providers::get_agent_config).post(providers::set_agent_config),
+        )
         .route("/api/v1/models", get(providers::list_models))
         .route("/api/v1/models/active", post(providers::set_active_model))
         .route(
@@ -81,7 +85,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/api/v1/sessions/{id}",
-            get(sessions::get_session).delete(sessions::delete_session),
+            get(sessions::get_session)
+                .patch(sessions::update_session)
+                .delete(sessions::delete_session),
         )
         .route(
             "/api/v1/sessions/{id}/audit",
