@@ -1,24 +1,24 @@
-use crate::state::{SeqEvent, ServerState, SessionChannel};
+use super::events::{resume_point, sse_response, EventsQuery};
+use crate::state::ServerState;
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{
-        sse::{Event, KeepAlive, Sse},
+        sse::{Event, Sse},
         IntoResponse,
     },
     Json,
 };
 use futures::Stream;
+use maukode_core::worktree::{self, WorktreeError, WorktreeInfo};
 use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner};
-use maukode_protocol::{LLMEvent, Message, SessionId, SessionState};
+use maukode_protocol::{GlobalEvent, LLMEvent, Message, SessionId, SessionState};
 use maukode_tools::create_default_registry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Deserialize)]
@@ -31,13 +31,52 @@ pub struct ListSessionsQuery {
 pub struct CreateSessionRequest {
     pub directory: Option<String>,
     pub title: Option<String>,
+    /// Pin this session to a provider/model instead of the server defaults.
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    /// `"worktree"` runs the agent in its own git worktree/branch so parallel agents on the same
+    /// repository cannot overwrite each other. Omit for the shared checkout.
+    pub isolation: Option<Isolation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Isolation {
+    Worktree,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateSessionResponse {
+    #[serde(flatten)]
+    pub meta: maukode_protocol::SessionMetadata,
+    pub provider: String,
+    pub model: String,
+    pub worktree: Option<WorktreeInfo>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionListItem {
+    #[serde(flatten)]
+    pub summary: maukode_core::SessionSummary,
+    pub running: bool,
+    pub pending_permission_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct EventsQuery {
-    /// Replay events with a sequence number greater than this (alternative to `Last-Event-ID`).
-    pub since: Option<u64>,
+pub struct SessionDetailQuery {
+    /// Return only the newest N messages (see `messages_start`); omit for the full history.
+    pub limit: Option<usize>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct MessagesQuery {
+    /// Exclusive upper index; defaults to the end. Pass the previous page's `start`.
+    pub before: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+const DEFAULT_PAGE: usize = 50;
+const MAX_PAGE: usize = 500;
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateSessionRequest {
@@ -59,6 +98,13 @@ pub struct SessionDetailResponse {
     /// Sequence number of the newest event; pass to `/events?since=` to resume without gaps.
     pub last_event_seq: u64,
     pub pending_permissions: Vec<maukode_protocol::PermissionRequest>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub worktree: Option<WorktreeInfo>,
+    /// Total messages in the session; `messages` may be a suffix when `limit` was given.
+    pub message_total: usize,
+    /// Index in the full history of `messages[0]`.
+    pub messages_start: usize,
     pub directory: String,
     pub state: SessionState,
     pub messages: Vec<Message>,
@@ -66,10 +112,48 @@ pub struct SessionDetailResponse {
     pub updated_at: String,
 }
 
+/// Provider/model a session runs with: its pinned pair if the provider still exists, otherwise
+/// the server defaults.
+async fn effective_model(state: &ServerState, id: SessionId) -> (String, String) {
+    let config = state.config.read().await;
+    if let Ok(Some((provider, model))) = state.store.session_model(id).await {
+        if config.get_provider(&provider).is_some() {
+            return (provider, model);
+        }
+    }
+    (config.active_provider.clone(), config.active_model.clone())
+}
+
+async fn load_session(
+    state: &ServerState,
+    id: SessionId,
+) -> Result<Arc<tokio::sync::RwLock<Session>>, (StatusCode, String)> {
+    state
+        .get_or_load_session(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))
+}
+
+/// Checkpoint manager for the workspace this session actually runs in.
+async fn checkpoints_for(
+    state: &ServerState,
+    id: SessionId,
+) -> Result<Arc<maukode_core::CheckpointManager>, (StatusCode, String)> {
+    let session = load_session(state, id).await?;
+    let dir = session.read().await.directory.clone();
+    state
+        .checkpoint_manager_for(&dir)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
 pub async fn list_sessions(
     State(state): State<Arc<ServerState>>,
     Query(query): Query<ListSessionsQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // Read before the listing so a client resuming from this seq cannot miss an event.
+    let event_seq = state.global_events.last_seq();
     let summaries = if query.all.unwrap_or(false) {
         state
             .store
@@ -88,7 +172,17 @@ pub async fn list_sessions(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
 
-    Ok(Json(summaries))
+    let mut items = Vec::with_capacity(summaries.len());
+    for summary in summaries {
+        let id = summary.id;
+        items.push(SessionListItem {
+            summary,
+            running: state.is_running(id).await,
+            pending_permission_count: state.pending_permission_count(id).await,
+        });
+    }
+
+    Ok(([("x-event-seq", event_seq.to_string())], Json(items)))
 }
 
 pub async fn create_session(
@@ -100,60 +194,120 @@ pub async fn create_session(
         .map(PathBuf::from)
         .unwrap_or_else(|| state.default_dir.clone());
 
-    let session = Session::new(&dir);
-    let meta = session.metadata();
+    let (provider, model) = {
+        let config = state.config.read().await;
+        let provider = payload
+            .provider
+            .unwrap_or_else(|| config.active_provider.clone());
+        let provider_cfg = config.get_provider(&provider).ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Provider '{provider}' not found"),
+            )
+        })?;
+        let model = payload.model.unwrap_or_else(|| {
+            if provider == config.active_provider {
+                config.active_model.clone()
+            } else {
+                provider_cfg
+                    .default_model
+                    .clone()
+                    .unwrap_or_else(|| config.active_model.clone())
+            }
+        });
+        (provider, model)
+    };
 
-    let config = state.config.read().await;
-    state
-        .store
-        .save_session(&session, &config.active_provider, &config.active_model)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut session = Session::new(&dir);
+    let mut worktree_info = None;
+    if payload.isolation == Some(Isolation::Worktree) {
+        let info = worktree::create(&dir, session.id)
+            .await
+            .map_err(|e| match e {
+                WorktreeError::Other(_) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                _ => (StatusCode::BAD_REQUEST, e.to_string()),
+            })?;
+        session.directory = info.path.clone();
+        worktree_info = Some(info);
+    }
+    let mut meta = session.metadata();
 
-    let mut meta = meta;
-    if let Some(title) = payload
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-    {
+    let persisted = async {
         state
             .store
-            .set_session_title(meta.id, Some(title))
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        meta.title = Some(title.to_string());
+            .save_session(&session, &provider, &model)
+            .await?;
+        if let Some(info) = &worktree_info {
+            state.store.set_worktree(session.id, info).await?;
+        }
+        if let Some(title) = payload
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+        {
+            state
+                .store
+                .set_session_title(session.id, Some(title))
+                .await?;
+            meta.title = Some(title.to_string());
+        }
+        anyhow::Ok(())
+    }
+    .await;
+    if let Err(e) = persisted {
+        // Don't leave an orphaned worktree behind a session that was never stored.
+        if let Some(info) = &worktree_info {
+            let _ = worktree::remove(info, true).await;
+        }
+        let _ = state.store.delete_session(session.id).await;
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
 
+    let id = session.id;
     state.register_new_session(session).await;
+    state.emit(GlobalEvent::SessionCreated { session_id: id });
 
-    Ok(Json(meta))
+    Ok(Json(CreateSessionResponse {
+        meta,
+        provider,
+        model,
+        worktree: worktree_info,
+    }))
 }
 
 pub async fn get_session(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<SessionId>,
+    Query(query): Query<SessionDetailQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let session_arc = state
-        .get_or_load_session(id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
+    let session_arc = load_session(&state, id).await?;
 
     let title = state.store.session_title(id).await.ok().flatten();
-    let running = state.active_turns.read().await.contains_key(&id);
+    let model = state.store.session_model(id).await.ok().flatten();
+    let worktree = state.store.get_worktree(id).await.ok().flatten();
+    let running = state.is_running(id).await;
     let last_event_seq = state.channel(id).await.last_seq();
     let pending_permissions = state.pending_permissions_for(id).await;
     let session = session_arc.read().await;
+    let message_total = session.messages.len();
+    let messages_start = query
+        .limit
+        .map_or(0, |limit| message_total.saturating_sub(limit.min(MAX_PAGE)));
     let detail = SessionDetailResponse {
         id: session.id,
         title,
         running,
         last_event_seq,
         pending_permissions,
+        provider: model.as_ref().map(|(p, _)| p.clone()),
+        model: model.map(|(_, m)| m),
+        worktree,
+        message_total,
+        messages_start,
         directory: session.directory.to_string_lossy().to_string(),
         state: session.state.clone(),
-        messages: session.messages.clone(),
+        messages: session.messages[messages_start..].to_vec(),
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
     };
@@ -161,26 +315,34 @@ pub async fn get_session(
     Ok(Json(detail))
 }
 
+/// Page backwards through history: first call without `before`, then pass the returned `start`.
+pub async fn get_session_messages(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Query(query): Query<MessagesQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = load_session(&state, id).await?;
+    let session = session_arc.read().await;
+    let total = session.messages.len();
+    let end = query.before.unwrap_or(total).min(total);
+    let limit = query.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
+    let start = end.saturating_sub(limit);
+    Ok(Json(json!({
+        "session_id": id,
+        "total": total,
+        "start": start,
+        "end": end,
+        "has_more": start > 0,
+        "messages": &session.messages[start..end],
+    })))
+}
+
 pub async fn submit_prompt(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<SessionId>,
     Json(payload): Json<PromptRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let session_arc = state
-        .get_or_load_session(id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
-
-    {
-        let session = session_arc.read().await;
-        if matches!(session.state, SessionState::Running) {
-            return Err((
-                StatusCode::CONFLICT,
-                "Agent is already executing a turn for this session".to_string(),
-            ));
-        }
-    }
+    let session_arc = load_session(&state, id).await?;
 
     let cancellation_token = state.try_register_active_turn(id).await.ok_or_else(|| {
         (
@@ -189,26 +351,67 @@ pub async fn submit_prompt(
         )
     })?;
 
+    // Past this point every early return must release the turn slot.
+    if let Err(err) = start_turn(
+        Arc::clone(&state),
+        id,
+        session_arc,
+        payload.prompt,
+        cancellation_token,
+    )
+    .await
+    {
+        state.clear_active_turn(id).await;
+        return Err(err);
+    }
+
+    Ok(Json(json!({
+        "status": "started",
+        "session_id": id,
+    })))
+}
+
+async fn persist_session(
+    state: &ServerState,
+    id: SessionId,
+    session: &Arc<tokio::sync::RwLock<Session>>,
+    provider: &str,
+    model: &str,
+) {
+    // Holding the map lock while saving orders this against `delete_session`, so a deleted
+    // session is never written back.
+    let sessions = state.sessions.read().await;
+    if !sessions.contains_key(&id) {
+        return;
+    }
+    let guard = session.read().await;
+    if let Err(error) = state.store.save_session(&guard, provider, model).await {
+        tracing::warn!(%error, session = %id, "Failed to persist session");
+    }
+}
+
+async fn start_turn(
+    state: Arc<ServerState>,
+    id: SessionId,
+    session_arc: Arc<tokio::sync::RwLock<Session>>,
+    prompt: String,
+    cancellation_token: tokio_util::sync::CancellationToken,
+) -> Result<(), (StatusCode, String)> {
+    let (provider_id, model) = effective_model(&state, id).await;
+    let session_dir = session_arc.read().await.directory.clone();
+
     let config_guard = state.config.read().await;
-    let llm_client = match config_guard.create_active_llm_client() {
-        Ok(client) => client,
-        Err(e) => {
-            drop(config_guard);
-            state.clear_active_turn(id).await;
-            return Err((StatusCode::BAD_REQUEST, e.to_string()));
-        }
-    };
+    let llm_client = config_guard
+        .create_llm_client_for(&provider_id)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let runner_config = RunnerConfig {
-        model: config_guard.active_model.clone(),
+        model: model.clone(),
         max_steps: config_guard.agent.max_steps,
         max_tokens: Some(config_guard.agent.max_tokens),
         temperature: None,
     };
-    let active_provider = config_guard.active_provider.clone();
-    let active_model = config_guard.active_model.clone();
 
-    let session_dir = session_arc.read().await.directory.clone();
     let mut tool_registry = if config_guard.security.jail_path_traversal {
         let jail = maukode_tools::PathJail::new(&session_dir)
             .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
@@ -228,7 +431,7 @@ pub async fn submit_prompt(
     ))));
     let tools = Arc::new(tool_registry);
 
-    let runner = SessionRunner::new(
+    let mut runner = SessionRunner::new(
         Arc::clone(&session_arc),
         llm_client,
         tools,
@@ -236,50 +439,55 @@ pub async fn submit_prompt(
         runner_config,
     )
     .with_permission_manager(state.permission_manager_for(id).await)
-    .with_permission_store(Arc::clone(&state.store))
-    .with_checkpoint_manager(Arc::clone(&state.checkpoint_manager));
+    .with_permission_store(Arc::clone(&state.store));
+    match state.checkpoint_manager_for(&session_dir).await {
+        Ok(cm) => runner = runner.with_checkpoint_manager(cm),
+        Err(error) => tracing::warn!(%error, "Checkpoints unavailable for this turn"),
+    }
 
-    let state_for_task = Arc::clone(&state);
     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
-    let store = Arc::clone(&state.store);
-    let session_for_persist = Arc::clone(&session_arc);
-    let active_turns = Arc::clone(&state.active_turns);
-    let clear_session_id = id;
+    let token_for_status = cancellation_token.clone();
 
-    // Spawn execution loop in background
+    state.emit(GlobalEvent::TurnStarted { session_id: id });
+
     tokio::spawn(async move {
         let run_handle = tokio::spawn(async move {
             runner
-                .run_with_cancellation(Some(payload.prompt), llm_tx, Some(cancellation_token))
+                .run_with_cancellation(Some(prompt), llm_tx, Some(cancellation_token))
                 .await
         });
 
-        // Forward stream events to broadcast subscribers
+        // Forward stream events; checkpoint progress to SQLite at most every 2s so a crash
+        // costs seconds of work rather than the whole turn.
+        let mut last_save = std::time::Instant::now();
         while let Some(event) = llm_rx.recv().await {
-            state_for_task.publish_event(id, event).await;
+            let save_now = matches!(event, LLMEvent::ToolResult(_))
+                && last_save.elapsed() >= std::time::Duration::from_secs(2);
+            state.publish_event(id, event).await;
+            if save_now {
+                persist_session(&state, id, &session_arc, &provider_id, &model).await;
+                last_save = std::time::Instant::now();
+            }
         }
 
-        let _ = run_handle.await;
+        let error = match run_handle.await {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(e.to_string()),
+            Err(e) => Some(e.to_string()),
+        };
 
-        // Clear the active turn marker so future prompts can proceed.
-        active_turns.write().await.remove(&clear_session_id);
-        state_for_task
-            .pending_permissions
-            .write()
-            .await
-            .remove(&clear_session_id);
-
-        // Persist final session state to SQLite
-        let guard = session_for_persist.read().await;
-        let _ = store
-            .save_session(&guard, &active_provider, &active_model)
-            .await;
+        // Free the turn slot first so the next prompt can proceed, then persist final state.
+        state.clear_active_turn(id).await;
+        state.clear_pending_permissions(id).await;
+        persist_session(&state, id, &session_arc, &provider_id, &model).await;
+        state.emit(GlobalEvent::TurnFinished {
+            session_id: id,
+            cancelled: token_for_status.is_cancelled(),
+            error,
+        });
     });
 
-    Ok(Json(json!({
-        "status": "started",
-        "session_id": id,
-    })))
+    Ok(())
 }
 
 pub async fn stream_session_events(
@@ -287,55 +495,9 @@ pub async fn stream_session_events(
     Path(id): Path<SessionId>,
     Query(query): Query<EventsQuery>,
     headers: HeaderMap,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
-    let since = query.since.or_else(|| {
-        headers
-            .get("last-event-id")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse().ok())
-    });
-    let channel = state.channel(id).await;
-    let (backlog, rx, last) = channel.subscribe(since);
-
-    struct Sse_ {
-        rx: tokio::sync::broadcast::Receiver<SeqEvent>,
-        backlog: VecDeque<SeqEvent>,
-        last: u64,
-        channel: Arc<SessionChannel>,
-    }
-
-    let init = Sse_ {
-        rx,
-        backlog: backlog.into(),
-        last,
-        channel,
-    };
-    let stream = futures::stream::unfold(init, |mut st| async move {
-        loop {
-            if let Some(ev) = st.backlog.pop_front() {
-                st.last = ev.seq;
-                return Some((Ok(to_sse_event(&ev)), st));
-            }
-            match st.rx.recv().await {
-                Ok(ev) if ev.seq <= st.last => continue,
-                Ok(ev) => {
-                    st.last = ev.seq;
-                    return Some((Ok(to_sse_event(&ev)), st));
-                }
-                // Slow consumer: refill from the replay log instead of silently dropping events.
-                Err(RecvError::Lagged(_)) => st.backlog = st.channel.replay_after(st.last).into(),
-                Err(RecvError::Closed) => return None,
-            }
-        }
-    });
-
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
-}
-
-fn to_sse_event(ev: &SeqEvent) -> Event {
-    Event::default()
-        .id(ev.seq.to_string())
-        .data(serde_json::to_string(&ev.event).unwrap_or_default())
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let since = resume_point(&query, &headers);
+    sse_response(state.channel(id).await, since)
 }
 
 pub async fn cancel_prompt(
@@ -450,11 +612,52 @@ pub async fn get_session_diff(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<SessionId>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let diff = state
-        .checkpoint_manager
+    let diff = checkpoints_for(&state, id)
+        .await?
         .get_diff(&id.to_string(), None)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(diff))
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct DiffTurnQuery {
+    /// Compare against the checkpoint taken before this turn instead of the session baseline.
+    pub turn: Option<usize>,
+}
+
+pub async fn get_session_diff_files(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Query(query): Query<DiffTurnQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let files = checkpoints_for(&state, id)
+        .await?
+        .get_diff_files(&id.to_string(), query.turn)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(maukode_protocol::FileDiffListResponse {
+        session_id: id.to_string(),
+        files,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FileDiffQuery {
+    pub path: String,
+    pub turn: Option<usize>,
+}
+
+pub async fn get_session_file_diff(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Query(query): Query<FileDiffQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let diff = checkpoints_for(&state, id)
+        .await?
+        .get_file_diff(&id.to_string(), &query.path, query.turn)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(diff))
 }
 
@@ -468,8 +671,14 @@ pub async fn undo_session(
     Path(id): Path<SessionId>,
     Json(payload): Json<UndoRequestPayload>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let undo_res = state
-        .checkpoint_manager
+    if state.is_running(id).await {
+        return Err((
+            StatusCode::CONFLICT,
+            "Cannot undo while the agent is running; cancel the turn first".to_string(),
+        ));
+    }
+    let undo_res = checkpoints_for(&state, id)
+        .await?
         .undo(&id.to_string(), payload.turns)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
@@ -480,8 +689,8 @@ pub async fn list_session_checkpoints(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<SessionId>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let checkpoints = state
-        .checkpoint_manager
+    let checkpoints = checkpoints_for(&state, id)
+        .await?
         .list_checkpoints(&id.to_string())
         .await;
     Ok(Json(checkpoints))
@@ -582,11 +791,13 @@ pub async fn compact_session(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
 
     let mut session = session_arc.write().await;
-    let config_guard = state.config.read().await;
-    let model = config_guard.active_model.clone();
-    let llm_res = config_guard.create_active_llm_client();
-    let llm_client = llm_res.ok();
-    drop(config_guard);
+    let (provider_id, model) = effective_model(&state, id).await;
+    let llm_client = state
+        .config
+        .read()
+        .await
+        .create_llm_client_for(&provider_id)
+        .ok();
 
     let result = maukode_core::ConversationCompactor::compact(
         &mut session,
@@ -604,14 +815,9 @@ pub async fn compact_session(
         .await;
 
     // Save the updated compacted session
-    let config_guard = state.config.read().await;
     let _ = state
         .store
-        .save_session(
-            &session,
-            &config_guard.active_provider,
-            &config_guard.active_model,
-        )
+        .save_session(&session, &provider_id, &model)
         .await;
 
     Ok(Json(maukode_protocol::CompactResponse {
@@ -624,22 +830,39 @@ pub async fn compact_session(
     }))
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct DeleteSessionQuery {
+    /// Remove the session's worktree checkout (default true).
+    pub cleanup_worktree: Option<bool>,
+    /// Also delete its branch, discarding unmerged commits (default false).
+    pub delete_branch: Option<bool>,
+}
+
 pub async fn delete_session(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<SessionId>,
+    Query(query): Query<DeleteSessionQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     state.cancel_active_turn(id).await;
+    let worktree_info = state.store.get_worktree(id).await.ok().flatten();
+    // Drop in-memory state first: this waits out any in-flight save, and later saves from the
+    // cancelled turn see the session is gone and skip.
+    state.forget_session(id).await;
     let existed = state
         .store
         .delete_session(id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    state.forget_session(id).await;
-    if existed {
-        Ok(Json(json!({ "status": "deleted", "session_id": id })))
-    } else {
-        Err((StatusCode::NOT_FOUND, "Session not found".to_string()))
+    if !existed {
+        return Err((StatusCode::NOT_FOUND, "Session not found".to_string()));
     }
+    if let (Some(info), true) = (worktree_info, query.cleanup_worktree.unwrap_or(true)) {
+        if let Err(error) = worktree::remove(&info, query.delete_branch.unwrap_or(false)).await {
+            tracing::warn!(%error, "Failed to remove worktree");
+        }
+    }
+    state.emit(GlobalEvent::SessionDeleted { session_id: id });
+    Ok(Json(json!({ "status": "deleted", "session_id": id })))
 }
 
 pub async fn get_session_audit(
@@ -683,4 +906,123 @@ pub async fn update_session(
     Ok(Json(
         json!({ "status": "ok", "session_id": id, "title": title }),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetSessionModelRequest {
+    /// Defaults to the session's current provider.
+    pub provider_id: Option<String>,
+    pub model: String,
+}
+
+/// Pin this session to a provider/model without touching other sessions or the defaults.
+pub async fn set_session_model(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<SetSessionModelRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    load_session(&state, id).await?;
+    let provider = match payload.provider_id {
+        Some(p) => p,
+        None => effective_model(&state, id).await.0,
+    };
+    if state.config.read().await.get_provider(&provider).is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Provider '{provider}' not found"),
+        ));
+    }
+    state
+        .store
+        .set_session_model(id, &provider, &payload.model)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.emit(GlobalEvent::SessionUpdated { session_id: id });
+    Ok(Json(
+        json!({ "status": "ok", "provider": provider, "model": payload.model }),
+    ))
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct WorktreeActionRequest {
+    pub message: Option<String>,
+}
+
+async fn worktree_of(
+    state: &ServerState,
+    id: SessionId,
+) -> Result<WorktreeInfo, (StatusCode, String)> {
+    load_session(state, id).await?;
+    state
+        .store
+        .get_worktree(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                "Session does not use a worktree".to_string(),
+            )
+        })
+}
+
+pub async fn get_worktree(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let info = worktree_of(&state, id).await?;
+    let status = worktree::status(&info)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(status))
+}
+
+fn reject_while_running(running: bool) -> Result<(), (StatusCode, String)> {
+    if running {
+        Err((
+            StatusCode::CONFLICT,
+            "The agent is running; wait for it to finish or cancel the turn".to_string(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Commit everything the agent changed onto the session's branch.
+pub async fn commit_worktree(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    body: Option<Json<WorktreeActionRequest>>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let info = worktree_of(&state, id).await?;
+    reject_while_running(state.is_running(id).await)?;
+    let message = body
+        .and_then(|Json(b)| b.message)
+        .unwrap_or_else(|| "maukode: agent changes".to_string());
+    let commit = worktree::commit_all(&info, &message)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(json!({ "commit": commit })))
+}
+
+/// Merge the session's branch into the project's current branch (`--no-ff`). Conflicts are
+/// reported and rolled back; a dirty project checkout is refused with 409.
+pub async fn merge_worktree(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    body: Option<Json<WorktreeActionRequest>>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let info = worktree_of(&state, id).await?;
+    reject_while_running(state.is_running(id).await)?;
+    let message = body
+        .and_then(|Json(b)| b.message)
+        .unwrap_or_else(|| format!("Merge {}", info.branch));
+    let outcome = worktree::merge(&info, &message)
+        .await
+        .map_err(|e| match e {
+            WorktreeError::DirtyProject => (StatusCode::CONFLICT, e.to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+    state.emit(GlobalEvent::SessionUpdated { session_id: id });
+    Ok(Json(outcome))
 }

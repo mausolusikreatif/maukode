@@ -1,9 +1,10 @@
 use anyhow::Result;
+use maukode_core::CheckpointManager;
 use maukode_core::{AppConfig, PermissionManager, Session, SqliteSessionStore};
-use maukode_protocol::{LLMEvent, PermissionRequest, SessionId};
+use maukode_protocol::{GlobalEvent, LLMEvent, PermissionRequest, SessionId, SessionState};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -11,40 +12,45 @@ use tokio_util::sync::CancellationToken;
 /// Number of recent events kept per session so reconnecting clients can catch up.
 const EVENT_LOG_CAPACITY: usize = 2000;
 
-/// An event with a per-session monotonically increasing sequence number (SSE `id`).
+/// An event with a monotonically increasing sequence number (SSE `id`).
 #[derive(Debug, Clone, Serialize)]
-pub struct SeqEvent {
+pub struct SeqEvent<T> {
     pub seq: u64,
-    pub event: LLMEvent,
+    pub event: T,
 }
 
-#[derive(Default)]
-struct ChannelInner {
+struct ChannelInner<T> {
     last_seq: u64,
-    log: VecDeque<SeqEvent>,
+    log: VecDeque<SeqEvent<T>>,
 }
 
-/// Broadcast channel plus a bounded replay log for one session.
-pub struct SessionChannel {
-    tx: broadcast::Sender<SeqEvent>,
-    inner: std::sync::Mutex<ChannelInner>,
+/// Broadcast channel plus a bounded replay log.
+pub struct EventChannel<T> {
+    tx: broadcast::Sender<SeqEvent<T>>,
+    inner: std::sync::Mutex<ChannelInner<T>>,
 }
 
-impl SessionChannel {
-    fn new() -> Self {
+/// Per-session agent events.
+pub type SessionChannel = EventChannel<LLMEvent>;
+
+impl<T: Clone> EventChannel<T> {
+    pub fn new() -> Self {
         let (tx, _rx) = broadcast::channel(500);
         Self {
             tx,
-            inner: std::sync::Mutex::new(ChannelInner::default()),
+            inner: std::sync::Mutex::new(ChannelInner {
+                last_seq: 0,
+                log: VecDeque::new(),
+            }),
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, ChannelInner> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, ChannelInner<T>> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Append to the log and broadcast; returns the assigned sequence number.
-    pub fn publish(&self, event: LLMEvent) -> u64 {
+    pub fn publish(&self, event: T) -> u64 {
         let mut inner = self.lock();
         inner.last_seq += 1;
         let ev = SeqEvent {
@@ -65,7 +71,7 @@ impl SessionChannel {
     }
 
     /// Logged events with `seq > after`.
-    pub fn replay_after(&self, after: u64) -> Vec<SeqEvent> {
+    pub fn replay_after(&self, after: u64) -> Vec<SeqEvent<T>> {
         self.lock()
             .log
             .iter()
@@ -76,10 +82,11 @@ impl SessionChannel {
 
     /// Atomically snapshot the backlog (`seq > since`, if given) and subscribe to live events.
     /// Returns `(backlog, receiver, last_seq_seen)`; without `since` the backlog is empty.
+    #[allow(clippy::type_complexity)]
     pub fn subscribe(
         &self,
         since: Option<u64>,
-    ) -> (Vec<SeqEvent>, broadcast::Receiver<SeqEvent>, u64) {
+    ) -> (Vec<SeqEvent<T>>, broadcast::Receiver<SeqEvent<T>>, u64) {
         let inner = self.lock();
         let rx = self.tx.subscribe();
         let after = since.unwrap_or(inner.last_seq);
@@ -88,6 +95,12 @@ impl SessionChannel {
             None => Vec::new(),
         };
         (backlog, rx, after)
+    }
+}
+
+impl<T: Clone> Default for EventChannel<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -101,7 +114,10 @@ pub struct ServerState {
     pub active_turns: Arc<RwLock<HashMap<SessionId, CancellationToken>>>,
     /// Default manager; per-session managers are forked from it (see `permission_manager_for`).
     pub permission_manager: Arc<PermissionManager>,
-    pub checkpoint_manager: Arc<maukode_core::CheckpointManager>,
+    /// One shadow-git manager per workspace root (worktree sessions each have their own).
+    pub checkpoint_managers: Arc<RwLock<HashMap<PathBuf, Arc<CheckpointManager>>>>,
+    /// Cross-session activity feed for dashboards.
+    pub global_events: Arc<EventChannel<GlobalEvent>>,
     pub mcp_manager: Arc<maukode_core::McpManager>,
     pub auth_token: Option<String>,
     pub default_dir: PathBuf,
@@ -119,7 +135,6 @@ impl ServerState {
                 .with_whitelist(config.security.bash_whitelist.clone()),
         );
 
-        let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&dir).await?);
         let mcp_manager = Arc::new(maukode_core::McpManager::new());
 
         Ok(Self {
@@ -131,7 +146,8 @@ impl ServerState {
             session_permissions: Arc::new(RwLock::new(HashMap::new())),
             active_turns: Arc::new(RwLock::new(HashMap::new())),
             permission_manager,
-            checkpoint_manager,
+            checkpoint_managers: Arc::new(RwLock::new(HashMap::new())),
+            global_events: Arc::new(EventChannel::new()),
             mcp_manager,
             auth_token,
             default_dir: dir,
@@ -144,7 +160,18 @@ impl ServerState {
             return Ok(Some(Arc::clone(s)));
         }
 
-        if let Some(loaded) = self.store.load_session(id).await? {
+        if let Some(mut loaded) = self.store.load_session(id).await? {
+            // A turn that was in flight when the process died can never resume; without this the
+            // session would look busy forever.
+            if matches!(
+                loaded.state,
+                SessionState::Running
+                    | SessionState::WaitingForInput
+                    | SessionState::WaitingForToolConfirmation
+            ) && !self.active_turns.read().await.contains_key(&id)
+            {
+                loaded.state = SessionState::Interrupted;
+            }
             let session_arc = Arc::new(RwLock::new(loaded));
             sessions.insert(id, Arc::clone(&session_arc));
             return Ok(Some(session_arc));
@@ -206,18 +233,74 @@ impl ServerState {
                 .entry(id)
                 .or_default()
                 .insert(req.request_id.clone(), req.clone());
+            self.emit(GlobalEvent::PermissionRequested {
+                session_id: id,
+                request: req.clone(),
+            });
         }
         self.channel(id).await.publish(event);
     }
 
+    /// Publish to the cross-session feed.
+    pub fn emit(&self, event: GlobalEvent) {
+        self.global_events.publish(event);
+    }
+
     pub async fn resolve_pending_permission(&self, id: SessionId, request_id: &str) {
-        let mut pending = self.pending_permissions.write().await;
-        if let Some(map) = pending.get_mut(&id) {
-            map.remove(request_id);
-            if map.is_empty() {
+        let removed = {
+            let mut pending = self.pending_permissions.write().await;
+            let removed = pending
+                .get_mut(&id)
+                .is_some_and(|map| map.remove(request_id).is_some());
+            if pending.get(&id).is_some_and(|m| m.is_empty()) {
                 pending.remove(&id);
             }
+            removed
+        };
+        if removed {
+            self.emit(GlobalEvent::PermissionResolved {
+                session_id: id,
+                request_id: request_id.to_string(),
+            });
         }
+    }
+
+    /// Drop prompts nobody answered (turn ended, timed out or was cancelled).
+    pub async fn clear_pending_permissions(&self, id: SessionId) {
+        let removed = self.pending_permissions.write().await.remove(&id);
+        for request_id in removed.into_iter().flat_map(|m| m.into_keys()) {
+            self.emit(GlobalEvent::PermissionResolved {
+                session_id: id,
+                request_id,
+            });
+        }
+    }
+
+    pub async fn pending_permission_count(&self, id: SessionId) -> usize {
+        self.pending_permissions
+            .read()
+            .await
+            .get(&id)
+            .map_or(0, |m| m.len())
+    }
+
+    pub async fn is_running(&self, id: SessionId) -> bool {
+        self.active_turns.read().await.contains_key(&id)
+    }
+
+    /// Shadow-git checkpoint manager for the workspace a session runs in.
+    pub async fn checkpoint_manager_for(&self, dir: &Path) -> Result<Arc<CheckpointManager>> {
+        let key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        if let Some(m) = self.checkpoint_managers.read().await.get(&key) {
+            return Ok(Arc::clone(m));
+        }
+        let mut managers = self.checkpoint_managers.write().await;
+        if let Some(m) = managers.get(&key) {
+            return Ok(Arc::clone(m));
+        }
+        let manager = Arc::new(CheckpointManager::new(&key).await?);
+        managers.insert(key, Arc::clone(&manager));
+        Ok(manager)
     }
 
     pub async fn pending_permissions_for(&self, id: SessionId) -> Vec<PermissionRequest> {

@@ -1,3 +1,4 @@
+pub mod events;
 pub mod health;
 pub mod providers;
 pub mod sessions;
@@ -6,7 +7,7 @@ use crate::middleware::auth::auth_middleware;
 use crate::state::ServerState;
 use axum::{
     extract::Request,
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderName, HeaderValue, StatusCode},
     middleware::{from_fn, from_fn_with_state, Next},
     response::Response,
     routing::{get, post},
@@ -42,7 +43,10 @@ async fn reject_foreign_origin(req: Request, next: Next) -> Result<Response, Sta
 }
 
 pub fn create_router(state: Arc<ServerState>) -> Router {
-    let cors = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+    let cors = CorsLayer::new()
+        .allow_methods(Any)
+        .allow_headers(Any)
+        .expose_headers([HeaderName::from_static("x-event-seq")]);
     let guarded = state.auth_token.is_none();
     let cors = if guarded {
         cors.allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
@@ -113,7 +117,36 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/sessions/{id}/diff",
             get(sessions::get_session_diff),
         )
+        .route(
+            "/api/v1/sessions/{id}/diff/files",
+            get(sessions::get_session_diff_files),
+        )
+        .route(
+            "/api/v1/sessions/{id}/diff/file",
+            get(sessions::get_session_file_diff),
+        )
         .route("/api/v1/sessions/{id}/undo", post(sessions::undo_session))
+        .route(
+            "/api/v1/sessions/{id}/messages",
+            get(sessions::get_session_messages),
+        )
+        .route(
+            "/api/v1/sessions/{id}/model",
+            axum::routing::put(sessions::set_session_model),
+        )
+        .route(
+            "/api/v1/sessions/{id}/worktree",
+            get(sessions::get_worktree),
+        )
+        .route(
+            "/api/v1/sessions/{id}/worktree/commit",
+            post(sessions::commit_worktree),
+        )
+        .route(
+            "/api/v1/sessions/{id}/worktree/merge",
+            post(sessions::merge_worktree),
+        )
+        .route("/api/v1/events", get(events::global_events))
         .route(
             "/api/v1/sessions/{id}/checkpoints",
             get(sessions::list_session_checkpoints),

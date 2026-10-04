@@ -11,6 +11,7 @@ pub mod repo_map;
 pub mod runner;
 pub mod session;
 pub mod store;
+pub mod worktree;
 
 pub use chatgpt_auth::{AuthEndpoints, ChatGptAuth, LoginAttempt};
 pub use chatgpt_client::ChatGptClient;

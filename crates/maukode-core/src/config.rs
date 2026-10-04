@@ -396,9 +396,14 @@ impl AppConfig {
     }
 
     pub fn create_active_llm_client(&self) -> Result<Arc<dyn LLMClient>> {
+        self.create_llm_client_for(&self.active_provider)
+    }
+
+    /// Build a client for a specific provider (used for per-session provider/model pinning).
+    pub fn create_llm_client_for(&self, provider_id: &str) -> Result<Arc<dyn LLMClient>> {
         let provider = self
-            .get_active_provider()
-            .ok_or_else(|| anyhow::anyhow!("No active provider configured"))?;
+            .get_provider(provider_id)
+            .ok_or_else(|| anyhow::anyhow!("Provider '{provider_id}' not found"))?;
 
         match provider.kind {
             ProviderKind::ChatGpt => {

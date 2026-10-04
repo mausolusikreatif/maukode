@@ -18,6 +18,11 @@ pub struct SessionSummary {
     pub provider: String,
     pub model: String,
     pub updated_at: DateTime<Utc>,
+    /// Original repository when the session runs in an isolated git worktree.
+    #[serde(default)]
+    pub project_dir: Option<String>,
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +115,12 @@ impl SqliteSessionStore {
 
         let conn = Connection::open(&db_path)
             .with_context(|| format!("Failed to open sqlite database at {}", db_path.display()))?;
+
+        // Several agents (and CLI/TUI processes) share this file: WAL lets readers run during a
+        // write and the busy timeout turns brief contention into a wait instead of an error.
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;",
+        )?;
 
         // Initialize schema
         conn.execute_batch(
@@ -209,7 +220,14 @@ impl SqliteSessionStore {
             "ALTER TABLE sessions ADD COLUMN directory TEXT NOT NULL DEFAULT '';",
             [],
         );
-        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN custom_title TEXT;", []);
+        for ddl in [
+            "ALTER TABLE sessions ADD COLUMN custom_title TEXT;",
+            "ALTER TABLE sessions ADD COLUMN project_dir TEXT;",
+            "ALTER TABLE sessions ADD COLUMN worktree_branch TEXT;",
+            "ALTER TABLE sessions ADD COLUMN base_commit TEXT;",
+        ] {
+            let _ = conn.execute(ddl, []);
+        }
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sessions_directory ON sessions(directory);",
             [],
@@ -222,7 +240,7 @@ impl SqliteSessionStore {
     }
 
     pub async fn save_session(&self, session: &Session, provider: &str, model: &str) -> Result<()> {
-        let conn = self.conn.lock().await;
+        let mut conn = self.conn.lock().await;
 
         let title = session
             .messages
@@ -237,13 +255,14 @@ impl SqliteSessionStore {
             })
             .unwrap_or_else(|| "New Session".to_string());
 
+        let tx = conn.transaction()?;
         let state_str = serde_json::to_string(&session.state)?;
         let id_str = session.id.to_string();
         let directory_str = session.directory.to_string_lossy().to_string();
         let created_at_str = session.created_at.to_rfc3339();
         let updated_at_str = session.updated_at.to_rfc3339();
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO sessions (id, directory, title, provider, model, state, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET
@@ -266,7 +285,7 @@ impl SqliteSessionStore {
         )?;
 
         // Replace messages
-        conn.execute(
+        tx.execute(
             "DELETE FROM messages WHERE session_id = ?1;",
             params![id_str],
         )?;
@@ -276,20 +295,21 @@ impl SqliteSessionStore {
             let parts_json = serde_json::to_string(&msg.parts)?;
             let now = Utc::now().to_rfc3339();
 
-            conn.execute(
+            tx.execute(
                 "INSERT INTO messages (session_id, role, parts_json, created_at)
                  VALUES (?1, ?2, ?3, ?4);",
                 params![id_str, role_str, parts_json, now],
             )?;
 
             // Retain full uncompressed message in messages_audit for historical auditing
-            let _ = conn.execute(
+            let _ = tx.execute(
                 "INSERT OR IGNORE INTO messages_audit (session_id, role, parts_json, created_at)
                  VALUES (?1, ?2, ?3, ?4);",
                 params![id_str, role_str, parts_json, now],
             );
         }
 
+        tx.commit()?;
         Ok(())
     }
 
@@ -466,6 +486,94 @@ impl SqliteSessionStore {
             report.compactions.push(row?);
         }
         Ok(report)
+    }
+
+    pub async fn set_worktree(
+        &self,
+        id: SessionId,
+        info: &crate::worktree::WorktreeInfo,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE sessions SET project_dir = ?1, worktree_branch = ?2, base_commit = ?3
+             WHERE id = ?4",
+            params![
+                info.project_dir.to_string_lossy(),
+                info.branch,
+                info.base_commit,
+                id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Worktree metadata for a session; the worktree path is the session's `directory`.
+    pub async fn get_worktree(
+        &self,
+        id: SessionId,
+    ) -> Result<Option<crate::worktree::WorktreeInfo>> {
+        let conn = self.conn.lock().await;
+        let row = conn
+            .query_row(
+                "SELECT directory, project_dir, worktree_branch, base_commit
+                 FROM sessions WHERE id = ?1",
+                params![id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        Ok(match row {
+            Some((path, Some(project), Some(branch), Some(base))) => {
+                Some(crate::worktree::WorktreeInfo {
+                    project_dir: PathBuf::from(project),
+                    path: PathBuf::from(path),
+                    branch,
+                    base_commit: base,
+                })
+            }
+            _ => None,
+        })
+    }
+
+    /// The provider/model pinned to this session.
+    pub async fn session_model(&self, id: SessionId) -> Result<Option<(String, String)>> {
+        let conn = self.conn.lock().await;
+        let row = conn
+            .query_row(
+                "SELECT provider, model FROM sessions WHERE id = ?1",
+                params![id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .optional()?;
+        Ok(match row {
+            Some((Some(p), Some(m))) if !p.is_empty() && !m.is_empty() => Some((p, m)),
+            _ => None,
+        })
+    }
+
+    pub async fn set_session_model(
+        &self,
+        id: SessionId,
+        provider: &str,
+        model: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let n = conn.execute(
+            "UPDATE sessions SET provider = ?1, model = ?2 WHERE id = ?3",
+            params![provider, model, id.to_string()],
+        )?;
+        Ok(n > 0)
     }
 
     /// Delete a session and its dependent rows. Returns whether the session existed.
@@ -683,7 +791,7 @@ impl SqliteSessionStore {
     pub async fn list_all_sessions(&self) -> Result<Vec<SessionSummary>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count
+            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count, s.project_dir, s.worktree_branch
              FROM sessions s
              LEFT JOIN messages m ON s.id = m.session_id
              GROUP BY s.id
@@ -699,6 +807,8 @@ impl SqliteSessionStore {
             let model: String = row.get(4).unwrap_or_default();
             let updated_at_str: String = row.get(5)?;
             let msg_count: i64 = row.get(6).unwrap_or(0);
+            let project_dir: Option<String> = row.get(7).unwrap_or(None);
+            let worktree_branch: Option<String> = row.get(8).unwrap_or(None);
             Ok((
                 id_str,
                 directory,
@@ -707,11 +817,23 @@ impl SqliteSessionStore {
                 model,
                 updated_at_str,
                 msg_count,
+                project_dir,
+                worktree_branch,
             ))
         })?;
 
         let mut summaries = Vec::new();
-        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten()
+        for (
+            id_str,
+            directory,
+            title,
+            provider,
+            model,
+            updated_at_str,
+            msg_count,
+            project_dir,
+            worktree_branch,
+        ) in rows.flatten()
         {
             if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
                 let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
@@ -725,6 +847,8 @@ impl SqliteSessionStore {
                     provider,
                     model,
                     updated_at,
+                    project_dir,
+                    worktree_branch,
                 });
             }
         }
@@ -736,10 +860,10 @@ impl SqliteSessionStore {
         let dir_str = dir.to_string_lossy().to_string();
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count
+            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count, s.project_dir, s.worktree_branch
              FROM sessions s
              LEFT JOIN messages m ON s.id = m.session_id
-             WHERE s.directory = ?1
+             WHERE s.directory = ?1 OR s.project_dir = ?1
              GROUP BY s.id
              ORDER BY s.updated_at DESC
              LIMIT 50;",
@@ -753,6 +877,8 @@ impl SqliteSessionStore {
             let model: String = row.get(4).unwrap_or_default();
             let updated_at_str: String = row.get(5)?;
             let msg_count: i64 = row.get(6).unwrap_or(0);
+            let project_dir: Option<String> = row.get(7).unwrap_or(None);
+            let worktree_branch: Option<String> = row.get(8).unwrap_or(None);
             Ok((
                 id_str,
                 directory,
@@ -761,11 +887,23 @@ impl SqliteSessionStore {
                 model,
                 updated_at_str,
                 msg_count,
+                project_dir,
+                worktree_branch,
             ))
         })?;
 
         let mut summaries = Vec::new();
-        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten()
+        for (
+            id_str,
+            directory,
+            title,
+            provider,
+            model,
+            updated_at_str,
+            msg_count,
+            project_dir,
+            worktree_branch,
+        ) in rows.flatten()
         {
             if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
                 let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
@@ -779,6 +917,8 @@ impl SqliteSessionStore {
                     provider,
                     model,
                     updated_at,
+                    project_dir,
+                    worktree_branch,
                 });
             }
         }
@@ -860,5 +1000,72 @@ mod tests {
             audit_after[1].text_content(),
             "Turn 1 assistant response with 500 lines of build output"
         );
+    }
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn concurrent_writers_across_connections_do_not_fail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        // Two stores on one file stand in for the daemon plus a local CLI/TUI process.
+        let stores = [
+            SqliteSessionStore::new(&path).unwrap(),
+            SqliteSessionStore::new(&path).unwrap(),
+        ];
+        let mut tasks = Vec::new();
+        for i in 0..40 {
+            let store = stores[i % 2].clone();
+            tasks.push(tokio::spawn(async move {
+                let mut session = Session::new("/tmp/x");
+                for n in 0..20 {
+                    session.add_message(Message::user(format!("m{n}")));
+                }
+                store.save_session(&session, "p", "m").await?;
+                store.save_session(&session, "p", "m").await?;
+                anyhow::Ok(session.id)
+            }));
+        }
+        for t in tasks {
+            let id = t.await.unwrap().unwrap();
+            let loaded = stores[0].load_session(id).await.unwrap().unwrap();
+            assert_eq!(loaded.messages.len(), 20);
+        }
+        let mode: String = stores[0]
+            .conn
+            .lock()
+            .await
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+    }
+
+    #[tokio::test]
+    async fn delete_session_removes_dependents_and_worktree_metadata_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(dir.path().join("db.sqlite")).unwrap();
+        let mut session = Session::new("/tmp/wt");
+        session.add_message(Message::user("hi"));
+        store.save_session(&session, "p", "m").await.unwrap();
+        let info = crate::worktree::WorktreeInfo {
+            project_dir: "/repo".into(),
+            path: "/tmp/wt".into(),
+            branch: "maukode/abc".into(),
+            base_commit: "deadbeef".into(),
+        };
+        store.set_worktree(session.id, &info).await.unwrap();
+        assert_eq!(store.get_worktree(session.id).await.unwrap(), Some(info));
+        let listed = store
+            .list_sessions_by_directory(Path::new("/repo"))
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].worktree_branch.as_deref(), Some("maukode/abc"));
+        assert!(store.delete_session(session.id).await.unwrap());
+        assert!(store.load_session(session.id).await.unwrap().is_none());
+        assert!(!store.delete_session(session.id).await.unwrap());
     }
 }

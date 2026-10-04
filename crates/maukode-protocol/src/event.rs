@@ -1,4 +1,5 @@
 use crate::message::{ToolCall, ToolResult};
+use crate::session::SessionId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,4 +171,69 @@ pub struct CompactResponse {
     pub original_tokens: usize,
     pub compacted_tokens: usize,
     pub summary: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileDiffStatus {
+    Added,
+    Modified,
+    Deleted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDiffEntry {
+    pub path: String,
+    pub status: FileDiffStatus,
+    /// `None` for binary files.
+    pub insertions: Option<usize>,
+    pub deletions: Option<usize>,
+    pub binary: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDiffListResponse {
+    pub session_id: String,
+    pub files: Vec<FileDiffEntry>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDiffResponse {
+    pub session_id: String,
+    pub path: String,
+    pub diff: String,
+    /// True when `diff` was cut to the server's size cap.
+    pub truncated: bool,
+}
+
+/// Cross-session activity for dashboards (`GET /api/v1/events`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GlobalEvent {
+    SessionCreated {
+        session_id: SessionId,
+    },
+    /// Title, model or worktree metadata changed.
+    SessionUpdated {
+        session_id: SessionId,
+    },
+    SessionDeleted {
+        session_id: SessionId,
+    },
+    TurnStarted {
+        session_id: SessionId,
+    },
+    TurnFinished {
+        session_id: SessionId,
+        cancelled: bool,
+        error: Option<String>,
+    },
+    PermissionRequested {
+        session_id: SessionId,
+        request: PermissionRequest,
+    },
+    PermissionResolved {
+        session_id: SessionId,
+        request_id: String,
+    },
 }
