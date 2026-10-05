@@ -1,7 +1,9 @@
+pub mod auth;
 pub mod events;
 pub mod health;
 pub mod providers;
 pub mod sessions;
+pub mod settings;
 
 use crate::middleware::auth::auth_middleware;
 use crate::state::ServerState;
@@ -147,6 +149,25 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             post(sessions::merge_worktree),
         )
         .route("/api/v1/events", get(events::global_events))
+        .route(
+            "/api/v1/providers/{id}",
+            axum::routing::delete(providers::delete_provider),
+        )
+        .route(
+            "/api/v1/config/security",
+            get(settings::get_security).put(settings::set_default_permission_mode),
+        )
+        .route("/api/v1/mcp", get(settings::list_mcp))
+        .route(
+            "/api/v1/auth/chatgpt",
+            get(auth::status).delete(auth::logout),
+        )
+        .route("/api/v1/auth/chatgpt/login", post(auth::begin_login))
+        .route(
+            "/api/v1/auth/chatgpt/login/{attempt_id}",
+            get(auth::login_status).delete(auth::cancel_login),
+        )
+        .route("/api/v1/auth/chatgpt/account", post(auth::use_account))
         .route(
             "/api/v1/sessions/{id}/checkpoints",
             get(sessions::list_session_checkpoints),

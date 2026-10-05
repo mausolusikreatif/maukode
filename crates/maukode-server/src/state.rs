@@ -104,7 +104,25 @@ impl<T: Clone> Default for EventChannel<T> {
     }
 }
 
+/// Where a ChatGPT sign-in attempt currently stands.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum LoginProgress {
+    Pending,
+    Succeeded { email: String },
+    Failed { error: String },
+}
+
+/// The single in-flight ChatGPT sign-in (its task owns the loopback callback listener).
+pub struct LoginSlot {
+    pub id: String,
+    pub progress: Arc<tokio::sync::Mutex<LoginProgress>>,
+    pub task: tokio::task::JoinHandle<()>,
+}
+
 pub struct ServerState {
+    pub login: tokio::sync::Mutex<Option<LoginSlot>>,
     pub config: Arc<RwLock<AppConfig>>,
     pub store: Arc<SqliteSessionStore>,
     pub sessions: Arc<RwLock<HashMap<SessionId, Arc<RwLock<Session>>>>>,
@@ -141,6 +159,7 @@ impl ServerState {
             config: Arc::new(RwLock::new(config)),
             store: Arc::new(store),
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            login: tokio::sync::Mutex::new(None),
             channels: Arc::new(RwLock::new(HashMap::new())),
             pending_permissions: Arc::new(RwLock::new(HashMap::new())),
             session_permissions: Arc::new(RwLock::new(HashMap::new())),

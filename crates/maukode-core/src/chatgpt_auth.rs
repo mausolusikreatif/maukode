@@ -65,10 +65,9 @@ struct CredentialStore {
 
 impl CredentialStore {
     fn active(&self) -> Result<&Profile> {
-        let id = self
-            .active_client_id
-            .as_deref()
-            .ok_or_else(|| anyhow!("Sign in with ChatGPT first: maukode auth login"))?;
+        let id = self.active_client_id.as_deref().ok_or_else(|| {
+            anyhow!("Sign in with ChatGPT first (Settings → ChatGPT, or `maukode auth login`)")
+        })?;
         self.profiles
             .iter()
             .find(|profile| profile.client_id == id)
@@ -320,7 +319,7 @@ impl ChatGptAuth {
                 }
                 let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
                 let valid = params.get("state") == Some(&attempt.state);
-                let message = if valid { "MauKode sign-in received. Return to the terminal." } else { "Invalid sign-in state." };
+                let message = if valid { "MauKode sign-in received. You can close this tab and return to MauKode." } else { "Invalid sign-in state." };
                 let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{message}", message.len());
                 socket.write_all(response.as_bytes()).await?;
                 if !valid {

@@ -16,7 +16,15 @@ bodies with a 4xx/5xx status.
 | Method | Path | Body / query | Notes |
 |---|---|---|---|
 | GET | `/health`, `/api/v1/health` | | public |
-| GET/POST | `/providers` | POST: `ProviderConfig` | upsert |
+| GET/POST | `/providers` | POST: `ProviderConfig` | upsert; `api_key`: `null` keeps the stored key, `""` removes it |
+| DELETE | `/providers/{id}` | | `409` for the active provider, `404` if unknown |
+| GET/PUT | `/config/security` | PUT `{permission_mode}` | GET also returns jail/allowed paths/bash whitelist (read-only); PUT persists the default approval mode for **new** sessions |
+| GET | `/mcp` | `?directory=` | status of configured MCP servers (read-only: they run commands, so they are configured in files) |
+| GET | `/auth/chatgpt` | | `{email, accounts[]}`; never tokens |
+| POST | `/auth/chatgpt/login` | `{new_account?, open_browser?}` | starts Sign in with ChatGPT → `{attempt_id, url, browser_opened}`. The loopback callback listener lives in the daemon, so the approving browser must run on the **same machine** |
+| GET/DELETE | `/auth/chatgpt/login/{attempt_id}` | | poll `{state: pending\|succeeded\|failed, email?, error?}` / cancel (closes the listener) |
+| POST | `/auth/chatgpt/account` | `{client_id}` | switch account |
+| DELETE | `/auth/chatgpt` | | revoke and sign out |
 | POST | `/providers/active` | `{provider_id}` | |
 | GET | `/models?provider=` | | |
 | POST | `/models/active` | `{model}` | |

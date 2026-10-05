@@ -10,9 +10,17 @@ import type {
   ProvidersListResponse,
   SessionDetailResponse,
   SessionListItem,
+  StopReason,
   WorktreeStatus,
 } from "../api/types";
 import { forgetBootstrap, saveBootstrap } from "../platform";
+import {
+  disableNotifications,
+  enableNotifications,
+  loadNotificationsPref,
+  noticeFor,
+  showNotice,
+} from "./notify";
 import {
   addNotice,
   applyEvent,
@@ -65,6 +73,12 @@ export const emptyReview = (open = false): ReviewState => ({
   checkpoints: 0, worktree: null, busy: false, result: null,
 });
 
+/** How a session's most recent turn ended (kept for this app run; the server does not store it). */
+export interface LastStop {
+  reason: StopReason;
+  message: string | null;
+}
+
 interface AppState {
   client: ApiClient | null;
   connection: Connection;
@@ -76,7 +90,15 @@ interface AppState {
   threads: Record<string, ThreadState>;
   loadingOlder: boolean;
   review: ReviewState;
+  /** Main area when no session is open: the overview, or the settings screen. */
+  view: "home" | "settings";
+  lastStop: Record<string, LastStop>;
+  notificationsOn: boolean;
 
+  refreshProviders: () => Promise<void>;
+  goHome: () => void;
+  openSettings: () => void;
+  setNotifications: (on: boolean) => Promise<boolean>;
   connect: (url: string, token?: string) => Promise<void>;
   disconnect: () => void;
   refreshSessions: () => Promise<void>;
@@ -133,6 +155,21 @@ export const useApp = create<AppState>((set, get) => {
   };
 
   const onGlobal = (e: GlobalEvent) => {
+    const st = get();
+    if (st.notificationsOn) {
+      const notice = noticeFor(e, {
+        activeId: st.activeId,
+        windowHidden: document.hidden || !document.hasFocus(),
+        sessions: st.sessions,
+      });
+      if (notice) {
+        const id = "session_id" in e ? e.session_id : null;
+        showNotice(notice, () => {
+          window.focus();
+          if (id) void get().openSession(id);
+        });
+      }
+    }
     switch (e.type) {
       case "session_created":
       case "session_deleted":
@@ -141,9 +178,14 @@ export const useApp = create<AppState>((set, get) => {
         break;
       case "turn_started":
         patchSession(e.session_id, (x) => ({ ...x, running: true }));
+        set((s) => {
+          const { [e.session_id]: _gone, ...rest } = s.lastStop;
+          return { lastStop: rest };
+        });
         break;
       case "turn_finished":
         patchSession(e.session_id, (x) => ({ ...x, running: false, pending_permission_count: 0 }));
+        set((s) => ({ lastStop: { ...s.lastStop, [e.session_id]: { reason: e.reason, message: e.message } } }));
         refreshSoon();
         break;
       case "permission_requested":
@@ -212,6 +254,29 @@ export const useApp = create<AppState>((set, get) => {
     threads: {},
     loadingOlder: false,
     review: emptyReview(),
+    view: "home",
+    lastStop: {},
+    notificationsOn: loadNotificationsPref(),
+
+    refreshProviders: async () => {
+      const client = get().client;
+      if (!client) return;
+      set({ providers: await client.providers() });
+    },
+    goHome: () => {
+      get().closeSession();
+      set({ view: "home" });
+    },
+    openSettings: () => {
+      get().closeSession();
+      set({ view: "settings" });
+    },
+    setNotifications: async (on) => {
+      const granted = on ? await enableNotifications() : false;
+      if (!on) disableNotifications();
+      set({ notificationsOn: granted });
+      return granted;
+    },
 
     connect: async (url, token) => {
       get().disconnect();
@@ -247,7 +312,7 @@ export const useApp = create<AppState>((set, get) => {
       globalAbort?.abort();
       sessionAbort?.abort();
       globalAbort = sessionAbort = null;
-      set({ client: null, connection: "disconnected", sessions: [], activeId: null, meta: null, threads: {} });
+      set({ client: null, connection: "disconnected", sessions: [], activeId: null, meta: null, threads: {}, lastStop: {}, view: "home" });
     },
 
     refreshSessions: async () => {
@@ -267,7 +332,7 @@ export const useApp = create<AppState>((set, get) => {
       sessionAbort?.abort();
       const ctrl = new AbortController();
       sessionAbort = ctrl;
-      set((s) => ({ activeId: id, meta: null, review: emptyReview(s.review.open) }));
+      set((s) => ({ activeId: id, meta: null, view: "home", review: emptyReview(s.review.open) }));
       try {
         const d = await client.getSession(id, PAGE);
         if (ctrl.signal.aborted) return;

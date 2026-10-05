@@ -79,11 +79,16 @@ pub async fn add_or_update_provider(
     Json(mut payload): Json<ProviderConfig>,
 ) -> impl IntoResponse {
     let mut config = state.config.write().await;
-    // Clients receive redacted keys, so a missing key means "keep the stored one".
-    if payload.api_key.is_none() {
-        payload.api_key = config
-            .get_provider(&payload.id)
-            .and_then(|p| p.api_key.clone());
+    // Clients receive redacted keys, so a missing key means "keep the stored one" and an empty
+    // string means "remove it".
+    match payload.api_key.as_deref() {
+        None => {
+            payload.api_key = config
+                .get_provider(&payload.id)
+                .and_then(|p| p.api_key.clone());
+        }
+        Some("") => payload.api_key = None,
+        Some(_) => {}
     }
     config.add_or_update_provider(payload);
     Json(json!({ "status": "ok" }))
@@ -174,4 +179,17 @@ pub async fn set_agent_config(
         .save()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(agent))
+}
+
+/// Remove a provider (never the active one). Sessions pinned to it fall back to the defaults.
+pub async fn delete_provider(
+    State(state): State<Arc<ServerState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut config = state.config.write().await;
+    match config.remove_provider(&id) {
+        Ok(true) => Ok(Json(json!({ "status": "removed" }))),
+        Ok(false) => Err((StatusCode::NOT_FOUND, format!("Provider '{id}' not found"))),
+        Err(e) => Err((StatusCode::CONFLICT, e.to_string())),
+    }
 }

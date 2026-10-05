@@ -56,3 +56,15 @@ the conversation is kept), and — for sessions started with worktree isolation 
 controls. Merging uses `--no-ff` into whatever branch the project currently has checked out; a
 conflict is rolled back and reported, and a project with uncommitted changes to tracked files is
 refused. Deleting a worktree session offers to keep (default) or discard its branch.
+
+## Managing agents
+
+- **Overview** lists every agent by urgency: *needs you* (pending approvals), *stopped early*
+  (output/step limit or error), *running*, *recent*. The window title shows `(N) MauKode` while
+  N sessions wait for approval.
+- **Notifications** (Settings → General) are sent for approvals and finished turns of sessions you
+  are not currently looking at. Cancelling a turn never notifies. In the Tauri shell the webview's
+  Notification API may need `tauri-plugin-notification`; not wired yet.
+- **Settings**: default approval mode and agent limits (persisted by the daemon), providers
+  (keys are write-only), ChatGPT sign-in, and read-only views of MCP servers and security.
+- **Audit** (session header) shows approval decisions, mode changes and compactions.

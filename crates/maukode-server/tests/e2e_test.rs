@@ -134,6 +134,29 @@ async fn tool_turn_with_permission_prompt_completes_even_if_gateway_says_stop() 
     let mut feed = app.events(&format!("/api/v1/sessions/{id}/events")).await;
     app.prompt(&id, "write a file").await;
 
+    // While the turn is still running (parked on the approval prompt) the session already has
+    // its title, derived from the first message.
+    let mut feed_for_titles = app.events("/api/v1/events").await;
+    let _ = &mut feed_for_titles;
+    let listing = loop {
+        let l = app.get("/api/v1/sessions?all=true").await;
+        let mine = l
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id.as_str())
+            .cloned();
+        if mine.as_ref().is_some_and(|s| s["title"] == "write a file") {
+            break l;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    assert!(listing
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["running"] == true));
+
     // The prompt is visible to a client that connects mid-turn via the snapshot.
     let before = feed.until("permission_request").await;
     let request_id = before.last().unwrap()["request_id"]

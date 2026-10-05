@@ -1,17 +1,24 @@
 import { SseParser } from "./sse";
 import type {
+  AgentConfig,
   AuditResponse,
+  ChatGptLoginStarted,
+  ChatGptLoginStatus,
+  ChatGptStatus,
   Checkpoint,
   CreateSessionRequest,
   CreateSessionResponse,
   FileDiffListResponse,
   FileDiffResponse,
+  McpListResponse,
   MergeOutcome,
   MessagesPage,
   ModelsListResponse,
   PermissionDecision,
   PermissionMode,
+  ProviderConfig,
   ProvidersListResponse,
+  SecuritySettings,
   SessionDetailResponse,
   SessionListItem,
   UndoResponse,
@@ -127,6 +134,51 @@ export class ApiClient {
   }
   providers() {
     return this.request<ProvidersListResponse>("GET", "/api/v1/providers");
+  }
+  upsertProvider(p: ProviderConfig) {
+    return this.request<void>("POST", "/api/v1/providers", p);
+  }
+  deleteProvider(id: string) {
+    return this.request<void>("DELETE", `/api/v1/providers/${enc(id)}`);
+  }
+  setActiveProvider(providerId: string) {
+    return this.request<void>("POST", "/api/v1/providers/active", { provider_id: providerId });
+  }
+  agentConfig() {
+    return this.request<AgentConfig>("GET", "/api/v1/config/agent");
+  }
+  setAgentConfig(c: { max_steps?: number; max_tokens?: number }) {
+    return this.request<AgentConfig>("POST", "/api/v1/config/agent", c);
+  }
+  security() {
+    return this.request<SecuritySettings>("GET", "/api/v1/config/security");
+  }
+  setDefaultPermissionMode(mode: PermissionMode) {
+    return this.request<void>("PUT", "/api/v1/config/security", { permission_mode: mode });
+  }
+  mcp() {
+    return this.request<McpListResponse>("GET", "/api/v1/mcp");
+  }
+  chatgptStatus() {
+    return this.request<ChatGptStatus>("GET", "/api/v1/auth/chatgpt");
+  }
+  chatgptLogin(opts: { newAccount?: boolean; openBrowser?: boolean } = {}) {
+    return this.request<ChatGptLoginStarted>("POST", "/api/v1/auth/chatgpt/login", {
+      new_account: opts.newAccount ?? false,
+      open_browser: opts.openBrowser ?? false,
+    });
+  }
+  chatgptLoginStatus(attemptId: string) {
+    return this.request<ChatGptLoginStatus>("GET", `/api/v1/auth/chatgpt/login/${attemptId}`);
+  }
+  chatgptCancelLogin(attemptId: string) {
+    return this.request<void>("DELETE", `/api/v1/auth/chatgpt/login/${attemptId}`);
+  }
+  chatgptUseAccount(clientId: string) {
+    return this.request<void>("POST", "/api/v1/auth/chatgpt/account", { client_id: clientId });
+  }
+  chatgptLogout() {
+    return this.request<void>("DELETE", "/api/v1/auth/chatgpt");
   }
   models(provider?: string) {
     return this.request<ModelsListResponse>(

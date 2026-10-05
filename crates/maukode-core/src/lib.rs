@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod chatgpt_auth;
 pub mod chatgpt_client;
 pub mod checkpoint;

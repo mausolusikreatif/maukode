@@ -494,6 +494,7 @@ async fn start_turn(
         // costs seconds of work rather than the whole turn.
         let mut last_save = std::time::Instant::now();
         let mut stopped: Option<(StopReason, Option<String>)> = None;
+        let mut titled = false;
         while let Some(event) = llm_rx.recv().await {
             if let LLMEvent::TurnStopped { reason, message } = &event {
                 stopped = Some((*reason, message.clone()));
@@ -501,6 +502,13 @@ async fn start_turn(
             let save_now = matches!(event, LLMEvent::ToolResult(_))
                 && last_save.elapsed() >= std::time::Duration::from_secs(2);
             state.publish_event(id, event).await;
+            // The first event means the runner has recorded the prompt: store it now so the
+            // session gets its title (derived from the first message) while it is still running.
+            if !titled {
+                titled = true;
+                persist_session(&state, id, &session_arc, &provider_id, &model).await;
+                state.emit(GlobalEvent::SessionUpdated { session_id: id });
+            }
             if save_now {
                 persist_session(&state, id, &session_arc, &provider_id, &model).await;
                 last_save = std::time::Instant::now();

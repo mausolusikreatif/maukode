@@ -13,7 +13,7 @@ function baseName(path: string): string {
 }
 
 export function Sidebar() {
-  const { sessions, activeId, openSession, connection } = useApp();
+  const { sessions, activeId, openSession, connection, view, goHome, openSettings } = useApp();
   const [creating, setCreating] = useState(false);
 
   const groups = useMemo(() => {
@@ -39,6 +39,14 @@ export function Sidebar() {
       </button>
       <div className="summary muted" data-testid="summary">
         {running} running · {needsYou} need you
+      </div>
+      <div className="row nav">
+        <button data-testid="nav-overview" className={!activeId && view === "home" ? "active" : ""} onClick={goHome}>
+          Overview
+        </button>
+        <button data-testid="nav-settings" className={!activeId && view === "settings" ? "active" : ""} onClick={openSettings}>
+          Settings
+        </button>
       </div>
       <nav>
         {groups.map(([project, items]) => (

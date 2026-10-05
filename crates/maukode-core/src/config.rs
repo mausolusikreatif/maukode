@@ -366,6 +366,20 @@ impl AppConfig {
         let _ = self.save();
     }
 
+    /// Remove a provider. The active provider cannot be removed; returns whether it existed.
+    pub fn remove_provider(&mut self, id: &str) -> Result<bool> {
+        if self.active_provider == id {
+            anyhow::bail!("Cannot remove the active provider; switch to another one first");
+        }
+        let before = self.providers.len();
+        self.providers.retain(|p| p.id != id);
+        let removed = self.providers.len() != before;
+        if removed {
+            self.save()?;
+        }
+        Ok(removed)
+    }
+
     pub fn set_active_provider(&mut self, id: &str) -> Result<()> {
         let provider = self
             .get_provider(id)
@@ -375,7 +389,9 @@ impl AppConfig {
         if provider.kind == ProviderKind::ChatGpt
             && crate::chatgpt_auth::ChatGptAuth::new()?.status()?.is_none()
         {
-            anyhow::bail!("Sign in with ChatGPT first: maukode auth login");
+            anyhow::bail!(
+                "Sign in with ChatGPT first (Settings → ChatGPT, or `maukode auth login`)"
+            );
         }
 
         self.active_provider = provider.id;
