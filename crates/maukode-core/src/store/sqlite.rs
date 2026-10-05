@@ -63,6 +63,32 @@ pub struct CompactionAuditRecord {
     pub created_at: DateTime<Utc>,
 }
 
+fn is_busy(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(f, _)
+            if matches!(
+                f.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    )
+}
+
+/// Retry an operation that hit lock contention, backing off for up to ~10 seconds.
+fn retry_busy<T>(mut op: impl FnMut() -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut delay = std::time::Duration::from_millis(5);
+    loop {
+        match op() {
+            Err(e) if is_busy(&e) && std::time::Instant::now() < deadline => {
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(std::time::Duration::from_millis(100));
+            }
+            result => return result,
+        }
+    }
+}
+
 /// Structured provenance for a session, newest records first.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditReport {
@@ -118,13 +144,19 @@ impl SqliteSessionStore {
 
         // Several agents (and CLI/TUI processes) share this file: WAL lets readers run during a
         // write and the busy timeout turns brief contention into a wait instead of an error.
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;",
-        )?;
+        // The timeout must be installed first: switching to WAL takes a lock, and without a busy
+        // handler a concurrent opener fails immediately with "database is locked".
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // Even with a busy handler SQLite reports SQLITE_BUSY at once for some lock upgrades
+        // (it cannot wait without risking deadlock), so setup is retried explicitly.
+        retry_busy(|| {
+            conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
+        })?;
 
         // Initialize schema
-        conn.execute_batch(
-            "
+        retry_busy(|| {
+            conn.execute_batch(
+                "
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 directory TEXT NOT NULL DEFAULT '',
@@ -213,25 +245,30 @@ impl SqliteSessionStore {
                 FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             ",
-        )?;
+            )
+        })?;
 
-        // Safe migration if table previously existed without directory column
-        let _ = conn.execute(
-            "ALTER TABLE sessions ADD COLUMN directory TEXT NOT NULL DEFAULT '';",
-            [],
-        );
+        // Safe migrations for databases created by older versions. "duplicate column" just means
+        // the migration already ran; anything else (other than lock contention) is a real error.
         for ddl in [
+            "ALTER TABLE sessions ADD COLUMN directory TEXT NOT NULL DEFAULT '';",
             "ALTER TABLE sessions ADD COLUMN custom_title TEXT;",
             "ALTER TABLE sessions ADD COLUMN project_dir TEXT;",
             "ALTER TABLE sessions ADD COLUMN worktree_branch TEXT;",
             "ALTER TABLE sessions ADD COLUMN base_commit TEXT;",
         ] {
-            let _ = conn.execute(ddl, []);
+            match retry_busy(|| conn.execute(ddl, [])) {
+                Ok(_) => {}
+                Err(e) if e.to_string().contains("duplicate column name") => {}
+                Err(e) => return Err(e.into()),
+            }
         }
-        let _ = conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_directory ON sessions(directory);",
-            [],
-        );
+        retry_busy(|| {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_directory ON sessions(directory);",
+                [],
+            )
+        })?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -1041,6 +1078,29 @@ mod concurrency_tests {
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
             .unwrap();
         assert_eq!(mode, "wal");
+    }
+
+    /// Many processes/tests opening a brand-new database at once used to fail with "database is
+    /// locked" because the WAL switch ran before the busy timeout was installed.
+    #[test]
+    fn simultaneous_first_open_of_a_new_database_succeeds() {
+        for round in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(format!("fresh{round}.sqlite"));
+            let barrier = Arc::new(std::sync::Barrier::new(16));
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    let (path, barrier) = (path.clone(), Arc::clone(&barrier));
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        SqliteSessionStore::new(path).map(|_| ())
+                    })
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap().expect("open failed");
+            }
+        }
     }
 
     #[tokio::test]
