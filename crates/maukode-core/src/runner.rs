@@ -782,4 +782,42 @@ mod turn_tests {
         // Only the user prompt: no empty assistant message that would poison the next request.
         assert_eq!(messages.len(), 1);
     }
+
+    /// A gateway that reports `Finish(EndTurn)` alongside tool calls must not end the turn: the
+    /// runner keeps going until a response has no tool calls.
+    #[tokio::test]
+    async fn tool_calls_continue_even_if_provider_reports_stop() {
+        let call: Step = Ok(vec![
+            Ok(LLMEvent::ToolCallFinish {
+                tool_call: ToolCall {
+                    id: "1".into(),
+                    name: "missing_tool".into(),
+                    arguments: serde_json::json!({}),
+                },
+            }),
+            Ok(LLMEvent::Finish {
+                reason: FinishReason::EndTurn,
+            }),
+        ]);
+        let (events, result, messages, _) =
+            run(vec![call, text("all done", FinishReason::EndTurn)], 5).await;
+        assert!(result.is_ok());
+        // user, assistant(tool call), user(tool result), assistant(text)
+        assert_eq!(messages.len(), 4);
+        assert_eq!(stops(&events), vec![(StopReason::Completed, None)]);
+        let finishes = events
+            .iter()
+            .filter(|e| matches!(e, LLMEvent::Finish { .. }))
+            .count();
+        assert_eq!(finishes, 2, "the early Finish arrives before the turn ends");
+        let first_finish = events
+            .iter()
+            .position(|e| matches!(e, LLMEvent::Finish { .. }))
+            .unwrap();
+        let stop = events
+            .iter()
+            .position(|e| matches!(e, LLMEvent::TurnStopped { .. }))
+            .unwrap();
+        assert!(first_finish < stop);
+    }
 }
