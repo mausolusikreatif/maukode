@@ -15,7 +15,9 @@ export default defineConfig({
   reporter: [["list"]],
   globalSetup: "./e2e/global-setup.ts",
   webServer: {
-    command: "npx vite build && npx vite preview --port 4173 --strictPort",
+    // Bind IPv4 explicitly: `localhost` may resolve to ::1 first (Node 17+), so the readiness check
+    // against 127.0.0.1 would time out on hosts that list both addresses.
+    command: "npx vite build && npx vite preview --host 127.0.0.1 --port 4173 --strictPort",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

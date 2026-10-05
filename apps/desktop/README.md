@@ -18,7 +18,7 @@ apps/desktop
 ```sh
 cargo run -p maukode-cli -- server --bind 127.0.0.1:4096 --token dev   # terminal 1
 cd apps/desktop && npm install && npm run dev                           # terminal 2
-# open http://localhost:1420/?url=http://127.0.0.1:4096&token=dev
+# open http://127.0.0.1:1420/?url=http://127.0.0.1:4096&token=dev
 ```
 
 ## Tests
