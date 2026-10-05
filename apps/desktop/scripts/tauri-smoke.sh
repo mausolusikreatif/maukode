@@ -76,10 +76,11 @@ import -display "$DISPLAY" -window root "$SHOT"
 echo "screenshot: $SHOT"
 grep -qi "panic\|error while running" "$WORK/app.log" && fail "the app logged a failure"
 
-# The sidebar's connection indicator (top right of the sidebar) is green once connected.
-PIXEL="$(convert "$SHOT" -crop 1x1+262+22 +repage -depth 8 txt:- | tail -1 | grep -o '([0-9, ]*)' | tr -d '() ')"
-IFS=, read -r R G B _ <<<"$PIXEL"
-if ! { [ "${G:-0}" -ge $((${R:-0} + 30)) ] && [ "${G:-0}" -ge $((${B:-0} + 10)) ]; }; then
-  fail "UI does not look connected (indicator pixel rgb=$R,$G,$B; expected green)"
+# The sidebar's connection indicator (a small dot at the top of the sidebar) is green once
+# connected. Scan the whole sidebar header instead of one pixel so layout tweaks don't break this.
+GREEN="$(convert "$SHOT" -crop 264x56+0+0 +repage -depth 8 txt:- | grep -o '([0-9, ]*)' | tr -d '() ' |
+  awk -F, '$2 >= $1 + 30 && $2 >= $3 + 10 { n++ } END { print n + 0 }')"
+if [ "$GREEN" -lt 10 ]; then
+  fail "UI does not look connected (no green indicator in the sidebar header; $GREEN green pixels)"
 fi
 echo "SMOKE OK: shell started an authenticated daemon at $URL"
