@@ -12,7 +12,7 @@ pub struct DaemonInfo {
 }
 
 pub fn daemon_file_path() -> PathBuf {
-    if let Some(mut dir) = dirs::data_dir() {
+    if let Some(mut dir) = maukode_core::paths::data_dir() {
         dir.push("maukode");
         dir.push("daemon.json");
         dir
@@ -26,7 +26,7 @@ pub fn daemon_file_path() -> PathBuf {
 }
 
 pub fn daemon_log_path() -> PathBuf {
-    if let Some(mut dir) = dirs::data_dir() {
+    if let Some(mut dir) = maukode_core::paths::data_dir() {
         dir.push("maukode");
         dir.push("server.log");
         dir
@@ -119,9 +119,11 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
 
     let mut cmd = std::process::Command::new(&current_exe);
     cmd.arg("server").arg("--bind").arg(&bind_addr);
-    if let Some(ref t) = token {
-        cmd.arg("--token").arg(t);
-    }
+    // Via the environment, not argv: command lines are readable by every local user (`ps`).
+    match token {
+        Some(ref t) => cmd.env("MAUKODE_AUTH_TOKEN", t),
+        None => cmd.env_remove("MAUKODE_AUTH_TOKEN"),
+    };
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::from(log_file.try_clone()?))
         .stderr(std::process::Stdio::from(log_file));
@@ -176,7 +178,48 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
         let _ = std::fs::create_dir_all(parent);
     }
     let json = serde_json::to_string_pretty(&info)?;
-    let _ = std::fs::write(&daemon_file, json);
+    write_private(&daemon_file, &json)?;
 
     Ok(info)
+}
+
+/// Write a file only the current user can read: it holds the daemon's bearer token.
+fn write_private(path: &std::path::Path, contents: &str) -> Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    // `mode` only applies on creation; tighten a pre-existing file as well.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents.as_bytes())?;
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn daemon_file_is_private_even_when_it_already_existed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("daemon.json");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, "{\"token\":\"t\"}").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"token\":\"t\"}");
+    }
 }

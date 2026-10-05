@@ -41,7 +41,7 @@ impl McpManager {
 
         // 1. Global ~/.config/maukode/mcp.json or ~/.maukode/mcp.json
         let mut global_candidates = Vec::new();
-        if let Some(cfg_dir) = dirs::config_dir() {
+        if let Some(cfg_dir) = crate::paths::config_dir() {
             global_candidates.push(cfg_dir.join("maukode").join("mcp.json"));
         }
         if let Some(home_dir) = dirs::home_dir() {

@@ -28,6 +28,7 @@ pub struct ListSessionsQuery {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CreateSessionRequest {
     pub directory: Option<String>,
     pub title: Option<String>,
@@ -40,12 +41,14 @@ pub struct CreateSessionRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {
     Worktree,
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CreateSessionResponse {
     #[serde(flatten)]
     pub meta: maukode_protocol::SessionMetadata,
@@ -55,6 +58,7 @@ pub struct CreateSessionResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SessionListItem {
     #[serde(flatten)]
     pub summary: maukode_core::SessionSummary,
@@ -75,27 +79,57 @@ pub struct MessagesQuery {
     pub limit: Option<usize>,
 }
 
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct MessagesPage {
+    pub session_id: SessionId,
+    pub total: usize,
+    /// Index of `messages[0]` in the full history; pass it as `before` for the next page.
+    pub start: usize,
+    pub end: usize,
+    pub has_more: bool,
+    pub messages: Vec<Message>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct PermissionModeResponse {
+    pub mode: maukode_core::PermissionMode,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct AuditResponse {
+    pub session_id: SessionId,
+    pub summary: String,
+    pub report: maukode_core::store::sqlite::AuditReport,
+}
+
 const DEFAULT_PAGE: usize = 50;
 const MAX_PAGE: usize = 500;
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UpdateSessionRequest {
     /// New title; null or blank restores the automatic title.
     pub title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PromptRequest {
     pub prompt: String,
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SessionDetailResponse {
     pub id: SessionId,
     pub title: Option<String>,
     /// True while an agent turn is executing.
     pub running: bool,
     /// Sequence number of the newest event; pass to `/events?since=` to resume without gaps.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub last_event_seq: u64,
     pub pending_permissions: Vec<maukode_protocol::PermissionRequest>,
     pub provider: Option<String>,
@@ -327,14 +361,14 @@ pub async fn get_session_messages(
     let end = query.before.unwrap_or(total).min(total);
     let limit = query.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
     let start = end.saturating_sub(limit);
-    Ok(Json(json!({
-        "session_id": id,
-        "total": total,
-        "start": start,
-        "end": end,
-        "has_more": start > 0,
-        "messages": &session.messages[start..end],
-    })))
+    Ok(Json(MessagesPage {
+        session_id: id,
+        total,
+        start,
+        end,
+        has_more: start > 0,
+        messages: session.messages[start..end].to_vec(),
+    }))
 }
 
 pub async fn submit_prompt(
@@ -538,6 +572,7 @@ pub async fn cancel_prompt(
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SetPermissionModeRequest {
     pub mode: maukode_core::PermissionMode,
     /// With a session id only that session changes; without one the default for new sessions
@@ -558,7 +593,7 @@ pub async fn get_permission_mode(
         Some(id) => state.permission_manager_for(id).await.mode(),
         None => state.permission_manager.mode(),
     };
-    Json(json!({ "mode": mode }))
+    Json(PermissionModeResponse { mode })
 }
 
 pub async fn set_permission_mode(
@@ -603,6 +638,7 @@ pub async fn set_permission_mode(
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct RespondPermissionRequest {
     pub decision: maukode_protocol::PermissionDecision,
 }
@@ -683,6 +719,7 @@ pub async fn get_session_file_diff(
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UndoRequestPayload {
     pub turns: Option<usize>,
 }
@@ -900,9 +937,11 @@ pub async fn get_session_audit(
         .audit_report(id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(Json(
-        json!({ "session_id": id, "summary": summary, "report": report }),
-    ))
+    Ok(Json(AuditResponse {
+        session_id: id,
+        summary,
+        report,
+    }))
 }
 
 pub async fn update_session(
@@ -930,6 +969,7 @@ pub async fn update_session(
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SetSessionModelRequest {
     /// Defaults to the session's current provider.
     pub provider_id: Option<String>,
@@ -965,6 +1005,7 @@ pub async fn set_session_model(
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct WorktreeActionRequest {
     pub message: Option<String>,
 }

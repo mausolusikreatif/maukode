@@ -96,7 +96,7 @@ pub struct ChatGptAuth {
 
 impl ChatGptAuth {
     pub fn new() -> Result<Self> {
-        let path = dirs::config_dir()
+        let path = crate::paths::config_dir()
             .ok_or_else(|| anyhow!("Cannot locate config directory"))?
             .join("maukode/chatgpt_auth.json");
         Ok(Self::at_path(path))

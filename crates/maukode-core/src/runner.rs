@@ -34,6 +34,27 @@ impl Default for RunnerConfig {
 /// How many times a response cut off by the output limit is resumed automatically.
 const MAX_AUTO_CONTINUATIONS: usize = 2;
 
+/// Every tool call stored in history must have a matching result, or the next provider request
+/// is rejected. Build "cancelled" results for the calls (`(id, name)`) that never got one.
+fn cancelled_results(calls: &[(String, String)], answered: &[ContentPart]) -> Vec<ContentPart> {
+    calls
+        .iter()
+        .filter(|(id, _)| {
+            !answered
+                .iter()
+                .any(|p| matches!(p, ContentPart::ToolResult(r) if &r.tool_call_id == id))
+        })
+        .map(|(id, name)| {
+            ContentPart::ToolResult(ToolResult {
+                tool_call_id: id.clone(),
+                tool_name: name.clone(),
+                content: "Cancelled by user before this tool ran.".to_string(),
+                is_error: true,
+            })
+        })
+        .collect()
+}
+
 fn stopped(reason: StopReason, message: Option<String>) -> LLMEvent {
     LLMEvent::TurnStopped { reason, message }
 }
@@ -346,6 +367,16 @@ impl SessionRunner {
             // If the turn was cancelled mid-stream, stop after preserving partial output.
             if is_cancelled {
                 debug!("Turn cancelled by user mid-stream.");
+                if !tool_calls.is_empty() {
+                    let meta: Vec<(String, String)> = tool_calls
+                        .iter()
+                        .map(|c| (c.id.clone(), c.name.clone()))
+                        .collect();
+                    self.session.write().await.add_message(Message {
+                        role: Role::User,
+                        parts: cancelled_results(&meta, &[]),
+                    });
+                }
                 let _ = event_tx.send(LLMEvent::Finish {
                     reason: FinishReason::Cancelled,
                 });
@@ -394,17 +425,19 @@ impl SessionRunner {
 
             // Execute tools
             let mut tool_results = Vec::new();
+            let call_meta: Vec<(String, String)> = tool_calls
+                .iter()
+                .map(|c| (c.id.clone(), c.name.clone()))
+                .collect();
+            let mut cancelled = false;
             for call in tool_calls {
                 let mut keep_result_private = false;
-                if let Some(ref token) = cancellation_token {
-                    if token.is_cancelled() {
-                        let _ = event_tx.send(LLMEvent::Finish {
-                            reason: FinishReason::Cancelled,
-                        });
-                        let mut session = self.session.write().await;
-                        session.state = SessionState::Idle;
-                        return Ok((StopReason::Cancelled, None));
-                    }
+                if cancellation_token
+                    .as_ref()
+                    .is_some_and(|t| t.is_cancelled())
+                {
+                    cancelled = true;
+                    break;
                 }
 
                 info!("Executing tool: {} ({})", call.name, call.id);
@@ -480,21 +513,35 @@ impl SessionRunner {
                             description,
                         };
 
-                        let rx = perm_mgr.register_request(req_id).await;
+                        let rx = perm_mgr.register_request(req_id.clone()).await;
                         let _ = event_tx.send(LLMEvent::PermissionRequest(perm_req));
 
-                        // Wait for user's decision (timeout 5 minutes)
-                        let decision =
-                            match tokio::time::timeout(std::time::Duration::from_secs(300), rx)
-                                .await
-                            {
-                                Ok(Ok(d)) => d,
-                                Ok(Err(_)) => maukode_protocol::PermissionDecision::Deny,
-                                Err(_) => {
-                                    tracing::warn!("Permission request timed out");
-                                    maukode_protocol::PermissionDecision::Deny
+                        // Wait for the user's decision (5 minute timeout); Stop must not have to
+                        // wait for it.
+                        let decision = tokio::select! {
+                            biased;
+                            _ = async {
+                                match &cancellation_token {
+                                    Some(token) => token.cancelled().await,
+                                    None => futures::future::pending::<()>().await,
                                 }
-                            };
+                            } => {
+                                perm_mgr.forget_request(&req_id).await;
+                                cancelled = true;
+                                break;
+                            }
+                            waited = tokio::time::timeout(std::time::Duration::from_secs(300), rx) => {
+                                match waited {
+                                    Ok(Ok(d)) => d,
+                                    Ok(Err(_)) => maukode_protocol::PermissionDecision::Deny,
+                                    Err(_) => {
+                                        tracing::warn!("Permission request timed out");
+                                        perm_mgr.forget_request(&req_id).await;
+                                        maukode_protocol::PermissionDecision::Deny
+                                    }
+                                }
+                            }
+                        };
 
                         if let Some(store) = &self.permission_store {
                             let visibility =
@@ -556,12 +603,8 @@ impl SessionRunner {
                     tokio::select! {
                         biased;
                         _ = token.cancelled() => {
-                            let _ = event_tx.send(LLMEvent::Finish {
-                                reason: FinishReason::Cancelled,
-                            });
-                            let mut session = self.session.write().await;
-                            session.state = SessionState::Idle;
-                            return Ok((StopReason::Cancelled, None));
+                            cancelled = true;
+                            break;
                         }
                         res = self.tools.execute(&call.name, call.arguments) => res,
                     }
@@ -595,6 +638,22 @@ impl SessionRunner {
                 } else {
                     tool_results.push(ContentPart::ToolResult(tr));
                 }
+            }
+
+            if cancelled {
+                let extra = cancelled_results(&call_meta, &tool_results);
+                tool_results.extend(extra);
+                let mut session = self.session.write().await;
+                session.add_message(Message {
+                    role: Role::User,
+                    parts: tool_results,
+                });
+                session.state = SessionState::Idle;
+                drop(session);
+                let _ = event_tx.send(LLMEvent::Finish {
+                    reason: FinishReason::Cancelled,
+                });
+                return Ok((StopReason::Cancelled, None));
             }
 
             // Tool calls must have matching results in model history. Private results are replaced

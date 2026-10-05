@@ -1,3 +1,5 @@
+mod common;
+
 use maukode_server::{routes, ServerClient, ServerState};
 use std::path::Path;
 use std::sync::Arc;
@@ -5,6 +7,7 @@ use tempfile::tempdir;
 use tokio::net::TcpListener;
 
 async fn start_test_server(directory: &Path) -> (String, tokio::task::JoinHandle<()>) {
+    common::isolate_home();
     let state = Arc::new(
         ServerState::new(Some("secret123".to_string()), Some(directory.to_path_buf()))
             .await
@@ -206,6 +209,7 @@ async fn test_desktop_backend_hardening() {
 #[tokio::test]
 async fn test_tokenless_server_rejects_foreign_origin() {
     let temp_dir = tempdir().unwrap();
+    common::isolate_home();
     let state = Arc::new(
         ServerState::new(None, Some(temp_dir.path().to_path_buf()))
             .await
@@ -238,6 +242,7 @@ async fn test_tokenless_server_rejects_foreign_origin() {
 #[tokio::test]
 async fn test_sse_replay_session_mode_title_and_limits() {
     let temp_dir = tempdir().unwrap();
+    common::isolate_home();
     let state = Arc::new(
         ServerState::new(
             Some("secret123".to_string()),
@@ -399,6 +404,7 @@ struct Harness {
 
 impl Harness {
     async fn start(dir: &Path) -> Self {
+        common::isolate_home();
         let state = Arc::new(
             ServerState::new(None, Some(dir.to_path_buf()))
                 .await

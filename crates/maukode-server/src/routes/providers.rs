@@ -5,17 +5,19 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use maukode_core::ProviderConfig;
-use serde::Deserialize;
+use maukode_core::{ProviderConfig, ProviderKind};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SetActiveProviderRequest {
     pub provider_id: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SetActiveModelRequest {
     pub model: String,
 }
@@ -25,26 +27,51 @@ pub struct GetModelsQuery {
     pub provider: Option<String>,
 }
 
+/// A provider as shown to clients: stored secrets are never included.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct ProviderView {
+    pub id: String,
+    pub name: String,
+    pub kind: ProviderKind,
+    pub base_url: String,
+    pub has_api_key: bool,
+    pub default_model: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct ProvidersListResponse {
+    pub active_provider: String,
+    pub active_model: String,
+    pub providers: Vec<ProviderView>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct ModelsListResponse {
+    pub provider: String,
+    pub models: Vec<String>,
+}
+
 pub async fn list_providers(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let config = state.config.read().await;
-    // Never ship stored secrets to clients; expose only whether a key is set.
-    let providers: Vec<_> = config
-        .providers
-        .iter()
-        .map(|p| {
-            let mut value = serde_json::to_value(p).unwrap_or_default();
-            if let Some(obj) = value.as_object_mut() {
-                obj.insert("has_api_key".into(), json!(p.api_key.is_some()));
-                obj.insert("api_key".into(), serde_json::Value::Null);
-            }
-            value
-        })
-        .collect();
-    Json(json!({
-        "active_provider": config.active_provider,
-        "active_model": config.active_model,
-        "providers": providers,
-    }))
+    Json(ProvidersListResponse {
+        active_provider: config.active_provider.clone(),
+        active_model: config.active_model.clone(),
+        providers: config
+            .providers
+            .iter()
+            .map(|p| ProviderView {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                kind: p.kind.clone(),
+                base_url: p.base_url.clone(),
+                has_api_key: p.api_key.is_some(),
+                default_model: p.default_model.clone(),
+            })
+            .collect(),
+    })
 }
 
 pub async fn add_or_update_provider(
@@ -92,10 +119,10 @@ pub async fn list_models(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(json!({
-        "provider": target_provider,
-        "models": models,
-    })))
+    Ok(Json(ModelsListResponse {
+        provider: target_provider,
+        models,
+    }))
 }
 
 pub async fn set_active_model(
@@ -111,6 +138,7 @@ pub async fn set_active_model(
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SetAgentConfigRequest {
     pub max_steps: Option<usize>,
     pub max_tokens: Option<u32>,

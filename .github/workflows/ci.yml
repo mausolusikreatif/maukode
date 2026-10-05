@@ -16,5 +16,14 @@ jobs:
         run: cargo fmt --all --check
       - name: Test workspace and TUI behavior/performance smoke tests
         run: cargo test --workspace --locked
+      - name: TypeScript bindings are up to date
+        run: |
+          cargo test --locked -p maukode-protocol -p maukode-core -p maukode-server \
+            --features maukode-protocol/ts,maukode-core/ts,maukode-server/ts export_bindings
+          test -z "$(git status --porcelain -- apps/desktop/src/api/generated)" || {
+            git status --porcelain -- apps/desktop/src/api/generated
+            echo "Generated bindings are stale: regenerate and commit apps/desktop/src/api/generated"
+            exit 1
+          }
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings

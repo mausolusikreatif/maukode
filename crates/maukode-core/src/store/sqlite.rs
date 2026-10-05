@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SessionSummary {
     pub id: SessionId,
     pub directory: String,
@@ -26,8 +27,10 @@ pub struct SessionSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PermissionAuditRecord {
     pub session_id: SessionId,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub turn_id: i64,
     pub tool_call_id: String,
     pub tool_name: String,
@@ -40,8 +43,10 @@ pub struct PermissionAuditRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PermissionModeAuditRecord {
     pub session_id: SessionId,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub turn_id: i64,
     pub previous_mode: PermissionMode,
     pub new_mode: PermissionMode,
@@ -50,9 +55,12 @@ pub struct PermissionModeAuditRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CompactionAuditRecord {
     pub session_id: SessionId,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub source_turn_start: i64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub source_turn_end: i64,
     pub original_message_count: usize,
     pub compacted_message_count: usize,
@@ -91,6 +99,7 @@ fn retry_busy<T>(mut op: impl FnMut() -> rusqlite::Result<T>) -> rusqlite::Resul
 
 /// Structured provenance for a session, newest records first.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct AuditReport {
     pub permission_count: usize,
     pub mode_change_count: usize,
@@ -120,7 +129,7 @@ impl SqliteSessionStore {
     }
 
     pub fn default_db_path() -> PathBuf {
-        if let Some(mut dir) = dirs::data_dir() {
+        if let Some(mut dir) = crate::paths::data_dir() {
             dir.push("maukode");
             dir.push("maukode.db");
             dir

@@ -61,6 +61,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Utilities
+ts-rs = { version = "12", features = ["serde-json-impl", "chrono-impl", "uuid-impl"] }
 uuid = { version = "1.12", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.11"

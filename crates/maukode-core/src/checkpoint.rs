@@ -54,7 +54,7 @@ impl CheckpointManager {
             canonical_root.to_string_lossy().hash(&mut hasher);
             let dir_hash = format!("{:016x}", hasher.finish());
 
-            let base = dirs::data_dir()
+            let base = crate::paths::data_dir()
                 .unwrap_or_else(|| PathBuf::from("/tmp"))
                 .join("maukode")
                 .join("shadow_git")

@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 static MERGE_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct WorktreeInfo {
     /// Repository the worktree was created from (its top-level directory).
     pub project_dir: PathBuf,
@@ -25,6 +26,7 @@ pub struct WorktreeInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct WorktreeStatus {
     #[serde(flatten)]
     pub info: WorktreeInfo,
@@ -35,6 +37,7 @@ pub struct WorktreeStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum MergeOutcome {
     Merged { commit: String },
@@ -81,7 +84,7 @@ async fn git_env(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<Stri
 }
 
 pub fn worktrees_root() -> PathBuf {
-    dirs::data_dir()
+    crate::paths::data_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("maukode")
         .join("worktrees")

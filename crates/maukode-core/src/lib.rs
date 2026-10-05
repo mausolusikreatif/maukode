@@ -6,6 +6,7 @@ pub mod config;
 pub mod context;
 pub mod mcp;
 pub mod memory;
+pub mod paths;
 pub mod permission;
 pub mod repo_map;
 pub mod runner;

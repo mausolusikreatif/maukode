@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 /// Agent loop limits applied to every turn started through the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct AgentConfig {
     #[serde(default = "default_max_steps")]
     pub max_steps: usize,
@@ -32,6 +33,7 @@ impl Default for AgentConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     Anthropic,
@@ -76,6 +78,7 @@ impl Default for SecurityConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ProviderConfig {
     pub id: String,
     pub name: String,
@@ -213,7 +216,7 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn config_path() -> PathBuf {
-        if let Some(mut dir) = dirs::config_dir() {
+        if let Some(mut dir) = crate::paths::config_dir() {
             dir.push("maukode");
             dir.push("config.json");
             dir
