@@ -27,3 +27,27 @@ jobs:
           }
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Build the daemon used by the UI tests
+        run: cargo build -p maukode-cli --locked
+      - name: Install, typecheck, unit test
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: End-to-end UI tests (real daemon, scripted LLM gateway)
+        working-directory: apps/desktop
+        run: |
+          npx playwright install --with-deps chromium
+          CI=1 npx playwright test
