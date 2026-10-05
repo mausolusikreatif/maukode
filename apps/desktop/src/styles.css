@@ -97,12 +97,28 @@ h3 { font-size: 12px; }
 .nav button.active { background: var(--hover); color: var(--text); border-color: transparent; }
 .sidebar nav.list { overflow-y: auto; flex: 1; min-height: 0; padding: 4px; }
 .sidebar nav:not(.list) { overflow-y: auto; flex: 1; min-height: 0; padding: 0 4px; }
-.sidebar h3 { margin: 14px 8px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; margin-bottom: 1px; padding: 6px 10px 6px 12px; background: transparent; border-color: transparent; border-radius: 8px; }
+.project { margin-top: 10px; }
+.project-head { display: flex; align-items: center; gap: 2px; }
+.project-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border-color: transparent; background: transparent; padding: 4px 8px; font-weight: 600; font-size: 12.5px; text-align: left; }
+.project-toggle:hover:not(:disabled) { background: var(--hover); border-color: transparent; }
+.project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chev { flex: none; font-size: 10px; color: var(--muted); transition: transform 0.12s; }
+.chev.closed { transform: rotate(-90deg); }
+.folder { flex: none; color: var(--muted); font-size: 12px; }
+.count { margin-left: auto; flex: none; font-size: 11px; font-weight: 400; color: var(--muted); }
+.project-add { flex: none; width: 24px; height: 24px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; opacity: 0; }
+.project-head:hover .project-add, .project-add:focus-visible { opacity: 1; }
+.project-add:hover:not(:disabled) { background: var(--hover); border-color: transparent; color: var(--text); }
+.dot.warn { background: var(--warn); }
+.session { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; padding: 6px 10px 6px 12px; background: transparent; border: 1px solid transparent; border-radius: 8px; margin-bottom: 1px; }
 .session:hover:not(:disabled) { background: var(--hover); border-color: transparent; }
-.session.active { background: var(--hover); border-color: transparent; }
+.session.active { background: var(--hover); }
 .session.active::before { content: ""; position: absolute; left: 3px; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
 .session .title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.project .session { margin-left: 14px; width: calc(100% - 14px); }
+.project .session.active::before { left: 3px; }
+.session-meta { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--muted); max-width: 100%; overflow: hidden; white-space: nowrap; }
+.session-meta .branch { font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; }
 .badges { display: flex; gap: 4px; }
 .badges:empty { display: none; }
 .badge { font-size: 11px; line-height: 16px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
@@ -120,8 +136,13 @@ h3 { font-size: 12px; }
 .session-view { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--bg); }
 .session-head { flex: none; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .session-head > div:first-child { min-width: 0; flex: 1 1 220px; }
+.crumbs { display: flex; gap: 6px; margin-bottom: 3px; min-width: 0; }
+.chip { font-size: 11px; line-height: 18px; padding: 0 8px; border-radius: 6px; background: var(--hover); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+.project-chip { color: var(--text); font-weight: 500; }
+.branch-chip { font-family: var(--mono); }
 .session-head strong { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-head .small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; }
+.session-head > div:first-child { display: flex; flex-direction: column; }
+.session-head .small { font: 11px var(--mono); }
 .session-head .row { flex: none; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .session-head select { width: auto; padding: 4px 8px; }
 

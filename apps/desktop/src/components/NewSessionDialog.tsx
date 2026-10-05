@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useApp } from "../state/store";
 
-export function NewSessionDialog({ onClose }: { onClose: () => void }) {
+export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void; initialDir?: string | null }) {
   const { providers, sessions, createSession } = useApp();
-  const [directory, setDirectory] = useState(sessions[0]?.project_dir ?? sessions[0]?.directory ?? "");
+  const [directory, setDirectory] = useState(initialDir ?? sessions[0]?.project_dir ?? sessions[0]?.directory ?? "");
   const [isolate, setIsolate] = useState(true);
   const [provider, setProvider] = useState(providers?.active_provider ?? "");
   const [model, setModel] = useState("");

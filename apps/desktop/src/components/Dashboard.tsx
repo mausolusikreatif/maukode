@@ -1,11 +1,7 @@
 import { needsContinue } from "../api/types";
 import type { SessionListItem } from "../api/types";
+import { baseName } from "../state/format";
 import { useApp } from "../state/store";
-
-function baseName(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
-}
 
 function ago(iso: string): string {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
