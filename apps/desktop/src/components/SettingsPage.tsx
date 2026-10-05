@@ -90,11 +90,27 @@ function GeneralSection() {
       <div className="row">
         <label>
           Max steps per turn
-          <input data-testid="max-steps" type="number" min={1} max={200} value={steps} onChange={(e) => setSteps(e.target.value)} />
+          <input
+            data-testid="max-steps"
+            type="number"
+            min={1}
+            max={200}
+            value={steps}
+            disabled={!agent}
+            onChange={(e) => setSteps(e.target.value)}
+          />
         </label>
         <label>
           Max output tokens
-          <input data-testid="max-tokens" type="number" min={1} max={200000} value={tokens} onChange={(e) => setTokens(e.target.value)} />
+          <input
+            data-testid="max-tokens"
+            type="number"
+            min={1}
+            max={200000}
+            value={tokens}
+            disabled={!agent}
+            onChange={(e) => setTokens(e.target.value)}
+          />
         </label>
         <button
           data-testid="save-limits"

@@ -123,6 +123,21 @@ test("settings: default approval mode and agent limits persist across reloads", 
   }
 });
 
+test("settings: agent-limit fields wait for the server's values instead of being overwritten by them", async ({ page }) => {
+  const repo = gitRepo();
+  await connectAndCreate(page, repo);
+  // Slow the config response down: a late reply used to clobber whatever had already been typed.
+  await page.route("**/api/v1/config/agent", async (route) => {
+    if (route.request().method() === "GET") await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await openSettings(page);
+  await expect(page.getByTestId("max-steps")).toBeDisabled();
+  await expect(page.getByTestId("save-limits")).toBeDisabled();
+  await expect(page.getByTestId("max-steps")).toBeEnabled({ timeout: 10_000 });
+  await expect(page.getByTestId("max-steps")).toHaveValue(/^\d+$/);
+});
+
 test("settings: add, edit and remove a provider without ever seeing its key", async ({ page }) => {
   const repo = gitRepo();
   await connectAndCreate(page, repo);
