@@ -5,6 +5,7 @@ export type { ContentPart } from "./generated/ContentPart";
 export type { CreateSessionRequest } from "./generated/CreateSessionRequest";
 export type { CreateSessionResponse } from "./generated/CreateSessionResponse";
 export type { DiffResponse } from "./generated/DiffResponse";
+export type { FileDiffEntry } from "./generated/FileDiffEntry";
 export type { FileDiffListResponse } from "./generated/FileDiffListResponse";
 export type { FileDiffResponse } from "./generated/FileDiffResponse";
 export type { GlobalEvent } from "./generated/GlobalEvent";

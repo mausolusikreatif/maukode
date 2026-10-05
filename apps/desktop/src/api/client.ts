@@ -1,6 +1,7 @@
 import { SseParser } from "./sse";
 import type {
   AuditResponse,
+  Checkpoint,
   CreateSessionRequest,
   CreateSessionResponse,
   FileDiffListResponse,
@@ -13,6 +14,7 @@ import type {
   ProvidersListResponse,
   SessionDetailResponse,
   SessionListItem,
+  UndoResponse,
   WorktreeStatus,
 } from "./types";
 
@@ -93,8 +95,12 @@ export class ApiClient {
     const q = `limit=${limit}${before === undefined ? "" : `&before=${before}`}`;
     return this.request<MessagesPage>("GET", `/api/v1/sessions/${id}/messages?${q}`);
   }
-  deleteSession(id: string) {
-    return this.request<void>("DELETE", `/api/v1/sessions/${id}`);
+  deleteSession(id: string, opts: { cleanupWorktree?: boolean; deleteBranch?: boolean } = {}) {
+    const q = new URLSearchParams();
+    if (opts.cleanupWorktree !== undefined) q.set("cleanup_worktree", String(opts.cleanupWorktree));
+    if (opts.deleteBranch !== undefined) q.set("delete_branch", String(opts.deleteBranch));
+    const qs = q.toString();
+    return this.request<void>("DELETE", `/api/v1/sessions/${id}${qs ? `?${qs}` : ""}`);
   }
   renameSession(id: string, title: string | null) {
     return this.request<void>("PATCH", `/api/v1/sessions/${id}`, { title });
@@ -133,6 +139,12 @@ export class ApiClient {
   }
   fileDiff(id: string, path: string) {
     return this.request<FileDiffResponse>("GET", `/api/v1/sessions/${id}/diff/file?path=${enc(path)}`);
+  }
+  checkpoints(id: string) {
+    return this.request<Checkpoint[]>("GET", `/api/v1/sessions/${id}/checkpoints`);
+  }
+  undo(id: string, turns?: number) {
+    return this.request<UndoResponse>("POST", `/api/v1/sessions/${id}/undo`, { turns });
   }
   worktree(id: string) {
     return this.request<WorktreeStatus>("GET", `/api/v1/sessions/${id}/worktree`);

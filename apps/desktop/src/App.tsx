@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import type { PermissionMode } from "./api/types";
 import { Composer } from "./components/Composer";
+import { DeleteDialog } from "./components/DeleteDialog";
 import { ConnectScreen } from "./components/ConnectScreen";
 import { Prompts } from "./components/Prompts";
+import { ReviewPanel } from "./components/ReviewPanel";
 import { Sidebar } from "./components/Sidebar";
 import { Thread } from "./components/Thread";
 import { getBootstrap, type Bootstrap } from "./platform";
@@ -54,40 +56,43 @@ function ModeSelect({ sessionId }: { sessionId: string }) {
 }
 
 function SessionView() {
-  const { activeId, meta, threads, deleteSession } = useApp();
+  const { activeId, meta, threads, review, toggleReview } = useApp();
+  const [deleting, setDeleting] = useState(false);
   if (!activeId) {
     return <main className="empty muted">Select a session or create a new one.</main>;
   }
   const thread = threads[activeId] ?? emptyThread();
   return (
-    <main className="session-view">
-      <header className="session-head">
-        <div>
-          <strong data-testid="session-title">{meta?.title || "Session"}</strong>
-          <div className="muted small">
-            {meta?.provider}/{meta?.model}
-            {meta?.branch && <> · ⎇ {meta.branch}</>} · {meta?.directory}
+    <div className={`session-layout ${review.open ? "with-review" : ""}`}>
+      <main className="session-view">
+        <header className="session-head">
+          <div>
+            <strong data-testid="session-title">{meta?.title || "Session"}</strong>
+            <div className="muted small">
+              {meta?.provider}/{meta?.model}
+              {meta?.branch && <> · ⎇ {meta.branch}</>} · {meta?.directory}
+            </div>
           </div>
-        </div>
-        <div className="row">
-          <ModeSelect sessionId={activeId} />
-          <span data-testid="run-state" className={`badge ${thread.running ? "run" : ""}`}>
-            {thread.running ? "running" : "idle"}
-          </span>
-          <button
-            className="link"
-            onClick={() => {
-              if (confirm("Delete this session? Its history is removed permanently.")) void deleteSession(activeId);
-            }}
-          >
-            Delete
-          </button>
-        </div>
-      </header>
-      <Thread thread={thread} />
-      <Prompts thread={thread} />
-      <Composer running={thread.running} />
-    </main>
+          <div className="row">
+            <ModeSelect sessionId={activeId} />
+            <button data-testid="toggle-review" className={review.open ? "primary" : ""} onClick={() => void toggleReview()}>
+              Changes{review.files.length > 0 ? ` (${review.files.length})` : ""}
+            </button>
+            <span data-testid="run-state" className={`badge ${thread.running ? "run" : ""}`}>
+              {thread.running ? "running" : "idle"}
+            </span>
+            <button data-testid="delete-session" className="link" onClick={() => setDeleting(true)}>
+              Delete
+            </button>
+          </div>
+        </header>
+        <Thread thread={thread} />
+        <Prompts thread={thread} />
+        <Composer running={thread.running} />
+      </main>
+      {review.open && <ReviewPanel running={thread.running} />}
+      {deleting && <DeleteDialog sessionId={activeId} onClose={() => setDeleting(false)} />}
+    </div>
   );
 }
 

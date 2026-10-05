@@ -13,9 +13,9 @@ export const env = () => ({
 const json = (o: unknown) => JSON.stringify(o);
 export const text = (t: string) => json({ choices: [{ delta: { content: t } }] });
 export const finish = (reason: string) => json({ choices: [{ finish_reason: reason }] });
-export const toolCall = (id: string, name: string, args: object) =>
+export const toolCall = (id: string, name: string, args: object, index = 0) =>
   json({
-    choices: [{ delta: { tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }],
+    choices: [{ delta: { tool_calls: [{ index, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }],
   });
 
 export type Step = { sse: string[] } | { status: number };
@@ -62,6 +62,11 @@ export async function connectAndCreate(page: Page, dir: string, opts: { isolate?
   await page.getByTestId("connect-token").fill(token);
   await page.getByTestId("connect-button").click();
   await expect(page.getByTestId("new-session")).toBeVisible();
+  await createSession(page, dir, opts);
+}
+
+/** Open the "New session" dialog and create a session in `dir` (already connected). */
+export async function createSession(page: Page, dir: string, opts: { isolate?: boolean } = {}) {
   await page.getByTestId("new-session").click();
   await page.getByTestId("dir-input").fill(dir);
   const iso = page.getByTestId("isolation-checkbox");
@@ -75,4 +80,10 @@ export async function connectAndCreate(page: Page, dir: string, opts: { isolate?
 export async function send(page: Page, prompt: string) {
   await page.getByTestId("composer-input").fill(prompt);
   await page.getByTestId("send-button").click();
+}
+
+/** Send a prompt and wait for the turn to finish. */
+export async function runTurn(page: Page, prompt: string) {
+  await send(page, prompt);
+  await expect(page.getByTestId("run-state")).toHaveText("idle");
 }

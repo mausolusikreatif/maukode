@@ -47,3 +47,12 @@ CI fails if `src/api/generated` is stale.
 the [Tauri prerequisites](https://tauri.app/start/prerequisites/). It was written against the
 Tauri 2 API but has **not been compiled yet** (no WebView libraries in the authoring
 environment); a Windows `.ico` and macOS `.icns` still need to be generated with `tauri icon`.
+
+## Reviewing agent work
+
+The **Changes** button opens a panel with the files the agent changed (against the checkpoint taken
+before the session's first turn), a line-numbered diff per file, **Undo last turn** (restores files;
+the conversation is kept), and — for sessions started with worktree isolation — commit and merge
+controls. Merging uses `--no-ff` into whatever branch the project currently has checked out; a
+conflict is rolled back and reported, and a project with uncommitted changes to tracked files is
+refused. Deleting a worktree session offers to keep (default) or discard its branch.

@@ -100,3 +100,30 @@ pre { margin: 0; padding: 8px 10px; background: var(--code-bg); border-radius: 6
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: grid; place-items: center; z-index: 10; }
 .modal { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: min(480px, 92vw); }
 .modal h2 { margin-top: 0; }
+
+.session-layout { display: grid; grid-template-columns: 1fr; min-width: 0; height: 100%; }
+.session-layout.with-review { grid-template-columns: minmax(320px, 1fr) minmax(360px, 46%); }
+.review { border-left: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; height: 100%; background: var(--bg); }
+.review-head { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.review-head .link { margin-left: auto; }
+.review-files { max-height: 28%; overflow: auto; border-bottom: 1px solid var(--border); }
+.diff-file { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; width: 100%; text-align: left; border: 0; border-radius: 0; background: transparent; padding: 4px 12px; }
+.diff-file.active { background: var(--panel); }
+.diff-file .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.status { font: 600 11px ui-monospace, monospace; text-align: center; border-radius: 4px; padding: 1px 0; }
+.status.added { color: var(--ok); } .status.deleted { color: var(--error); } .status.modified { color: var(--warn); }
+.plus { color: var(--ok); } .minus { color: var(--error); }
+.review-diff { flex: 1; overflow: auto; min-height: 80px; }
+.diff-view { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hunk-head { background: var(--panel); color: var(--muted); padding: 2px 12px; position: sticky; top: 0; }
+.dline { display: grid; grid-template-columns: 44px 44px 14px 1fr; white-space: pre-wrap; word-break: break-word; }
+.dline .no { color: var(--muted); text-align: right; padding-right: 6px; user-select: none; }
+.dline.add { background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.dline.del { background: color-mix(in srgb, var(--error) 16%, transparent); }
+.dline.meta { color: var(--muted); font-style: italic; }
+.dline code { font: inherit; }
+.review-actions { border-top: 1px solid var(--border); padding: 10px 12px; display: grid; gap: 10px; }
+.worktree { display: grid; gap: 6px; }
+.worktree h4 { margin: 0; }
+.notice.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.small { font-size: 12px; }
