@@ -8,6 +8,10 @@ license = "MIT OR Apache-2.0"
 # excluded from the root workspace and CI's `cargo test --workspace`.
 [workspace]
 
+[features]
+# Serve the bundled UI instead of the dev-server URL; required for release builds.
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

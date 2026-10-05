@@ -14,6 +14,22 @@ struct DaemonInfo {
     token: Option<String>,
 }
 
+/// The daemon executable: `MAUKODE_BIN`, else a `maukode` shipped next to this app (release
+/// bundles), else whatever `maukode` is on `PATH`.
+fn daemon_binary() -> String {
+    if let Ok(bin) = std::env::var("MAUKODE_BIN") {
+        return bin;
+    }
+    if let Some(sibling) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("maukode")))
+        .filter(|p| p.is_file())
+    {
+        return sibling.to_string_lossy().into_owned();
+    }
+    "maukode".to_string()
+}
+
 /// Locate the MauKode daemon, starting it if needed, and hand its URL and token to the UI.
 ///
 /// The daemon is a separate, persistent process (`maukode server start`): agents keep running
@@ -33,7 +49,7 @@ async fn daemon_info() -> Result<DaemonInfo, String> {
         });
     }
 
-    let bin = std::env::var("MAUKODE_BIN").unwrap_or_else(|_| "maukode".to_string());
+    let bin = daemon_binary();
     let token = format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),

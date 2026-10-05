@@ -3,6 +3,9 @@
 # that the UI, through Tauri IPC (`daemon_info`), makes the shell start an authenticated daemon
 # and that the app then shows the connected UI.
 #
+# SMOKE_RELEASE=1 tests the release binary instead (bundled UI, no dev server); build it first with
+# `cargo build --release --features custom-protocol` in src-tauri.
+#
 # Needs: the Tauri Linux prerequisites, xvfb, imagemagick, and a built `maukode` CLI
 # (`cargo build -p maukode-cli`, or set MAUKODE_BIN).
 set -euo pipefail
@@ -38,14 +41,21 @@ Xvfb "$DISPLAY" -screen 0 1280x800x24 >/dev/null 2>&1 &
 pids+=($!)
 wait_for "virtual display" xdpyinfo -display "$DISPLAY"
 
-# Debug builds load the dev server URL from tauri.conf.json.
-# Run vite directly (not via npx) so the recorded pid is the process we need to stop.
-./node_modules/.bin/vite --host 127.0.0.1 --port 1420 --strictPort >"$WORK/vite.log" 2>&1 &
-pids+=($!)
-wait_for "vite dev server" curl -sf http://127.0.0.1:1420/
-
-(cd src-tauri && cargo build --locked)
-src-tauri/target/debug/maukode-desktop >"$WORK/app.log" 2>&1 &
+if [ -n "${SMOKE_RELEASE:-}" ]; then
+  APP="${SMOKE_APP:-src-tauri/target/release/maukode-desktop}"
+  [ -x "$APP" ] || fail "release binary not found: $APP"
+else
+  # Debug builds load the dev server URL from tauri.conf.json.
+  # Run vite directly (not via npx) so the recorded pid is the process we need to stop.
+  ./node_modules/.bin/vite --host 127.0.0.1 --port 1420 --strictPort >"$WORK/vite.log" 2>&1 &
+  pids+=($!)
+  wait_for "vite dev server" curl -sf http://127.0.0.1:1420/
+  (cd src-tauri && cargo build --locked)
+  APP="src-tauri/target/debug/maukode-desktop"
+fi
+# Release: the app must find the daemon next to itself, so hide MAUKODE_BIN from it.
+if [ -n "${SMOKE_RELEASE:-}" ]; then env -u MAUKODE_BIN "$APP" >"$WORK/app.log" 2>&1 &
+else "$APP" >"$WORK/app.log" 2>&1 & fi
 pids+=($!)
 
 DAEMON_JSON="$MAUKODE_HOME/data/maukode/daemon.json"
