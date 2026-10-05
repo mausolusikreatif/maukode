@@ -51,3 +51,49 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           CI=1 npx playwright test
+
+  tauri:
+    # Compiles the desktop shell and runs it under a virtual display: the UI must reach the Rust
+    # side over Tauri IPC and make it start an authenticated daemon.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev xvfb xauth imagemagick x11-utils libgl1-mesa-dri
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: tauri-${{ runner.os }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+      - name: Build the UI bundle and the daemon
+        run: |
+          cargo build -p maukode-cli --locked
+          cd apps/desktop
+          npm ci
+          npm run build
+      - name: Clippy (desktop shell)
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --locked -- -D warnings
+      - name: Run the shell and check it starts an authenticated daemon
+        working-directory: apps/desktop
+        run: SMOKE_SCREENSHOT="$PWD/shell.png" bash scripts/tauri-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shell-screenshot
+          path: apps/desktop/shell.png
+          if-no-files-found: ignore

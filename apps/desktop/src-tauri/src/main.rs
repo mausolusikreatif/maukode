@@ -2,6 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Serialize;
+use tokio::sync::Mutex;
+
+/// The UI may ask for the daemon from several places at once (e.g. two windows, or React's
+/// double-invoked effects in development). Only one caller at a time may look for / start it.
+static DAEMON_START: Mutex<()> = Mutex::const_new(());
 
 #[derive(Serialize)]
 struct DaemonInfo {
@@ -17,6 +22,7 @@ struct DaemonInfo {
 /// owner-only `daemon.json`; it never appears on a command line.
 #[tauri::command]
 async fn daemon_info() -> Result<DaemonInfo, String> {
+    let _single_flight = DAEMON_START.lock().await;
     if let Some(info) = maukode_server::get_daemon_status()
         .await
         .map_err(|e| e.to_string())?
@@ -33,10 +39,11 @@ async fn daemon_info() -> Result<DaemonInfo, String> {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     );
-    let status = std::process::Command::new(&bin)
+    let status = tokio::process::Command::new(&bin)
         .args(["server", "start"])
         .env("MAUKODE_AUTH_TOKEN", &token)
         .status()
+        .await
         .map_err(|e| format!("could not run `{bin}` (set MAUKODE_BIN): {e}"))?;
     if !status.success() {
         return Err(format!("`{bin} server start` failed with {status}"));
