@@ -12,12 +12,26 @@ function prettyArgs(args: string): string {
   }
 }
 
+/** One-line summary of what a tool call acts on (path, command, pattern…). */
+function argHint(args: string): string {
+  try {
+    const o = JSON.parse(args) as Record<string, unknown>;
+    for (const k of ["path", "file_path", "command", "pattern", "query", "url", "directory"]) {
+      if (typeof o[k] === "string") return (o[k] as string).split("\n")[0];
+    }
+  } catch {
+    /* partial JSON while streaming */
+  }
+  return "";
+}
+
 function ToolCard({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
   const label = { running: "running…", done: "done", error: "failed", private: "shown only to you" }[item.status];
   return (
     <details data-testid="tool-card" className={`tool ${item.status}`}>
       <summary>
         <span className="tool-name">{item.name || "tool"}</span>
+        <span className="tool-hint">{argHint(item.args ?? "")}</span>
         <span data-testid="tool-status" className="tool-status">{label}</span>
       </summary>
       {item.args && <pre className="args">{prettyArgs(item.args)}</pre>}
@@ -76,6 +90,12 @@ export function Thread({ thread }: { thread: ThreadState }) {
         <button data-testid="load-older" className="link" disabled={loadingOlder} onClick={() => void loadOlder()}>
           {loadingOlder ? "Loading…" : `Load earlier messages (${meta.loadedStart} more)`}
         </button>
+      )}
+      {thread.items.length === 0 && !thread.running && (!meta || meta.loadedStart === 0) && (
+        <div className="thread-empty">
+          <strong>What should the agent do?</strong>
+          Describe a task below. It works in this project and asks before risky actions.
+        </div>
       )}
       {thread.items.map((item) => (
         <Item key={item.id} item={item} />

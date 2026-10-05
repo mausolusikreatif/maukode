@@ -48,7 +48,7 @@ export function Sidebar() {
           Settings
         </button>
       </div>
-      <nav>
+      <nav className="list">
         {groups.map(([project, items]) => (
           <section key={project}>
             <h3 title={project}>{baseName(project)}</h3>

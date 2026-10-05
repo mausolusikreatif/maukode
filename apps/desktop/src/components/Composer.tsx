@@ -17,7 +17,7 @@ export function Composer({ running }: { running: boolean }) {
       <textarea
         data-testid="composer-input"
         value={text}
-        placeholder="Ask the agent to do something… (Enter to send, Shift+Enter for a new line)"
+        placeholder="Message the agent…  Enter to send, Shift+Enter for a new line"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -25,7 +25,7 @@ export function Composer({ running }: { running: boolean }) {
             submit();
           }
         }}
-        rows={3}
+        rows={1}
       />
       {running ? (
         <button data-testid="stop-button" className="danger" onClick={() => void stop()}>
