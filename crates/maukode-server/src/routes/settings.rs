@@ -69,7 +69,8 @@ pub struct McpQuery {
     pub directory: Option<String>,
 }
 
-/// Status of the configured MCP servers as seen from a directory (project-local config applies).
+/// Configured MCP servers as seen from a directory (project-local config applies). Never starts
+/// a server: `directory` is caller-chosen and its `mcp.json` defines commands.
 pub async fn list_mcp(
     State(state): State<Arc<ServerState>>,
     Query(query): Query<McpQuery>,
@@ -79,6 +80,9 @@ pub async fn list_mcp(
         .map(PathBuf::from)
         .unwrap_or_else(|| state.default_dir.clone());
     let config = state.config.read().await;
-    let servers = state.mcp_manager.list_server_statuses(&dir, &config).await;
+    let servers = state
+        .mcp_manager
+        .list_configured_statuses(&dir, &config)
+        .await;
     Json(maukode_protocol::McpListResponse { servers })
 }

@@ -31,7 +31,11 @@ impl Default for ServerConfig {
 }
 
 pub async fn run_server(config: ServerConfig) -> Result<()> {
-    let state = Arc::new(ServerState::new(config.auth_token.clone(), config.default_dir).await?);
+    let mut state = ServerState::new(config.auth_token.clone(), config.default_dir).await?;
+    if !config.bind_addr.ip().is_loopback() {
+        state.enforce_local_host = false;
+    }
+    let state = Arc::new(state);
     let app = routes::create_router(state);
 
     let listener = TcpListener::bind(config.bind_addr).await?;

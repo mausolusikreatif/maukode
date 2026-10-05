@@ -15,6 +15,8 @@ type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<serde_json:
 
 pub struct McpClient {
     name: String,
+    /// Identifies the command this client was started with (see [`McpClient::signature_of`]).
+    signature: String,
     stdin_tx: mpsc::Sender<String>,
     pending_requests: PendingRequests,
     next_id: AtomicU64,
@@ -22,6 +24,19 @@ pub struct McpClient {
 }
 
 impl McpClient {
+    /// Fingerprint of what a server runs (command and arguments, not secrets in `env`), so a
+    /// cached connection is only reused for an identical definition.
+    pub fn signature_of(config: &McpServerConfig) -> String {
+        std::iter::once(config.command.as_str())
+            .chain(config.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join("\0")
+    }
+
+    pub fn signature(&self) -> &str {
+        &self.signature
+    }
+
     pub async fn connect(
         name: impl Into<String>,
         config: &McpServerConfig,
@@ -129,6 +144,7 @@ impl McpClient {
             pending_requests,
             next_id: AtomicU64::new(1),
             child: Arc::new(Mutex::new(Some(child))),
+            signature: Self::signature_of(config),
         };
 
         // 4. Perform MCP initialize handshake

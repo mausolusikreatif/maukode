@@ -718,3 +718,57 @@ async fn test_message_pagination_model_pinning_and_global_events() {
         .await;
     assert_eq!(bad_create.status(), 400);
 }
+
+#[tokio::test]
+async fn tokenless_server_rejects_dns_rebinding_hosts() {
+    let temp_dir = tempdir().unwrap();
+    common::isolate_home();
+    let state = Arc::new(
+        ServerState::new(None, Some(temp_dir.path().to_path_buf()))
+            .await
+            .unwrap(),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}");
+    tokio::spawn(async move {
+        axum::serve(listener, routes::create_router(state))
+            .await
+            .unwrap();
+    });
+    let http = reqwest::Client::new();
+    let get = |host: &str| {
+        http.get(format!("{url}/api/v1/sessions?all=true"))
+            .header("host", host.to_string())
+            .send()
+    };
+
+    // A page on evil.example re-resolved to 127.0.0.1 is same-origin, so it sends no Origin on
+    // GETs; the Host header is what gives it away.
+    for host in [
+        format!("evil.example:{port}"),
+        "localhost.evil.example".to_string(),
+        "127.0.0.1.evil.example".to_string(),
+    ] {
+        assert_eq!(get(&host).await.unwrap().status(), 403, "{host}");
+    }
+    for host in [
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+        format!("[::1]:{port}"),
+        "localhost".to_string(),
+        format!("LocalHost:{port}"),
+        "localhost.".to_string(),
+    ] {
+        assert!(get(&host).await.unwrap().status().is_success(), "{host}");
+    }
+    // A local Origin does not excuse a foreign Host.
+    let both = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/api/v1/sessions?all=true"))
+        .header("origin", "http://localhost:1420")
+        .header("host", "evil.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(both.status(), 403);
+}

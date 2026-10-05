@@ -261,3 +261,55 @@ async fn default_approval_mode_persists_and_applies_to_new_sessions_only() {
     assert_eq!(s, 200);
     assert!(v["servers"].is_array());
 }
+
+/// Listing MCP servers is a GET and must never run the configured command (a project's
+/// `.maukode/mcp.json` is untrusted until an agent — or an explicit POST — connects it).
+#[tokio::test]
+async fn listing_mcp_servers_never_spawns_them_but_connect_does() {
+    let _serial = SERIAL.lock().await;
+    let app = App::start().await;
+    let project = tempfile::tempdir().unwrap();
+    let marker = project.path().join("spawned");
+    std::fs::create_dir_all(project.path().join(".maukode")).unwrap();
+    std::fs::write(
+        project.path().join(".maukode/mcp.json"),
+        json!({"mcpServers": {"probe": {
+            "command": "sh",
+            "args": ["-c", format!("touch {}; sleep 1", marker.display())]
+        }}})
+        .to_string(),
+    )
+    .unwrap();
+
+    let (s, v) = app
+        .call(
+            M::POST,
+            "/api/v1/sessions",
+            Some(json!({"directory": project.path()})),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+
+    let (s, v) = app
+        .call(M::GET, &format!("/api/v1/sessions/{id}/mcp"), None)
+        .await;
+    assert_eq!(s, 200);
+    let probe = v["servers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["name"] == "probe")
+        .expect("configured server is listed");
+    assert_eq!(probe["status"], "not_started");
+    assert!(!marker.exists(), "GET must not spawn the server");
+
+    let (_, _) = app.call(M::GET, "/api/v1/mcp", None).await;
+    assert!(!marker.exists(), "GET /mcp must not spawn the server");
+
+    let (s, _) = app
+        .call(M::POST, &format!("/api/v1/sessions/{id}/mcp"), None)
+        .await;
+    assert_eq!(s, 200);
+    assert!(marker.exists(), "explicit connect spawns the server");
+}

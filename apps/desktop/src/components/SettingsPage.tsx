@@ -452,12 +452,12 @@ function ReadOnlySection() {
   return (
     <>
       <Section id="mcp" title="MCP servers">
-        <p className="muted small">Read-only: servers run commands, so they are configured in the config file (<code>mcpServers</code>) or a project’s <code>.maukode/mcp.json</code>.</p>
+        <p className="muted small">Read-only. Servers start when an agent first uses them (listing never starts one); they run commands, so they are configured in the config file (<code>mcpServers</code>) or a project’s <code>.maukode/mcp.json</code>.</p>
         {mcp?.servers.length === 0 && <p className="muted">None configured.</p>}
         {mcp?.servers.map((s) => (
           <div key={s.name} className="provider-row">
             <div>
-              <strong>{s.name}</strong> <code>{s.command}</code> <span className="badge">{s.status}</span>
+              <strong>{s.name}</strong> <code>{s.command}</code> <span className="badge">{s.status === "not_started" ? "not started" : s.status}</span>
               <div className="muted small">{s.tools.length} tool{s.tools.length === 1 ? "" : "s"}{s.error && <> · {s.error}</>}</div>
             </div>
           </div>

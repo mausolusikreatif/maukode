@@ -405,13 +405,14 @@ impl ServerClient {
         Ok(resp.json().await?)
     }
 
+    /// Connect the session's MCP servers (spawns them) and report their status.
     pub async fn list_mcp_servers(
         &self,
         session_id: SessionId,
     ) -> Result<maukode_protocol::McpListResponse> {
         let resp = self
             .http
-            .get(format!(
+            .post(format!(
                 "{}/api/v1/sessions/{session_id}/mcp",
                 self.base_url
             ))

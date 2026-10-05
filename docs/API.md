@@ -19,7 +19,7 @@ bodies with a 4xx/5xx status.
 | GET/POST | `/providers` | POST: `ProviderConfig` | upsert; `api_key`: `null` keeps the stored key, `""` removes it |
 | DELETE | `/providers/{id}` | | `409` for the active provider, `404` if unknown |
 | GET/PUT | `/config/security` | PUT `{permission_mode}` | GET also returns jail/allowed paths/bash whitelist (read-only); PUT persists the default approval mode for **new** sessions |
-| GET | `/mcp` | `?directory=` | status of configured MCP servers (read-only: they run commands, so they are configured in files) |
+| GET | `/mcp` | `?directory=` | configured MCP servers; **never starts one** (`not_started` until an agent connects it). Read-only: they run commands, so they are configured in files |
 | GET | `/auth/chatgpt` | | `{email, accounts[]}`; never tokens |
 | POST | `/auth/chatgpt/login` | `{new_account?, open_browser?}` | starts Sign in with ChatGPT → `{attempt_id, url, browser_opened}`. The loopback callback listener lives in the daemon, so the approving browser must run on the **same machine** |
 | GET/DELETE | `/auth/chatgpt/login/{attempt_id}` | | poll `{state: pending\|succeeded\|failed, email?, error?}` / cancel (closes the listener) |
@@ -44,7 +44,7 @@ bodies with a 4xx/5xx status.
 | GET | `/sessions/{id}/events` | `?since=` or `Last-Event-ID` | SSE, below |
 | POST | `/sessions/{id}/permissions/{request_id}` | `{decision}` | `allow_once \| allow_session \| allow_private \| deny` |
 | GET | `/sessions/{id}/audit` | | `{summary, report}`; `report` is structured (latest 200 each) |
-| GET | `/sessions/{id}/diff`, `/checkpoints`, `/map`, `/mcp` | map: `?subpath=&query=&max_tokens=` | diff/checkpoints are computed in the session's own workspace and survive daemon restarts |
+| GET | `/sessions/{id}/diff`, `/checkpoints`, `/map`, `/mcp` (non-spawning) | map: `?subpath=&query=&max_tokens=` | diff/checkpoints are computed in the session's own workspace and survive daemon restarts |
 | GET | `/sessions/{id}/diff/files` | `?turn=` | `{files:[{path,status,insertions,deletions,binary}]}` |
 | GET | `/sessions/{id}/diff/file` | `?path=&turn=` | unified diff of one file (literal path, capped at 1 MiB, `truncated` flag) |
 | POST | `/sessions/{id}/undo` | `{turns?}` | `409` while a turn is running |
@@ -98,3 +98,8 @@ Each message: `id: <seq>` and `data: <LLMEvent JSON>` (`type` tag: `text_delta`,
 - A slow consumer is caught up from the log rather than having events dropped.
 - Browser `EventSource` sends `Last-Event-ID` automatically on reconnect — but cannot set an
   `Authorization` header, so token mode needs a `fetch`-based SSE reader.
+
+
+`POST /sessions/{id}/mcp` connects (spawns) the session's configured MCP servers and returns their status.
+
+**Tokenless mode:** requests with a non-loopback `Origin`, or (on loopback binds) a non-loopback `Host`, get 403 (CSRF / DNS-rebinding guard).

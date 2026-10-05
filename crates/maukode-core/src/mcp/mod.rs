@@ -195,6 +195,59 @@ impl McpManager {
         statuses
     }
 
+    /// Report configured servers **without starting any**. Only servers that an agent turn has
+    /// already connected are queried for their tools; the rest are `not_started`. Unlike
+    /// [`Self::list_server_statuses`] this has no side effects, so it is safe behind a plain GET.
+    pub async fn list_configured_statuses(
+        &self,
+        cwd: &Path,
+        app_config: &AppConfig,
+    ) -> Vec<McpServerStatus> {
+        let configs = Self::load_server_configs(cwd, app_config).await;
+        let mut statuses = Vec::new();
+        for (name, config) in configs {
+            let command = format!("{} {}", config.command, config.args.join(" "))
+                .trim()
+                .to_string();
+            let connected = self.clients.read().await.get(&name).cloned();
+            // A client started from a different command (config edited since) is stale: report
+            // it as not started rather than showing the old server's tools under the new config.
+            let connected = connected.filter(|c| c.signature() == McpClient::signature_of(&config));
+            let (status, tools, error) = match connected {
+                Some(client) => match tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    client.list_tools(),
+                )
+                .await
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("timed out")))
+                {
+                    Ok(tools) => (
+                        "connected",
+                        tools
+                            .into_iter()
+                            .map(|t| McpToolInfo {
+                                name: format!("mcp__{}__{}", name, t.name),
+                                description: t.description.unwrap_or_default(),
+                            })
+                            .collect(),
+                        None,
+                    ),
+                    Err(e) => ("error", Vec::new(), Some(format!("tools/list failed: {e}"))),
+                },
+                None => ("not_started", Vec::new(), None),
+            };
+            statuses.push(McpServerStatus {
+                name,
+                command,
+                status: status.to_string(),
+                tools,
+                error,
+            });
+        }
+        statuses.sort_by(|a, b| a.name.cmp(&b.name));
+        statuses
+    }
+
     /// Shutdown all running MCP server subprocesses
     pub async fn shutdown_all(&self) {
         let mut guard = self.clients.write().await;

@@ -138,6 +138,9 @@ pub struct ServerState {
     pub global_events: Arc<EventChannel<GlobalEvent>>,
     pub mcp_manager: Arc<maukode_core::McpManager>,
     pub auth_token: Option<String>,
+    /// Reject requests whose `Host` is not a loopback name (DNS-rebinding guard). Only meaningful
+    /// without a token on a loopback bind; `run_server` turns it off for other bind addresses.
+    pub enforce_local_host: bool,
     pub default_dir: PathBuf,
 }
 
@@ -168,6 +171,7 @@ impl ServerState {
             checkpoint_managers: Arc::new(RwLock::new(HashMap::new())),
             global_events: Arc::new(EventChannel::new()),
             mcp_manager,
+            enforce_local_host: auth_token.is_none(),
             auth_token,
             default_dir: dir,
         })
