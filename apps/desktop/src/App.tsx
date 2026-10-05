@@ -11,7 +11,7 @@ import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar } from "./components/Sidebar";
 import { Thread } from "./components/Thread";
 import { getBootstrap, type Bootstrap } from "./platform";
-import { baseName, shortBranch } from "./state/format";
+import { baseName } from "./state/format";
 import { useApp } from "./state/store";
 import { titleFor } from "./state/notify";
 import { emptyThread } from "./state/thread";
@@ -74,7 +74,7 @@ function SessionView() {
           <div>
             <div className="crumbs" title={meta?.projectDir ?? meta?.directory}>
               <span className="chip project-chip">▤ {baseName(meta?.projectDir ?? meta?.directory ?? "")}</span>
-              {meta?.branch && <span className="chip branch-chip">⎇ {shortBranch(meta.branch)}</span>}
+              {meta?.branch && <span className="chip branch-chip">⎇ {meta.branch}</span>}
             </div>
             <strong data-testid="session-title">{meta?.title || "Session"}</strong>
             <span className="small muted">{meta?.provider}/{meta?.model}</span>
