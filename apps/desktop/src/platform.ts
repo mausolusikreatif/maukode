@@ -44,7 +44,7 @@ export function saveBootstrap(b: Bootstrap): void {
 }
 
 export async function pickDirectory(defaultPath?: string): Promise<string | null> {
-  if (!window.__TAURI_INTERNALS__) return null;
+  if (typeof window === "undefined" || !(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return null;
   const { open } = await import("@tauri-apps/plugin-dialog");
   const selected = await open({
     directory: true,
@@ -56,7 +56,7 @@ export async function pickDirectory(defaultPath?: string): Promise<string | null
 }
 
 export function isDesktop(): boolean {
-  return Boolean(window.__TAURI_INTERNALS__);
+  return typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 }
 
 export function forgetBootstrap(): void {
@@ -77,7 +77,9 @@ export async function focusWindow(): Promise<void> {
       /* ignore */
     }
   }
-  window.focus();
+  if (typeof window !== "undefined" && typeof window.focus === "function") {
+    window.focus();
+  }
 }
 
 export interface NativeNotificationOptions {
@@ -142,14 +144,18 @@ export async function openInEditor(
   }
 
   // Browser fallback: attempt custom URL protocol scheme
-  try {
-    const protocol = editor === "cursor" ? "cursor" : "vscode";
-    window.open(`${protocol}://file/${encodeURI(path)}`);
-    return { success: true };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: msg };
+  if (typeof window !== "undefined" && typeof window.open === "function") {
+    try {
+      const protocol = editor === "cursor" ? "cursor" : "vscode";
+      window.open(`${protocol}://file/${encodeURI(path)}`);
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
   }
+
+  return { success: false, error: "Window environment is not available" };
 }
 
 /**

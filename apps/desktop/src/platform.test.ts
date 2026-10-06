@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   focusWindow,
   isDesktop,
@@ -8,6 +8,17 @@ import {
 } from "./platform";
 
 describe("platform native helpers", () => {
+  beforeEach(() => {
+    (globalThis as unknown as { window?: { open: unknown; focus: unknown } }).window = {
+      open: vi.fn(),
+      focus: vi.fn(),
+    };
+  });
+
+  afterEach(() => {
+    delete (globalThis as unknown as { window?: unknown }).window;
+  });
+
   it("detects whether running in desktop tauri shell", () => {
     expect(isDesktop()).toBe(false);
   });
@@ -21,7 +32,6 @@ describe("platform native helpers", () => {
     const cursorRes = await openInEditor("/path/to/project", "cursor");
     expect(cursorRes.success).toBe(true);
     expect(openSpy).toHaveBeenCalledWith("cursor://file/%2Fpath%2Fto%2Fproject");
-    openSpy.mockRestore();
   });
 
   it("handles revealInFileManager gracefully in browser mode", async () => {
@@ -34,7 +44,6 @@ describe("platform native helpers", () => {
     const focusSpy = vi.spyOn(window, "focus").mockImplementation(() => undefined);
     await focusWindow();
     expect(focusSpy).toHaveBeenCalled();
-    focusSpy.mockRestore();
   });
 
   it("showNotification dispatches with onClick callback", () => {
