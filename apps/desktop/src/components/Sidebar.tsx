@@ -2,15 +2,23 @@ import { useMemo, useState } from "react";
 import type { SessionListItem } from "../api/types";
 import { baseName, shortAgo } from "../state/format";
 import { useApp } from "../state/store";
-import { NewSessionDialog } from "./NewSessionDialog";
 
 function projectOf(s: SessionListItem): string {
   return s.project_dir ?? s.directory;
 }
 
 export function Sidebar() {
-  const { sessions, activeId, openSession, connection, view, goHome, openSettings } = useApp();
-  const [creating, setCreating] = useState<string | null | false>(false);
+  const {
+    sessions,
+    activeId,
+    openSession,
+    connection,
+    view,
+    goHome,
+    openSettings,
+    openNewSession,
+    toggleShortcuts,
+  } = useApp();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (key: string) =>
     setCollapsed((c) => {
@@ -38,9 +46,20 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-head">
         <strong>MauKode</strong>
-        <span data-testid="connection" className={`dot ${connection}`} title={connection} />
+        <div className="row">
+          <button
+            type="button"
+            className="link icon-btn"
+            title="Keyboard shortcuts (?)"
+            data-testid="btn-shortcuts"
+            onClick={toggleShortcuts}
+          >
+            ?
+          </button>
+          <span data-testid="connection" className={`dot ${connection}`} title={connection} />
+        </div>
       </div>
-      <button data-testid="new-session" className="primary" onClick={() => setCreating(null)}>
+      <button data-testid="new-session" className="primary" onClick={() => openNewSession(null)}>
         New session
       </button>
       <div className="summary muted" data-testid="summary">
@@ -68,7 +87,7 @@ export function Sidebar() {
                   {closed && attention && <span className="dot warn" />}
                   <span className="count">{items.length}</span>
                 </button>
-                <button className="project-add" title={`New session in ${baseName(project)}`} aria-label={`New session in ${baseName(project)}`} onClick={() => setCreating(project)}>
+                <button className="project-add" title={`New session in ${baseName(project)}`} aria-label={`New session in ${baseName(project)}`} onClick={() => openNewSession(project)}>
                   +
                 </button>
               </div>
@@ -104,7 +123,6 @@ export function Sidebar() {
         })}
         {sessions.length === 0 && <p className="muted pad">No sessions yet.</p>}
       </nav>
-      {creating !== false && <NewSessionDialog initialDir={creating} onClose={() => setCreating(false)} />}
     </aside>
   );
 }

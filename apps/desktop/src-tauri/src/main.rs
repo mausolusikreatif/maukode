@@ -77,10 +77,121 @@ async fn daemon_info() -> Result<DaemonInfo, String> {
     }
 }
 
+/// Bring the application window to the foreground and focus it.
+#[tauri::command]
+async fn focus_window(window: tauri::Window) -> Result<(), String> {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// Open a path in an external code editor (e.g. VS Code or Cursor).
+#[tauri::command]
+async fn open_in_editor(path: String, editor: Option<String>) -> Result<(), String> {
+    let ed = editor.as_deref().unwrap_or("code");
+    let bin = match ed {
+        "cursor" => "cursor",
+        _ => "code",
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        tokio::process::Command::new("cmd")
+            .args(["/c", bin, &path])
+            .spawn()
+            .map_err(|e| format!("failed to launch {bin} for {path}: {e}"))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        tokio::process::Command::new(bin)
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("failed to launch {bin} for {path}: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Reveal a file or folder in the operating system's native file manager.
+#[tauri::command]
+async fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = tokio::process::Command::new("explorer");
+        if p.is_file() {
+            cmd.arg(format!("/select,{}", path));
+        } else {
+            cmd.arg(&path);
+        }
+        cmd.spawn().map_err(|e| format!("failed to reveal in Explorer: {e}"))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = tokio::process::Command::new("open");
+        if p.is_file() {
+            cmd.arg("-R").arg(&path);
+        } else {
+            cmd.arg(&path);
+        }
+        cmd.spawn().map_err(|e| format!("failed to reveal in Finder: {e}"))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let target = if p.is_file() {
+            p.parent().unwrap_or(p).to_string_lossy().to_string()
+        } else {
+            path
+        };
+        tokio::process::Command::new("xdg-open")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| format!("failed to open file manager: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Send a native system notification where supported.
+#[tauri::command]
+async fn send_notification(title: String, body: String) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = tokio::process::Command::new("notify-send")
+            .args(["-a", "MauKode", &title, &body])
+            .spawn();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            r#"display notification "{}" with title "{}""#,
+            body.replace('"', "\\\""),
+            title.replace('"', "\\\"")
+        );
+        let _ = tokio::process::Command::new("osascript")
+            .args(["-e", &script])
+            .spawn();
+    }
+
+    let _ = (&title, &body);
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![daemon_info])
+        .invoke_handler(tauri::generate_handler![
+            daemon_info,
+            focus_window,
+            open_in_editor,
+            reveal_in_file_manager,
+            send_notification,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running the MauKode desktop app");
 }

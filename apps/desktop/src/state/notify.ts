@@ -1,5 +1,6 @@
 import type { GlobalEvent, SessionListItem, StopReason } from "../api/types";
 import { needsContinue } from "../api/types";
+import { showNotification } from "../platform";
 
 export interface Notice {
   title: string;
@@ -93,6 +94,9 @@ export function disableNotifications(): void {
 
 export function showNotice(n: Notice, onClick?: () => void): void {
   if (!notificationsSupported() || Notification.permission !== "granted") return;
-  const note = new Notification(n.title, { body: n.body });
-  if (onClick) note.onclick = () => onClick();
+  showNotification({
+    title: n.title,
+    body: n.body,
+    onClick,
+  });
 }

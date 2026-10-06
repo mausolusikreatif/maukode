@@ -66,3 +66,112 @@ export function forgetBootstrap(): void {
     /* ignore */
   }
 }
+
+/** Focus the application window, unminimizing and bringing it to the front if running as desktop app. */
+export async function focusWindow(): Promise<void> {
+  if (isDesktop()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("focus_window");
+    } catch {
+      /* ignore */
+    }
+  }
+  window.focus();
+}
+
+export interface NativeNotificationOptions {
+  title: string;
+  body: string;
+  sessionId?: string;
+  onClick?: () => void;
+}
+
+/**
+ * Dispatch a notification across native desktop and web.
+ * Dispatches to OS notifications where supported and sets up click handling to focus window.
+ */
+export function showNotification(options: NativeNotificationOptions): void {
+  // Native desktop notification dispatch if running inside Tauri
+  if (isDesktop()) {
+    void (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("send_notification", {
+          title: options.title,
+          body: options.body,
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+  }
+
+  // Web Notification API (supported in browsers and WebViews with permission)
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    try {
+      const note = new Notification(options.title, { body: options.body });
+      if (options.onClick) {
+        note.onclick = () => {
+          void focusWindow();
+          options.onClick?.();
+        };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Open a file or repository directory in an external code editor (VS Code or Cursor).
+ */
+export async function openInEditor(
+  path: string,
+  editor: "code" | "cursor" = "code"
+): Promise<{ success: boolean; error?: string }> {
+  if (isDesktop()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_in_editor", { path, editor });
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
+  }
+
+  // Browser fallback: attempt custom URL protocol scheme
+  try {
+    const protocol = editor === "cursor" ? "cursor" : "vscode";
+    window.open(`${protocol}://file/${encodeURI(path)}`);
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Reveal a file or directory in the operating system's native file manager.
+ */
+export async function revealInFileManager(
+  path: string
+): Promise<{ success: boolean; error?: string }> {
+  if (isDesktop()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("reveal_in_file_manager", { path });
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
+  }
+
+  return {
+    success: false,
+    error: "Revealing in file manager is only available in the desktop application.",
+  };
+}
+
