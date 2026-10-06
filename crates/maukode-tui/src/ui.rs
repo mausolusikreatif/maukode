@@ -24,33 +24,75 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .min(6)
         .min(size.height.saturating_sub(6))
         .max(1);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let plan_height = if app.show_plan && app.active_plan.is_some() {
+        let count = app.active_plan.as_ref().unwrap().steps.len();
+        (count as u16 + 2).min(7).max(3)
+    } else {
+        0
+    };
+
+    let constraints = if plan_height > 0 {
+        vec![
+            Constraint::Length(1),              // Minimalist telemetry status bar
+            Constraint::Length(plan_height),    // Plan timeline checklist widget
+            Constraint::Min(4),                 // Chat viewport
+            Constraint::Length(input_rows + 2), // Divider, wrapped prompt, hints
+        ]
+    } else {
+        vec![
             Constraint::Length(1),              // Minimalist telemetry status bar
             Constraint::Min(4),                 // Chat viewport
             Constraint::Length(input_rows + 2), // Divider, wrapped prompt, hints
-        ])
+        ]
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(size);
 
-    draw_header(f, app, chunks[0]);
-    draw_messages(
-        f,
-        &app.items,
-        &mut app.render_cache,
-        &mut app.scroll,
-        &mut app.max_scroll,
-        app.auto_scroll,
-        chunks[1],
-    );
-    draw_input(
-        f,
-        &app.input,
-        app.cursor_pos,
-        app.is_running,
-        app.spinner(),
-        chunks[2],
-    );
+    if plan_height > 0 {
+        draw_header(f, app, chunks[0]);
+        if let Some(ref plan) = app.active_plan {
+            draw_plan_widget(f, plan, chunks[1]);
+        }
+        draw_messages(
+            f,
+            &app.items,
+            &mut app.render_cache,
+            &mut app.scroll,
+            &mut app.max_scroll,
+            app.auto_scroll,
+            chunks[2],
+        );
+        draw_input(
+            f,
+            &app.input,
+            app.cursor_pos,
+            app.is_running,
+            app.spinner(),
+            chunks[3],
+        );
+    } else {
+        draw_header(f, app, chunks[0]);
+        draw_messages(
+            f,
+            &app.items,
+            &mut app.render_cache,
+            &mut app.scroll,
+            &mut app.max_scroll,
+            app.auto_scroll,
+            chunks[1],
+        );
+        draw_input(
+            f,
+            &app.input,
+            app.cursor_pos,
+            app.is_running,
+            app.spinner(),
+            chunks[2],
+        );
+    }
 
     // Active modal overlays
     let mut permission_max_scroll = None;
@@ -99,6 +141,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         ActiveModal::Help => {
             draw_help_modal(f);
+        }
+        ActiveModal::SubagentViewer {
+            selected_idx,
+            scroll,
+        } => {
+            draw_subagent_modal(f, &app.subagents, *selected_idx, *scroll);
         }
         ActiveModal::PermissionConfirmation { request, scroll } => {
             permission_max_scroll = Some(draw_permission_modal(f, request, *scroll));
@@ -279,6 +327,110 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
                     Span::styled("... (preview truncated)", theme::dim_style()),
                 ]));
             }
+            lines.push(Line::from(""));
+        }
+        ChatRole::Subagent {
+            id: _,
+            profile_name,
+            goal,
+            status,
+            step,
+            last_action,
+            tokens_used,
+            summary,
+        } => {
+            let (badge, status_style) = match status {
+                maukode_protocol::SubagentStatus::Running => (
+                    "◉ Running",
+                    Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                ),
+                maukode_protocol::SubagentStatus::Completed => (
+                    "✓ Completed",
+                    Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+                ),
+                maukode_protocol::SubagentStatus::Failed => (
+                    "✗ Failed",
+                    Style::default()
+                        .fg(COLOR_AMBER)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                maukode_protocol::SubagentStatus::Cancelled => ("⊘ Cancelled", theme::dim_style()),
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled("┌─ 🤖 Subagent: ", theme::brand_style()),
+                Span::styled(
+                    profile_name.clone(),
+                    Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!(" [{badge}] "), status_style),
+                Span::styled("─".repeat(20), theme::border_style()),
+                Span::styled("┐", theme::border_style()),
+            ]));
+
+            lines.push(Line::from(vec![
+                Span::styled("│ ", theme::border_style()),
+                Span::styled("Goal: ", theme::dim_style()),
+                Span::styled(goal.clone(), theme::text_style()),
+            ]));
+
+            match status {
+                maukode_protocol::SubagentStatus::Running => {
+                    lines.push(Line::from(vec![
+                        Span::styled("│ ", theme::border_style()),
+                        Span::styled("Status: ", theme::dim_style()),
+                        Span::styled(format!("step {step} • {last_action}"), theme::text_style()),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled("│ ", theme::border_style()),
+                        Span::styled("Tokens: ", theme::dim_style()),
+                        Span::styled(format!("{tokens_used} tokens used"), theme::muted_style()),
+                        Span::raw("   "),
+                        Span::styled("[/subagents or F3 to inspect]", theme::dim_style()),
+                    ]));
+                }
+                maukode_protocol::SubagentStatus::Completed => {
+                    if let Some(sum) = summary {
+                        let first_line = sum.lines().next().unwrap_or(sum.as_str());
+                        lines.push(Line::from(vec![
+                            Span::styled("│ ", theme::border_style()),
+                            Span::styled("Summary: ", theme::dim_style()),
+                            Span::styled(first_line.to_string(), theme::text_style()),
+                        ]));
+                    }
+                    lines.push(Line::from(vec![
+                        Span::styled("│ ", theme::border_style()),
+                        Span::styled("Tokens: ", theme::dim_style()),
+                        Span::styled(
+                            format!("{tokens_used} tokens used • finished"),
+                            theme::muted_style(),
+                        ),
+                        Span::raw("   "),
+                        Span::styled("[/subagents or F3 to inspect trace]", theme::dim_style()),
+                    ]));
+                }
+                maukode_protocol::SubagentStatus::Failed
+                | maukode_protocol::SubagentStatus::Cancelled => {
+                    if let Some(sum) = summary {
+                        lines.push(Line::from(vec![
+                            Span::styled("│ ", theme::border_style()),
+                            Span::styled("Result: ", theme::dim_style()),
+                            Span::styled(sum.clone(), theme::error_style()),
+                        ]));
+                    }
+                    lines.push(Line::from(vec![
+                        Span::styled("│ ", theme::border_style()),
+                        Span::styled("Tokens: ", theme::dim_style()),
+                        Span::styled(format!("{tokens_used} tokens used"), theme::muted_style()),
+                    ]));
+                }
+            }
+
+            lines.push(Line::from(vec![
+                Span::styled("└─", theme::border_style()),
+                Span::styled("─".repeat(40), theme::border_style()),
+                Span::styled("┘", theme::border_style()),
+            ]));
             lines.push(Line::from(""));
         }
         ChatRole::System => {
@@ -1098,6 +1250,26 @@ fn draw_help_modal(f: &mut Frame) {
             Span::styled("Switch working directory on the fly", theme::text_style()),
         ]),
         Line::from(vec![
+            Span::styled(
+                "/plan           ",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Toggle active plan checklist widget (F2)",
+                theme::text_style(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "/subagents      ",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Inspect child subagent traces and status (F3)",
+                theme::text_style(),
+            ),
+        ]),
+        Line::from(vec![
             Span::styled("/clear          ", theme::dim_style()),
             Span::styled(
                 "Clear the current conversation viewport",
@@ -1579,6 +1751,220 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
     );
 }
 
+fn draw_plan_widget(f: &mut Frame, plan: &maukode_protocol::Plan, area: Rect) {
+    let completed_count = plan
+        .steps
+        .iter()
+        .filter(|s| s.status == maukode_protocol::StepStatus::Completed)
+        .count();
+    let total_count = plan.steps.len();
+
+    let title = if let Some(ref t) = plan.title {
+        format!(" 📋 Plan: {t} [{completed_count}/{total_count}] ")
+    } else {
+        format!(" 📋 Active Plan [{completed_count}/{total_count}] ")
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::border_style())
+        .title(Span::styled(
+            title,
+            Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut lines = Vec::new();
+    for (i, step) in plan.steps.iter().enumerate() {
+        let (icon, style) = match step.status {
+            maukode_protocol::StepStatus::Completed => ("[✓]", Style::default().fg(COLOR_MINT)),
+            maukode_protocol::StepStatus::InProgress => (
+                "[◉]",
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            maukode_protocol::StepStatus::Pending => ("[○]", theme::dim_style()),
+            maukode_protocol::StepStatus::Failed => ("[✗]", Style::default().fg(COLOR_AMBER)),
+        };
+
+        let step_title_style = if step.status == maukode_protocol::StepStatus::Completed {
+            theme::muted_style()
+        } else {
+            theme::text_style()
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {icon} "), style),
+            Span::styled(format!("{}. ", i + 1), theme::dim_style()),
+            Span::styled(&step.title, step_title_style),
+        ]));
+    }
+
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_subagent_modal(
+    f: &mut Frame,
+    subagents: &[crate::app::SubagentSessionState],
+    selected_idx: usize,
+    scroll: usize,
+) {
+    let area = centered_rect(88, 78, f.area());
+    f.render_widget(Clear, area);
+
+    let total_agents = subagents.len();
+    let active_agent = subagents.get(selected_idx);
+
+    let title = format!(
+        " 🤖 Subagent Trace Inspector [Agent {}/{total_agents}] ",
+        selected_idx.saturating_add(1)
+    );
+
+    let outer_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_CYAN))
+        .title(Span::styled(title, theme::brand_style()));
+
+    let inner = outer_block.inner(area);
+    f.render_widget(outer_block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(4),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    // 0. Agent selection tabs
+    let mut tab_spans = Vec::new();
+    for (i, agent) in subagents.iter().enumerate() {
+        let is_current = i == selected_idx;
+        let status_mark = match agent.status {
+            maukode_protocol::SubagentStatus::Running => "◉",
+            maukode_protocol::SubagentStatus::Completed => "✓",
+            maukode_protocol::SubagentStatus::Failed => "✗",
+            maukode_protocol::SubagentStatus::Cancelled => "⊘",
+        };
+        let label = format!(" [{}: {} ({status_mark})] ", i + 1, agent.profile_name);
+        let tab_style = if is_current {
+            Style::default()
+                .fg(COLOR_BG)
+                .bg(COLOR_CYAN)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            theme::dim_style()
+        };
+        tab_spans.push(Span::styled(label, tab_style));
+        tab_spans.push(Span::raw(" "));
+    }
+    f.render_widget(Paragraph::new(Line::from(tab_spans)), chunks[0]);
+
+    // 1. Agent overview metadata
+    if let Some(agent) = active_agent {
+        let (status_str, status_color) = match agent.status {
+            maukode_protocol::SubagentStatus::Running => ("◉ Running", COLOR_CYAN),
+            maukode_protocol::SubagentStatus::Completed => ("✓ Completed", COLOR_MINT),
+            maukode_protocol::SubagentStatus::Failed => ("✗ Failed", COLOR_AMBER),
+            maukode_protocol::SubagentStatus::Cancelled => ("⊘ Cancelled", COLOR_MUTED),
+        };
+        let meta_lines = vec![
+            Line::from(vec![
+                Span::styled("Role: ", theme::dim_style()),
+                Span::styled(
+                    &agent.profile_name,
+                    Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("   "),
+                Span::styled("Status: ", theme::dim_style()),
+                Span::styled(
+                    status_str,
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("   "),
+                Span::styled("Tokens: ", theme::dim_style()),
+                Span::styled(format!("{}", agent.tokens_used), theme::text_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("Goal: ", theme::dim_style()),
+                Span::styled(&agent.goal, theme::text_style()),
+            ]),
+        ];
+        f.render_widget(Paragraph::new(meta_lines), chunks[1]);
+    } else {
+        f.render_widget(
+            Paragraph::new("No subagents recorded in this session.").style(theme::dim_style()),
+            chunks[1],
+        );
+    }
+
+    // 2. Divider
+    let sep = Paragraph::new("─".repeat(chunks[2].width as usize)).style(theme::dim_style());
+    f.render_widget(sep, chunks[2]);
+
+    // 3. Trace viewport
+    let mut trace_lines = Vec::new();
+    if let Some(agent) = active_agent {
+        if agent.trace.is_empty() {
+            trace_lines.push(Line::from(Span::styled(
+                "  (No execution trace entries recorded yet)",
+                theme::dim_style(),
+            )));
+        } else {
+            for entry in &agent.trace {
+                trace_lines.push(Line::from(vec![
+                    Span::styled(format!("{} ", entry.timestamp), theme::dim_style()),
+                    Span::styled(format!("[Step {}] ", entry.step), theme::brand_style()),
+                    Span::styled(&entry.action, theme::text_style()),
+                    Span::raw(" "),
+                    Span::styled(format!("({} tok)", entry.tokens_used), theme::muted_style()),
+                ]));
+            }
+        }
+    }
+
+    let total_lines = trace_lines.len();
+    let viewport_height = chunks[3].height as usize;
+    let max_scroll = total_lines.saturating_sub(viewport_height);
+    let effective_scroll = scroll.min(max_scroll);
+
+    let p = Paragraph::new(trace_lines).scroll((effective_scroll as u16, 0));
+    f.render_widget(p, chunks[3]);
+
+    if total_lines > viewport_height {
+        let mut scrollbar_state = ScrollbarState::new(total_lines).position(effective_scroll);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .track_symbol(Some("│"))
+            .thumb_symbol("┃")
+            .style(theme::dim_style());
+        f.render_stateful_widget(scrollbar, chunks[3], &mut scrollbar_state);
+    }
+
+    // 4. Footer hotkeys
+    let footer = Line::from(vec![
+        Span::styled("[Esc/q] ", theme::brand_style()),
+        Span::styled("Close  ", theme::dim_style()),
+        Span::styled("[Tab/h/l] ", theme::brand_style()),
+        Span::styled("Next/Prev Agent  ", theme::dim_style()),
+        Span::styled("[1-9] ", theme::brand_style()),
+        Span::styled("Jump Agent  ", theme::dim_style()),
+        Span::styled("[↑/↓] ", theme::brand_style()),
+        Span::styled("Scroll Trace", theme::dim_style()),
+    ]);
+    f.render_widget(
+        Paragraph::new(footer).alignment(Alignment::Center),
+        chunks[4],
+    );
+}
+
 #[cfg(test)]
 mod chat_viewport_tests {
     use super::*;
@@ -1803,5 +2189,100 @@ mod chat_viewport_tests {
         );
         assert_eq!(scroll, max_scroll);
         assert!(clamped.contains("message 1999"), "{clamped}");
+    }
+
+    #[test]
+    fn plan_widget_and_subagent_modal_render_cleanly() {
+        let plan = maukode_protocol::Plan::with_title(
+            "p1",
+            "Authentication Hardening",
+            vec![
+                maukode_protocol::PlanStep::new(
+                    "s1",
+                    "Inspect tokens",
+                    maukode_protocol::StepStatus::Completed,
+                ),
+                maukode_protocol::PlanStep::new(
+                    "s2",
+                    "Add mutex locks",
+                    maukode_protocol::StepStatus::InProgress,
+                ),
+            ],
+        );
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|f| {
+                draw_plan_widget(f, &plan, ratatui::layout::Rect::new(0, 0, 80, 5));
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(screen.contains("Authentication Hardening"), "{screen}");
+        assert!(screen.contains("[✓]"), "{screen}");
+        assert!(screen.contains("[◉]"), "{screen}");
+
+        let subagents = vec![crate::app::SubagentSessionState {
+            id: "sub-1".into(),
+            parent_session_id: maukode_protocol::SessionId::new(),
+            profile_name: "Codebase Researcher".into(),
+            goal: "Audit mutex usage".into(),
+            status: maukode_protocol::SubagentStatus::Running,
+            current_step: 1,
+            tokens_used: 120,
+            summary: None,
+            trace: vec![crate::app::SubagentTraceEntry {
+                timestamp: "10:00:00".into(),
+                step: 1,
+                action: "grep TokenBucket".into(),
+                tokens_used: 120,
+            }],
+        }];
+
+        terminal
+            .draw(|f| {
+                draw_subagent_modal(f, &subagents, 0, 0);
+            })
+            .unwrap();
+        let buffer2 = terminal.backend().buffer();
+        let screen2: String = buffer2.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(screen2.contains("Subagent Trace Inspector"), "{screen2}");
+        assert!(screen2.contains("Codebase Researcher"), "{screen2}");
+        assert!(screen2.contains("Audit mutex usage"), "{screen2}");
+        assert!(screen2.contains("grep TokenBucket"), "{screen2}");
+    }
+
+    #[test]
+    fn subagent_card_in_messages_renders_status() {
+        let mut terminal = Terminal::new(TestBackend::new(80, 15)).unwrap();
+        let items = vec![ChatItem {
+            role: ChatRole::Subagent {
+                id: "sub-1".into(),
+                profile_name: "Security Auditor".into(),
+                goal: "Check token expiration".into(),
+                status: maukode_protocol::SubagentStatus::Completed,
+                step: 3,
+                last_action: "Finished".into(),
+                tokens_used: 450,
+                summary: Some("Found 0 security vulnerabilities".into()),
+            },
+            content: String::new(),
+        }];
+        let mut cache = crate::render_cache::MessageRenderCache::default();
+        let (mut scroll, mut max_scroll) = (0, 0);
+        let screen = render(
+            &mut terminal,
+            &items,
+            &mut cache,
+            &mut scroll,
+            &mut max_scroll,
+            true,
+        );
+        assert!(screen.contains("Security Auditor"), "{screen}");
+        assert!(screen.contains("✓ Completed"), "{screen}");
+        assert!(
+            screen.contains("Found 0 security vulnerabilities"),
+            "{screen}"
+        );
     }
 }

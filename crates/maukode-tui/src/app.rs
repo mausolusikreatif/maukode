@@ -5,8 +5,8 @@ use maukode_core::{
     SqliteSessionStore,
 };
 use maukode_protocol::{
-    ContentPart, LLMEvent, Message, PermissionDecision, PermissionRequest, Role, SessionId,
-    StopReason, TokenUsage,
+    ContentPart, LLMEvent, Message, PermissionDecision, PermissionRequest, Plan, PlanStep, Role,
+    SessionId, StepStatus, StopReason, SubagentStatus, TokenUsage,
 };
 use maukode_server::ServerClient;
 use maukode_tools::{
@@ -17,6 +17,27 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentTraceEntry {
+    pub timestamp: String,
+    pub step: usize,
+    pub action: String,
+    pub tokens_used: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentSessionState {
+    pub id: String,
+    pub parent_session_id: SessionId,
+    pub profile_name: String,
+    pub goal: String,
+    pub status: SubagentStatus,
+    pub current_step: usize,
+    pub tokens_used: usize,
+    pub summary: Option<String>,
+    pub trace: Vec<SubagentTraceEntry>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatRole {
@@ -34,6 +55,16 @@ pub enum ChatRole {
         is_error: bool,
     },
     Reasoning,
+    Subagent {
+        id: String,
+        profile_name: String,
+        goal: String,
+        status: SubagentStatus,
+        step: usize,
+        last_action: String,
+        tokens_used: usize,
+        summary: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -185,6 +216,10 @@ pub enum ActiveModal {
         scroll: usize,
     },
     Help,
+    SubagentViewer {
+        selected_idx: usize,
+        scroll: usize,
+    },
     PrivateResult {
         tool_name: String,
         content: String,
@@ -215,6 +250,9 @@ pub struct App {
     pub max_scroll: usize,
     pub auto_scroll: bool,
     pub active_modal: ActiveModal,
+    pub active_plan: Option<Plan>,
+    pub show_plan: bool,
+    pub subagents: Vec<SubagentSessionState>,
     pub token_usage: Option<TokenUsage>,
     pub status_message: Option<(String, Instant)>,
     pub animation_frame: usize,
@@ -331,6 +369,9 @@ impl App {
             max_scroll: 0,
             auto_scroll: true,
             active_modal: ActiveModal::None,
+            active_plan: None,
+            show_plan: true,
+            subagents: Vec::new(),
             token_usage: None,
             status_message: None,
             animation_frame: 0,
@@ -765,6 +806,12 @@ impl App {
                 self.items.clear();
                 self.set_status("Cleared chat display");
             }
+            "/plan" => {
+                self.toggle_plan_widget();
+            }
+            "/subagents" | "/subagent" => {
+                self.open_subagents_modal();
+            }
             "/help" => {
                 self.active_modal = ActiveModal::Help;
             }
@@ -1021,6 +1068,135 @@ impl App {
                     content: format!("Error: {message}"),
                 });
             }
+            LLMEvent::PlanCreated { plan } => {
+                self.active_plan = Some(plan);
+                self.show_plan = true;
+                self.set_status("Plan updated (toggle with F2 or /plan)");
+            }
+            LLMEvent::PlanStepUpdated {
+                plan_id,
+                step_id,
+                status,
+            } => {
+                if let Some(ref mut plan) = self.active_plan {
+                    if plan.id == plan_id {
+                        if let Some(step) = plan.steps.iter_mut().find(|s| s.id == step_id) {
+                            step.status = status;
+                        }
+                    }
+                }
+            }
+            LLMEvent::SubagentSpawned {
+                subagent_id,
+                parent_session_id,
+                profile_name,
+                goal,
+            } => {
+                let now = chrono::Local::now().format("%H:%M:%S").to_string();
+                let init_action = format!("Spawned with goal: {goal}");
+                self.subagents.push(SubagentSessionState {
+                    id: subagent_id.clone(),
+                    parent_session_id,
+                    profile_name: profile_name.clone(),
+                    goal: goal.clone(),
+                    status: SubagentStatus::Running,
+                    current_step: 0,
+                    tokens_used: 0,
+                    summary: None,
+                    trace: vec![SubagentTraceEntry {
+                        timestamp: now,
+                        step: 0,
+                        action: init_action.clone(),
+                        tokens_used: 0,
+                    }],
+                });
+                self.items.push(ChatItem {
+                    role: ChatRole::Subagent {
+                        id: subagent_id,
+                        profile_name,
+                        goal,
+                        status: SubagentStatus::Running,
+                        step: 0,
+                        last_action: init_action,
+                        tokens_used: 0,
+                        summary: None,
+                    },
+                    content: String::new(),
+                });
+                self.set_status("🤖 Subagent spawned");
+                self.auto_scroll = true;
+            }
+            LLMEvent::SubagentProgress {
+                subagent_id,
+                step,
+                action,
+                tokens_used,
+            } => {
+                let now = chrono::Local::now().format("%H:%M:%S").to_string();
+                if let Some(subagent) = self.subagents.iter_mut().find(|s| s.id == subagent_id) {
+                    subagent.current_step = step;
+                    subagent.tokens_used = tokens_used;
+                    subagent.trace.push(SubagentTraceEntry {
+                        timestamp: now,
+                        step,
+                        action: action.clone(),
+                        tokens_used,
+                    });
+                }
+                if let Some(item) = self.items.iter_mut().rev().find(|item| {
+                    matches!(&item.role, ChatRole::Subagent { id, .. } if id == &subagent_id)
+                }) {
+                    if let ChatRole::Subagent {
+                        step: s_step,
+                        last_action,
+                        tokens_used: s_tokens,
+                        ..
+                    } = &mut item.role
+                    {
+                        *s_step = step;
+                        *last_action = action;
+                        *s_tokens = tokens_used;
+                    }
+                }
+                self.set_status("🤖 Subagent working...");
+            }
+            LLMEvent::SubagentFinished {
+                subagent_id,
+                status,
+                summary,
+                tokens_used,
+            } => {
+                let now = chrono::Local::now().format("%H:%M:%S").to_string();
+                if let Some(subagent) = self.subagents.iter_mut().find(|s| s.id == subagent_id) {
+                    subagent.status = status;
+                    subagent.summary = Some(summary.clone());
+                    subagent.tokens_used = tokens_used;
+                    let last_step = subagent.current_step;
+                    subagent.trace.push(SubagentTraceEntry {
+                        timestamp: now,
+                        step: last_step + 1,
+                        action: format!("Finished ({status:?}): {summary}"),
+                        tokens_used,
+                    });
+                }
+                if let Some(item) = self.items.iter_mut().rev().find(|item| {
+                    matches!(&item.role, ChatRole::Subagent { id, .. } if id == &subagent_id)
+                }) {
+                    if let ChatRole::Subagent {
+                        status: s_status,
+                        summary: s_summary,
+                        tokens_used: s_tokens,
+                        ..
+                    } = &mut item.role
+                    {
+                        *s_status = status;
+                        *s_summary = Some(summary.clone());
+                        *s_tokens = tokens_used;
+                    }
+                }
+                self.set_status(format!("🤖 Subagent finished: {status:?}"));
+                self.auto_scroll = true;
+            }
             LLMEvent::TurnStopped { reason, message } if reason.needs_continue() => {
                 let text = message.unwrap_or_else(|| "The turn stopped before finishing.".into());
                 self.set_status("Stopped early — type 'continue' to resume");
@@ -1031,6 +1207,29 @@ impl App {
                 self.auto_scroll = true;
             }
             _ => {}
+        }
+    }
+
+    pub fn toggle_plan_widget(&mut self) {
+        self.show_plan = !self.show_plan;
+        let state = if self.show_plan { "shown" } else { "hidden" };
+        self.set_status(format!("Plan timeline {state} (toggle with F2 or /plan)"));
+    }
+
+    pub fn open_subagents_modal(&mut self) {
+        if self.subagents.is_empty() {
+            self.set_status("No subagents spawned yet");
+            self.items.push(ChatItem {
+                role: ChatRole::System,
+                content: "No child subagents have been spawned in this session.".into(),
+            });
+        } else {
+            let selected_idx = self.subagents.len().saturating_sub(1);
+            self.active_modal = ActiveModal::SubagentViewer {
+                selected_idx,
+                scroll: 0,
+            };
+            self.set_status("Subagent trace viewer opened");
         }
     }
 
@@ -1468,6 +1667,114 @@ mod stream_tests {
         assert!(
             matches!(&items[1].role, ChatRole::ToolCall { name, args, .. }
             if name == "glob" && args.is_empty())
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_lifecycle_updates_state() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(dir.path().to_path_buf(), tx, None, false, None)
+            .await
+            .unwrap();
+
+        let plan = Plan::with_title(
+            "p1",
+            "Refactor auth",
+            vec![
+                PlanStep::new("s1", "Audit auth tokens", StepStatus::Pending),
+                PlanStep::new("s2", "Add mutex locks", StepStatus::Pending),
+            ],
+        );
+
+        app.handle_llm_event(LLMEvent::PlanCreated { plan: plan.clone() });
+        assert_eq!(
+            app.active_plan.as_ref().unwrap().title.as_deref(),
+            Some("Refactor auth")
+        );
+        assert_eq!(
+            app.active_plan.as_ref().unwrap().steps[0].status,
+            StepStatus::Pending
+        );
+
+        app.handle_llm_event(LLMEvent::PlanStepUpdated {
+            plan_id: "p1".into(),
+            step_id: "s1".into(),
+            status: StepStatus::Completed,
+        });
+        assert_eq!(
+            app.active_plan.as_ref().unwrap().steps[0].status,
+            StepStatus::Completed
+        );
+        assert_eq!(
+            app.active_plan.as_ref().unwrap().steps[1].status,
+            StepStatus::Pending
+        );
+    }
+
+    #[tokio::test]
+    async fn subagent_lifecycle_records_trace_and_updates_items() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(dir.path().to_path_buf(), tx, None, false, None)
+            .await
+            .unwrap();
+
+        let sub_id = "child-123".to_string();
+        let parent_id = SessionId::new();
+
+        app.handle_llm_event(LLMEvent::SubagentSpawned {
+            subagent_id: sub_id.clone(),
+            parent_session_id: parent_id,
+            profile_name: "Codebase Researcher".into(),
+            goal: "Find TokenBucket usages".into(),
+        });
+
+        assert_eq!(app.subagents.len(), 1);
+        assert_eq!(app.subagents[0].profile_name, "Codebase Researcher");
+        assert_eq!(app.subagents[0].status, SubagentStatus::Running);
+        assert!(matches!(
+            app.items.last().unwrap().role,
+            ChatRole::Subagent { ref id, ref profile_name, .. } if id == &sub_id && profile_name == "Codebase Researcher"
+        ));
+
+        app.handle_llm_event(LLMEvent::SubagentProgress {
+            subagent_id: sub_id.clone(),
+            step: 1,
+            action: "grep TokenBucket".into(),
+            tokens_used: 150,
+        });
+
+        assert_eq!(app.subagents[0].current_step, 1);
+        assert_eq!(app.subagents[0].tokens_used, 150);
+        assert_eq!(app.subagents[0].trace.len(), 2);
+
+        app.handle_llm_event(LLMEvent::SubagentFinished {
+            subagent_id: sub_id.clone(),
+            status: SubagentStatus::Completed,
+            summary: "Found 2 files".into(),
+            tokens_used: 420,
+        });
+
+        assert_eq!(app.subagents[0].status, SubagentStatus::Completed);
+        assert_eq!(app.subagents[0].summary.as_deref(), Some("Found 2 files"));
+        assert_eq!(app.subagents[0].tokens_used, 420);
+        assert!(matches!(
+            app.items.last().unwrap().role,
+            ChatRole::Subagent {
+                status: SubagentStatus::Completed,
+                tokens_used: 420,
+                ..
+            }
+        ));
+
+        app.open_subagents_modal();
+        assert_eq!(
+            app.active_modal,
+            ActiveModal::SubagentViewer {
+                selected_idx: 0,
+                scroll: 0
+            }
         );
     }
 }
