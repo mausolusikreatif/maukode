@@ -9,6 +9,7 @@ export const ARCHIVED_SESSIONS_STORAGE_KEY = "maukode.archivedSessions";
 
 /** Load pinned session IDs from localStorage. */
 export function loadPinnedSessions(): string[] {
+  if (typeof localStorage === "undefined") return [];
   try {
     const val: unknown = JSON.parse(localStorage.getItem(PINNED_SESSIONS_STORAGE_KEY) ?? "[]");
     return Array.isArray(val) ? val.filter((x): x is string => typeof x === "string") : [];
@@ -19,6 +20,7 @@ export function loadPinnedSessions(): string[] {
 
 /** Save pinned session IDs to localStorage. */
 export function savePinnedSessions(ids: Iterable<string>): void {
+  if (typeof localStorage === "undefined") return;
   try {
     const arr = Array.from(new Set(ids));
     localStorage.setItem(PINNED_SESSIONS_STORAGE_KEY, JSON.stringify(arr));
@@ -29,6 +31,7 @@ export function savePinnedSessions(ids: Iterable<string>): void {
 
 /** Load archived session IDs from localStorage. */
 export function loadArchivedSessions(): string[] {
+  if (typeof localStorage === "undefined") return [];
   try {
     const val: unknown = JSON.parse(localStorage.getItem(ARCHIVED_SESSIONS_STORAGE_KEY) ?? "[]");
     return Array.isArray(val) ? val.filter((x): x is string => typeof x === "string") : [];
@@ -39,6 +42,7 @@ export function loadArchivedSessions(): string[] {
 
 /** Save archived session IDs to localStorage. */
 export function saveArchivedSessions(ids: Iterable<string>): void {
+  if (typeof localStorage === "undefined") return;
   try {
     const arr = Array.from(new Set(ids));
     localStorage.setItem(ARCHIVED_SESSIONS_STORAGE_KEY, JSON.stringify(arr));

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SessionListItem } from "../api/types";
 import {
   filterSessions,
@@ -14,6 +14,14 @@ import {
   sortSessions,
 } from "./sessionFilters";
 import { emptyThread, type ThreadState } from "./thread";
+
+let storageMap = new Map<string, string>();
+const mockStorage = {
+  getItem: (key: string) => storageMap.get(key) ?? null,
+  setItem: (key: string, val: string) => storageMap.set(key, String(val)),
+  removeItem: (key: string) => storageMap.delete(key),
+  clear: () => storageMap.clear(),
+};
 
 const mockSession = (overrides: Partial<SessionListItem> = {}): SessionListItem => ({
   id: "session-1",
@@ -32,7 +40,12 @@ const mockSession = (overrides: Partial<SessionListItem> = {}): SessionListItem 
 
 describe("sessionFilters persistence", () => {
   beforeEach(() => {
-    localStorage.clear();
+    storageMap = new Map();
+    (globalThis as unknown as { localStorage: unknown }).localStorage = mockStorage;
+  });
+
+  afterEach(() => {
+    delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
   });
 
   it("loads empty arrays when localStorage is empty or corrupt", () => {
