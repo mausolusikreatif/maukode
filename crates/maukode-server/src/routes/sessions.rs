@@ -11,9 +11,10 @@ use axum::{
 };
 use futures::Stream;
 use maukode_core::worktree::{self, WorktreeError, WorktreeInfo};
-use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner};
+use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner, SubagentTool};
 use maukode_protocol::{
     GlobalEvent, LLMEvent, Message, QueueSteeringPrompt, SessionId, SessionState, StopReason,
+    SubagentProfile,
 };
 use maukode_tools::create_default_registry;
 use serde::{Deserialize, Serialize};
@@ -184,6 +185,13 @@ async fn checkpoints_for(
         .checkpoint_manager_for(&dir)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+pub async fn list_subagent_profiles() -> Json<Vec<SubagentProfile>> {
+    Json(vec![
+        SubagentProfile::codebase_researcher(),
+        SubagentProfile::security_auditor(),
+    ])
 }
 
 pub async fn list_sessions(
@@ -442,7 +450,7 @@ fn start_turn(
         let (provider_id, model) = effective_model(&state, id).await;
         let session_dir = session_arc.read().await.directory.clone();
 
-        let (llm_client, runner_config, mut tool_registry) = {
+        let (llm_client, runner_config, mut tool_registry, jail) = {
             let config_guard = state.config.read().await;
             let llm_client = config_guard
                 .create_llm_client_for(&provider_id)
@@ -455,15 +463,15 @@ fn start_turn(
                 temperature: None,
             };
 
+            let jail = maukode_tools::PathJail::new(&session_dir)
+                .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
             let mut tool_registry = if config_guard.security.jail_path_traversal {
-                let jail = maukode_tools::PathJail::new(&session_dir)
-                    .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
-                maukode_tools::create_default_registry_with_jail(&session_dir, jail)
+                maukode_tools::create_default_registry_with_jail(&session_dir, jail.clone())
             } else {
                 create_default_registry(&session_dir)
             };
             config_guard.configure_web_search_in_registry(&mut tool_registry);
-            (llm_client, runner_config, tool_registry)
+            (llm_client, runner_config, tool_registry, jail)
         };
 
         let app_config = state.config.read().await.clone();
@@ -475,10 +483,19 @@ fn start_turn(
         let permission_mgr = state.permission_manager_for(id).await;
         let checkpoint_mgr = state.checkpoint_manager_for(&session_dir).await;
 
+        let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
+
         let context = Arc::new(ContextManager::new(&session_dir));
         tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
             context.repo_map(),
         ))));
+        tool_registry.register(Arc::new(SubagentTool::new(
+            id,
+            session_dir.clone(),
+            jail,
+            Arc::clone(&llm_client),
+            Some(llm_tx.clone()),
+        )));
         let tools = Arc::new(tool_registry);
 
         let mut runner = SessionRunner::new(
@@ -494,8 +511,6 @@ fn start_turn(
         if let Ok(cm) = checkpoint_mgr {
             runner = runner.with_checkpoint_manager(cm);
         }
-
-        let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
 
         state.emit(GlobalEvent::TurnStarted { session_id: id });
 

@@ -772,3 +772,15 @@ async fn tokenless_server_rejects_dns_rebinding_hosts() {
         .unwrap();
     assert_eq!(both.status(), 403);
 }
+
+#[tokio::test]
+async fn test_subagent_profiles_endpoint() {
+    let temp_dir = tempdir().unwrap();
+    let (url, _handle) = start_test_server(temp_dir.path()).await;
+    let client = ServerClient::new(&url, Some("secret123".to_string())).unwrap();
+
+    let profiles = client.list_subagent_profiles().await.unwrap();
+    assert!(!profiles.is_empty());
+    assert!(profiles.iter().any(|p| p.name == "codebase-researcher"));
+    assert!(profiles.iter().any(|p| p.name == "security-auditor"));
+}
