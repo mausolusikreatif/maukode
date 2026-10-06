@@ -130,6 +130,8 @@ pub struct ServerState {
     pub pending_permissions: Arc<RwLock<HashMap<SessionId, HashMap<String, PermissionRequest>>>>,
     pub session_permissions: Arc<RwLock<HashMap<SessionId, Arc<PermissionManager>>>>,
     pub active_turns: Arc<RwLock<HashMap<SessionId, CancellationToken>>>,
+    /// Session-level queues for prompts waiting while an agent turn is active.
+    pub queued_prompts: Arc<RwLock<HashMap<SessionId, VecDeque<String>>>>,
     /// Default manager; per-session managers are forked from it (see `permission_manager_for`).
     pub permission_manager: Arc<PermissionManager>,
     /// One shadow-git manager per workspace root (worktree sessions each have their own).
@@ -167,6 +169,7 @@ impl ServerState {
             pending_permissions: Arc::new(RwLock::new(HashMap::new())),
             session_permissions: Arc::new(RwLock::new(HashMap::new())),
             active_turns: Arc::new(RwLock::new(HashMap::new())),
+            queued_prompts: Arc::new(RwLock::new(HashMap::new())),
             permission_manager,
             checkpoint_managers: Arc::new(RwLock::new(HashMap::new())),
             global_events: Arc::new(EventChannel::new()),
@@ -345,11 +348,51 @@ impl ServerState {
         )
     }
 
+    /// Add a prompt to the session's prompt queue; returns the new queue length.
+    pub async fn queue_prompt(&self, id: SessionId, prompt: String) -> usize {
+        let mut queues = self.queued_prompts.write().await;
+        let queue = queues.entry(id).or_default();
+        queue.push_back(prompt);
+        queue.len()
+    }
+
+    /// Pop the next queued prompt for this session, if any.
+    pub async fn pop_queued_prompt(&self, id: SessionId) -> Option<String> {
+        let mut queues = self.queued_prompts.write().await;
+        let queue = queues.get_mut(&id)?;
+        let next = queue.pop_front();
+        if queue.is_empty() {
+            queues.remove(&id);
+        }
+        next
+    }
+
+    /// Return all prompts currently queued for this session.
+    pub async fn get_queued_prompts(&self, id: SessionId) -> Vec<String> {
+        self.queued_prompts
+            .read()
+            .await
+            .get(&id)
+            .map(|q| q.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Clear all queued prompts for this session; returns how many were cleared.
+    pub async fn clear_queued_prompts(&self, id: SessionId) -> usize {
+        self.queued_prompts
+            .write()
+            .await
+            .remove(&id)
+            .map(|q| q.len())
+            .unwrap_or(0)
+    }
+
     /// Drop all in-memory state for a session.
     pub async fn forget_session(&self, id: SessionId) {
         self.sessions.write().await.remove(&id);
         self.channels.write().await.remove(&id);
         self.pending_permissions.write().await.remove(&id);
         self.session_permissions.write().await.remove(&id);
+        self.queued_prompts.write().await.remove(&id);
     }
 }

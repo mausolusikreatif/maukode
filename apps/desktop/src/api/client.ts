@@ -116,6 +116,32 @@ export class ApiClient {
   prompt(id: string, prompt: string) {
     return this.request<void>("POST", `/api/v1/sessions/${id}/prompt`, { prompt });
   }
+  queuePrompt(id: string, prompt: string) {
+    return this.request<{ status: string; session_id: string; queue_len: number }>(
+      "POST",
+      `/api/v1/sessions/${id}/queue`,
+      { prompt },
+    );
+  }
+  steerPrompt(id: string, prompt: string) {
+    return this.request<{ status: string; session_id: string }>(
+      "POST",
+      `/api/v1/sessions/${id}/steer`,
+      { prompt },
+    );
+  }
+  getQueue(id: string) {
+    return this.request<{ session_id: string; queue: string[] }>(
+      "GET",
+      `/api/v1/sessions/${id}/queue`,
+    );
+  }
+  clearQueue(id: string) {
+    return this.request<{ status: string; session_id: string; cleared_count: number }>(
+      "DELETE",
+      `/api/v1/sessions/${id}/queue`,
+    );
+  }
   cancel(id: string) {
     return this.request<void>("POST", `/api/v1/sessions/${id}/cancel`, {});
   }

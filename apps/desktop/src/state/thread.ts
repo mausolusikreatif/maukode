@@ -1,5 +1,5 @@
 import { needsContinue } from "../api/types";
-import type { ContentPart, LLMEvent, Message, PermissionRequest, StopReason, TokenUsage } from "../api/types";
+import type { ContentPart, LLMEvent, Message, PermissionRequest, Plan, StopReason, TokenUsage } from "../api/types";
 
 export type ToolStatus = "running" | "done" | "error" | "private";
 
@@ -7,6 +7,7 @@ export type ThreadItem =
   | { kind: "user"; id: string; text: string }
   | { kind: "assistant"; id: string; text: string }
   | { kind: "reasoning"; id: string; text: string }
+  | { kind: "plan"; id: string; plan: Plan }
   | { kind: "tool"; id: string; name: string; args: string; status: ToolStatus; result?: string };
 
 /** Transient status lines for the current turn (errors, limits). Cleared when a new turn starts. */
@@ -24,13 +25,17 @@ export interface ThreadState {
   /** Why the last turn ended; cleared when a new turn starts. */
   stop: { reason: StopReason; message: string | null } | null;
   usage: TokenUsage | null;
+  /** Active structured plan for the session, if one has been emitted. */
+  plan: Plan | null;
+  /** Queued prompts waiting for subsequent turns. */
+  queue: string[];
   /** Newest event sequence applied; resume the SSE stream from here. */
   lastSeq: number;
   nextId: number;
 }
 
 export function emptyThread(): ThreadState {
-  return { items: [], notices: [], running: false, pending: [], stop: null, usage: null, lastSeq: 0, nextId: 1 };
+  return { items: [], notices: [], running: false, pending: [], stop: null, usage: null, plan: null, queue: [], lastSeq: 0, nextId: 1 };
 }
 
 function pushItem(state: ThreadState, make: (id: string) => ThreadItem): ThreadState {
@@ -109,6 +114,18 @@ export function applyEvent(state: ThreadState, event: LLMEvent, seq?: number): T
       const { type: _type, ...usage } = event;
       return { ...next, usage };
     }
+    case "plan_created":
+      return { ...next, plan: event.plan, running: true };
+    case "plan_step_updated": {
+      if (!next.plan) return next;
+      const updatedSteps = next.plan.steps.map((s) =>
+        s.id === event.step_id ? { ...s, status: event.status } : s
+      );
+      return {
+        ...next,
+        plan: { ...next.plan, steps: updatedSteps },
+      };
+    }
     case "context_warning":
       return addNotice(next, "warn", event.message);
     case "error":
@@ -171,7 +188,21 @@ export function itemsFromMessages(messages: Message[], idPrefix = "h"): ThreadIt
 
 export function threadFromSnapshot(
   messages: Message[],
-  opts: { running: boolean; pending: PermissionRequest[]; lastSeq: number },
+  opts: {
+    running: boolean;
+    pending: PermissionRequest[];
+    lastSeq: number;
+    plan?: Plan | null;
+    queue?: string[];
+  },
 ): ThreadState {
-  return { ...emptyThread(), items: itemsFromMessages(messages), running: opts.running, pending: opts.pending, lastSeq: opts.lastSeq };
+  return {
+    ...emptyThread(),
+    items: itemsFromMessages(messages),
+    running: opts.running,
+    pending: opts.pending,
+    lastSeq: opts.lastSeq,
+    plan: opts.plan ?? null,
+    queue: opts.queue ?? [],
+  };
 }

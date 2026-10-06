@@ -12,7 +12,9 @@ use axum::{
 use futures::Stream;
 use maukode_core::worktree::{self, WorktreeError, WorktreeInfo};
 use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner};
-use maukode_protocol::{GlobalEvent, LLMEvent, Message, SessionId, SessionState, StopReason};
+use maukode_protocol::{
+    GlobalEvent, LLMEvent, Message, QueueSteeringPrompt, SessionId, SessionState, StopReason,
+};
 use maukode_tools::create_default_registry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -144,6 +146,8 @@ pub struct SessionDetailResponse {
     pub messages: Vec<Message>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub queued_prompts: Vec<String>,
 }
 
 /// Provider/model a session runs with: its pinned pair if the provider still exists, otherwise
@@ -328,6 +332,7 @@ pub async fn get_session(
     let messages_start = query
         .limit
         .map_or(0, |limit| message_total.saturating_sub(limit.min(MAX_PAGE)));
+    let queued_prompts = state.get_queued_prompts(id).await;
     let detail = SessionDetailResponse {
         id: session.id,
         title,
@@ -344,6 +349,7 @@ pub async fn get_session(
         messages: session.messages[messages_start..].to_vec(),
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
+        queued_prompts,
     };
 
     Ok(Json(detail))
@@ -424,133 +430,168 @@ async fn persist_session(
     }
 }
 
-async fn start_turn(
+#[allow(clippy::type_complexity)]
+fn start_turn(
     state: Arc<ServerState>,
     id: SessionId,
     session_arc: Arc<tokio::sync::RwLock<Session>>,
     prompt: String,
     cancellation_token: tokio_util::sync::CancellationToken,
-) -> Result<(), (StatusCode, String)> {
-    let (provider_id, model) = effective_model(&state, id).await;
-    let session_dir = session_arc.read().await.directory.clone();
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), (StatusCode, String)>> + Send>> {
+    Box::pin(async move {
+        let (provider_id, model) = effective_model(&state, id).await;
+        let session_dir = session_arc.read().await.directory.clone();
 
-    let config_guard = state.config.read().await;
-    let llm_client = config_guard
-        .create_llm_client_for(&provider_id)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        let (llm_client, runner_config, mut tool_registry) = {
+            let config_guard = state.config.read().await;
+            let llm_client = config_guard
+                .create_llm_client_for(&provider_id)
+                .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    let runner_config = RunnerConfig {
-        model: model.clone(),
-        max_steps: config_guard.agent.max_steps,
-        max_tokens: Some(config_guard.agent.max_tokens),
-        temperature: None,
-    };
+            let runner_config = RunnerConfig {
+                model: model.clone(),
+                max_steps: config_guard.agent.max_steps,
+                max_tokens: Some(config_guard.agent.max_tokens),
+                temperature: None,
+            };
 
-    let mut tool_registry = if config_guard.security.jail_path_traversal {
-        let jail = maukode_tools::PathJail::new(&session_dir)
-            .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
-        maukode_tools::create_default_registry_with_jail(&session_dir, jail)
-    } else {
-        create_default_registry(&session_dir)
-    };
-    config_guard.configure_web_search_in_registry(&mut tool_registry);
-    state
-        .mcp_manager
-        .register_tools_into_registry(&mut tool_registry, &session_dir, &config_guard)
-        .await;
-    drop(config_guard);
-    let context = Arc::new(ContextManager::new(&session_dir));
-    tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
-        context.repo_map(),
-    ))));
-    let tools = Arc::new(tool_registry);
-
-    let mut runner = SessionRunner::new(
-        Arc::clone(&session_arc),
-        llm_client,
-        tools,
-        context,
-        runner_config,
-    )
-    .with_permission_manager(state.permission_manager_for(id).await)
-    .with_permission_store(Arc::clone(&state.store));
-    match state.checkpoint_manager_for(&session_dir).await {
-        Ok(cm) => runner = runner.with_checkpoint_manager(cm),
-        Err(error) => tracing::warn!(%error, "Checkpoints unavailable for this turn"),
-    }
-
-    let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
-
-    state.emit(GlobalEvent::TurnStarted { session_id: id });
-
-    tokio::spawn(async move {
-        let run_handle = tokio::spawn(async move {
-            runner
-                .run_with_cancellation(Some(prompt), llm_tx, Some(cancellation_token))
-                .await
-        });
-
-        // Forward stream events; checkpoint progress to SQLite at most every 2s so a crash
-        // costs seconds of work rather than the whole turn.
-        let mut last_save = std::time::Instant::now();
-        let mut stopped: Option<(StopReason, Option<String>)> = None;
-        let mut titled = false;
-        while let Some(event) = llm_rx.recv().await {
-            if let LLMEvent::TurnStopped { reason, message } = &event {
-                stopped = Some((*reason, message.clone()));
-            }
-            let save_now = matches!(event, LLMEvent::ToolResult(_))
-                && last_save.elapsed() >= std::time::Duration::from_secs(2);
-            state.publish_event(id, event).await;
-            // The first event means the runner has recorded the prompt: store it now so the
-            // session gets its title (derived from the first message) while it is still running.
-            if !titled {
-                titled = true;
-                persist_session(&state, id, &session_arc, &provider_id, &model).await;
-                state.emit(GlobalEvent::SessionUpdated { session_id: id });
-            }
-            if save_now {
-                persist_session(&state, id, &session_arc, &provider_id, &model).await;
-                last_save = std::time::Instant::now();
-            }
-        }
-
-        let join = run_handle.await;
-        // The runner always closes a turn with `TurnStopped`; if it did not (the task panicked),
-        // synthesize it so clients are never left waiting on a dead turn.
-        let (reason, message) = match stopped {
-            Some(done) => done,
-            None => {
-                let message = match join {
-                    Err(e) => format!("Agent task crashed: {e}"),
-                    Ok(_) => "Agent turn ended unexpectedly".to_string(),
-                };
-                session_arc.write().await.state = SessionState::Failed(message.clone());
-                let error = LLMEvent::Error {
-                    message: message.clone(),
-                };
-                state.publish_event(id, error).await;
-                let stop = LLMEvent::TurnStopped {
-                    reason: StopReason::Error,
-                    message: Some(message.clone()),
-                };
-                state.publish_event(id, stop).await;
-                (StopReason::Error, Some(message))
-            }
+            let mut tool_registry = if config_guard.security.jail_path_traversal {
+                let jail = maukode_tools::PathJail::new(&session_dir)
+                    .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
+                maukode_tools::create_default_registry_with_jail(&session_dir, jail)
+            } else {
+                create_default_registry(&session_dir)
+            };
+            config_guard.configure_web_search_in_registry(&mut tool_registry);
+            (llm_client, runner_config, tool_registry)
         };
 
-        // Free the turn slot first so the next prompt can proceed, then persist final state.
-        state.clear_active_turn(id).await;
-        state.clear_pending_permissions(id).await;
-        persist_session(&state, id, &session_arc, &provider_id, &model).await;
-        state.emit(GlobalEvent::TurnFinished {
-            session_id: id,
-            reason,
-            message,
-        });
-    });
+        let app_config = state.config.read().await.clone();
+        state
+            .mcp_manager
+            .register_tools_into_registry(&mut tool_registry, &session_dir, &app_config)
+            .await;
 
-    Ok(())
+        let permission_mgr = state.permission_manager_for(id).await;
+        let checkpoint_mgr = state.checkpoint_manager_for(&session_dir).await;
+
+        let context = Arc::new(ContextManager::new(&session_dir));
+        tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
+            context.repo_map(),
+        ))));
+        let tools = Arc::new(tool_registry);
+
+        let mut runner = SessionRunner::new(
+            Arc::clone(&session_arc),
+            llm_client,
+            tools,
+            context,
+            runner_config,
+        )
+        .with_permission_manager(permission_mgr)
+        .with_permission_store(Arc::clone(&state.store));
+
+        if let Ok(cm) = checkpoint_mgr {
+            runner = runner.with_checkpoint_manager(cm);
+        }
+
+        let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
+
+        state.emit(GlobalEvent::TurnStarted { session_id: id });
+
+        tokio::spawn(async move {
+            let run_handle = tokio::spawn(async move {
+                runner
+                    .run_with_cancellation(Some(prompt), llm_tx, Some(cancellation_token))
+                    .await
+            });
+
+            // Forward stream events; checkpoint progress to SQLite at most every 2s so a crash
+            // costs seconds of work rather than the whole turn.
+            let mut last_save = std::time::Instant::now();
+            let mut stopped: Option<(StopReason, Option<String>)> = None;
+            let mut titled = false;
+            while let Some(event) = llm_rx.recv().await {
+                if let LLMEvent::TurnStopped { reason, message } = &event {
+                    stopped = Some((*reason, message.clone()));
+                }
+                let save_now = matches!(event, LLMEvent::ToolResult(_))
+                    && last_save.elapsed() >= std::time::Duration::from_secs(2);
+                state.publish_event(id, event).await;
+                // The first event means the runner has recorded the prompt: store it now so the
+                // session gets its title (derived from the first message) while it is still running.
+                if !titled {
+                    titled = true;
+                    persist_session(&state, id, &session_arc, &provider_id, &model).await;
+                    state.emit(GlobalEvent::SessionUpdated { session_id: id });
+                }
+                if save_now {
+                    persist_session(&state, id, &session_arc, &provider_id, &model).await;
+                    last_save = std::time::Instant::now();
+                }
+            }
+
+            let join = run_handle.await;
+            // The runner always closes a turn with `TurnStopped`; if it did not (the task panicked),
+            // synthesize it so clients are never left waiting on a dead turn.
+            let (reason, message) = match stopped {
+                Some(done) => done,
+                None => {
+                    let message = match join {
+                        Err(e) => format!("Agent task crashed: {e}"),
+                        Ok(_) => "Agent turn ended unexpectedly".to_string(),
+                    };
+                    session_arc.write().await.state = SessionState::Failed(message.clone());
+                    let error = LLMEvent::Error {
+                        message: message.clone(),
+                    };
+                    state.publish_event(id, error).await;
+                    let stop = LLMEvent::TurnStopped {
+                        reason: StopReason::Error,
+                        message: Some(message.clone()),
+                    };
+                    state.publish_event(id, stop).await;
+                    (StopReason::Error, Some(message))
+                }
+            };
+
+            // Free the turn slot first so the next prompt can proceed, then persist final state.
+            state.clear_active_turn(id).await;
+            state.clear_pending_permissions(id).await;
+            persist_session(&state, id, &session_arc, &provider_id, &model).await;
+            state.emit(GlobalEvent::TurnFinished {
+                session_id: id,
+                reason,
+                message,
+            });
+
+            // Automatically start next queued prompt if turn completed successfully
+            if reason == StopReason::Completed {
+                if let Some(next_prompt) = state.pop_queued_prompt(id).await {
+                    if let Some(next_token) = state.try_register_active_turn(id).await {
+                        let next_state = Arc::clone(&state);
+                        let next_session = Arc::clone(&session_arc);
+                        tokio::spawn(async move {
+                            if let Err(err) = start_turn(
+                                next_state.clone(),
+                                id,
+                                next_session,
+                                next_prompt,
+                                next_token,
+                            )
+                            .await
+                            {
+                                next_state.clear_active_turn(id).await;
+                                tracing::error!(session = %id, error = ?err, "Failed to start queued turn");
+                            }
+                        });
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    })
 }
 
 pub async fn stream_session_events(
@@ -577,6 +618,123 @@ pub async fn cancel_prompt(
         "status": status,
         "session_id": id,
     })))
+}
+
+pub async fn queue_prompt(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<QueueSteeringPrompt>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = load_session(&state, id).await?;
+    let is_running = state.is_running(id).await;
+
+    if !is_running {
+        if let Some(cancellation_token) = state.try_register_active_turn(id).await {
+            if let Err(err) = start_turn(
+                Arc::clone(&state),
+                id,
+                session_arc,
+                payload.prompt,
+                cancellation_token,
+            )
+            .await
+            {
+                state.clear_active_turn(id).await;
+                return Err(err);
+            }
+            return Ok(Json(json!({
+                "status": "started",
+                "session_id": id,
+                "queue_len": 0,
+            })));
+        }
+    }
+
+    let queue_len = state.queue_prompt(id, payload.prompt).await;
+    Ok(Json(json!({
+        "status": "queued",
+        "session_id": id,
+        "queue_len": queue_len,
+    })))
+}
+
+pub async fn get_session_queue(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let _ = load_session(&state, id).await?;
+    let queue = state.get_queued_prompts(id).await;
+    Ok(Json(json!({
+        "session_id": id,
+        "queue": queue,
+    })))
+}
+
+pub async fn clear_session_queue(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let _ = load_session(&state, id).await?;
+    let cleared_count = state.clear_queued_prompts(id).await;
+    Ok(Json(json!({
+        "status": "cleared",
+        "session_id": id,
+        "cleared_count": cleared_count,
+    })))
+}
+
+pub async fn steer_prompt(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<QueueSteeringPrompt>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = load_session(&state, id).await?;
+    let is_running = state.is_running(id).await;
+
+    if is_running {
+        let prompt_text = payload.prompt.clone();
+        {
+            let mut session = session_arc.write().await;
+            session.add_message(Message::user(format!("[Steer]: {}", prompt_text)));
+        }
+        state
+            .publish_event(
+                id,
+                LLMEvent::TextDelta {
+                    text: format!("\n\n> 🧭 *Steering guidance injected: {}*\n\n", prompt_text),
+                },
+            )
+            .await;
+
+        Ok(Json(json!({
+            "status": "steered",
+            "session_id": id,
+        })))
+    } else {
+        if let Some(cancellation_token) = state.try_register_active_turn(id).await {
+            if let Err(err) = start_turn(
+                Arc::clone(&state),
+                id,
+                session_arc,
+                payload.prompt,
+                cancellation_token,
+            )
+            .await
+            {
+                state.clear_active_turn(id).await;
+                return Err(err);
+            }
+            Ok(Json(json!({
+                "status": "started",
+                "session_id": id,
+            })))
+        } else {
+            Err((
+                StatusCode::CONFLICT,
+                "Unable to claim turn slot".to_string(),
+            ))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

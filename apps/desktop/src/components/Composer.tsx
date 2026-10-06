@@ -76,7 +76,7 @@ export function Composer({ running }: { running: boolean }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autocompleteListRef = useRef<HTMLDivElement>(null);
 
-  const { send, stop, activeId, meta, review, client, threads } = useApp();
+  const { send, stop, steer, queue, activeId, meta, review, client, threads } = useApp();
   const thread = activeId ? threads[activeId] : undefined;
 
   // Auto-resize textarea
@@ -222,17 +222,7 @@ export function Composer({ running }: { running: boolean }) {
     textareaRef.current?.focus();
   };
 
-  const submit = () => {
-    const value = text.trim();
-    if ((!value && chips.length === 0) || running) return;
-
-    // Prepend attached context references to prompt
-    const contextTags = chips.map((c) => `@${c.value}`).join(" ");
-    let finalPrompt = value;
-    if (contextTags) {
-      finalPrompt = value ? `${contextTags}\n\n${value}` : contextTags;
-    }
-
+  const clearInput = () => {
     setText("");
     setChips([]);
     setAutocompleteOpen(false);
@@ -240,8 +230,44 @@ export function Composer({ running }: { running: boolean }) {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-    void send(finalPrompt);
   };
+
+  const buildPrompt = () => {
+    const value = text.trim();
+    if (!value && chips.length === 0) return "";
+    const contextTags = chips.map((c) => `@${c.value}`).join(" ");
+    if (contextTags) {
+      return value ? `${contextTags}\n\n${value}` : contextTags;
+    }
+    return value;
+  };
+
+  const handleSend = () => {
+    const prompt = buildPrompt();
+    if (!prompt || running) return;
+    clearInput();
+    void send(prompt);
+  };
+
+  const handleSteer = () => {
+    const prompt = buildPrompt();
+    if (!prompt) return;
+    clearInput();
+    void steer(prompt);
+  };
+
+  const handleQueue = () => {
+    const prompt = buildPrompt();
+    if (!prompt) return;
+    clearInput();
+    void queue(prompt);
+  };
+
+  const submit = handleSend;
+
+
+
+
 
   const gauge = estimateTokens(text, chips);
 
@@ -384,10 +410,18 @@ export function Composer({ running }: { running: boolean }) {
 
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              submit();
+              if (running) {
+                if (text.trim() || chips.length > 0) handleQueue();
+              } else {
+                submit();
+              }
             } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              submit();
+              if (running) {
+                if (text.trim() || chips.length > 0) handleSteer();
+              } else {
+                submit();
+              }
             }
           }}
           rows={1}
@@ -485,16 +519,39 @@ export function Composer({ running }: { running: boolean }) {
             <span className="gauge-tokens">~{gauge.tokens} tok</span>
           </div>
 
-          {/* Send / Stop Button */}
+          {/* Send / Stop / Steer / Queue Buttons */}
           {running ? (
-            <button
-              data-testid="stop-button"
-              className="danger"
-              onClick={() => void stop()}
-              title="Interrupt the agent turn"
-            >
-              Stop
-            </button>
+            <div className="composer-actions">
+              <button
+                type="button"
+                data-testid="steer-button"
+                className="primary steer-btn"
+                disabled={!text.trim() && chips.length === 0}
+                onClick={handleSteer}
+                title="Steer agent immediately with new guidance (Cmd+Enter)"
+              >
+                Steer
+              </button>
+              <button
+                type="button"
+                data-testid="queue-button"
+                className="queue-btn"
+                disabled={!text.trim() && chips.length === 0}
+                onClick={handleQueue}
+                title="Queue message for next turn (Enter)"
+              >
+                Queue
+              </button>
+              <button
+                type="button"
+                data-testid="stop-button"
+                className="danger"
+                onClick={() => void stop()}
+                title="Interrupt the agent turn"
+              >
+                Stop
+              </button>
+            </div>
           ) : (
             <button
               data-testid="send-button"

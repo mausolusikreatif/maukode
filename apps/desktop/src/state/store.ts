@@ -125,6 +125,9 @@ interface AppState {
   renameSession: (id: string, title: string) => Promise<void>;
   setSessionModel: (id: string, model: string, providerId?: string) => Promise<void>;
   send: (text: string) => Promise<void>;
+  steer: (text: string) => Promise<void>;
+  queue: (text: string) => Promise<void>;
+  clearQueue: () => Promise<void>;
   stop: () => Promise<void>;
   respond: (requestId: string, decision: PermissionDecision) => Promise<void>;
   loadOlder: () => Promise<void>;
@@ -239,7 +242,11 @@ export const useApp = create<AppState>((set, get) => {
     try {
       const d = await client.getSession(id, 500);
       if (get().activeId !== id) return;
-      patchThread(id, (t) => ({ ...t, items: itemsFromMessages(d.messages) }));
+      patchThread(id, (t) => ({
+        ...t,
+        items: itemsFromMessages(d.messages),
+        queue: d.queued_prompts ?? t.queue,
+      }));
       set({ meta: metaFrom(d) });
     } catch {
       /* the live stream already showed the turn; a failed resync is not worth interrupting */
@@ -409,6 +416,7 @@ export const useApp = create<AppState>((set, get) => {
               running: d.running,
               pending: d.pending_permissions,
               lastSeq: d.last_event_seq,
+              queue: d.queued_prompts ?? [],
             }),
           },
         }));
@@ -490,6 +498,46 @@ export const useApp = create<AppState>((set, get) => {
         await client.prompt(activeId, text);
       } catch (e) {
         patchThread(activeId, (t) => ({ ...addNotice(t, "error", errorText(e)), running: false }));
+      }
+    },
+
+    steer: async (text) => {
+      const { client, activeId } = get();
+      if (!client || !activeId || !text.trim()) return;
+      patchThread(activeId, (t) => ({
+        ...t,
+        items: [...t.items, { kind: "user", id: `s${t.nextId}`, text: `[Steer] ${text}` }],
+        nextId: t.nextId + 1,
+      }));
+      try {
+        await client.steerPrompt(activeId, text);
+      } catch (e) {
+        patchThread(activeId, (t) => addNotice(t, "error", errorText(e)));
+      }
+    },
+
+    queue: async (text) => {
+      const { client, activeId } = get();
+      if (!client || !activeId || !text.trim()) return;
+      patchThread(activeId, (t) => ({
+        ...t,
+        queue: [...t.queue, text],
+      }));
+      try {
+        await client.queuePrompt(activeId, text);
+      } catch (e) {
+        patchThread(activeId, (t) => addNotice(t, "error", errorText(e)));
+      }
+    },
+
+    clearQueue: async () => {
+      const { client, activeId } = get();
+      if (!client || !activeId) return;
+      patchThread(activeId, (t) => ({ ...t, queue: [] }));
+      try {
+        await client.clearQueue(activeId);
+      } catch (e) {
+        patchThread(activeId, (t) => addNotice(t, "error", errorText(e)));
       }
     },
 
