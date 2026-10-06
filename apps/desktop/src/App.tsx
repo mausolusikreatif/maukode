@@ -60,6 +60,133 @@ function ModeSelect({ sessionId }: { sessionId: string }) {
   );
 }
 
+function SessionTitle({ sessionId, title }: { sessionId: string; title: string | null }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(title || "");
+  const renameSession = useApp((s) => s.renameSession);
+
+  useEffect(() => {
+    setValue(title || "");
+  }, [title]);
+
+  const commit = async () => {
+    setEditing(false);
+    if (value.trim() !== (title || "").trim()) {
+      await renameSession(sessionId, value);
+    }
+  };
+
+  if (editing) {
+    return (
+      <form
+        className="title-edit-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void commit();
+        }}
+      >
+        <input
+          autoFocus
+          className="title-input"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setValue(title || "");
+              setEditing(false);
+            }
+          }}
+          placeholder="Session title…"
+        />
+      </form>
+    );
+  }
+
+  return (
+    <div className="title-row">
+      <strong
+        data-testid="session-title"
+        className="title-text"
+        title="Double click or click pencil to rename"
+        onDoubleClick={() => setEditing(true)}
+      >
+        {title || "Session"}
+      </strong>
+      <button
+        type="button"
+        className="link icon-btn"
+        title="Rename session"
+        aria-label="Rename session"
+        onClick={() => setEditing(true)}
+      >
+        ✎
+      </button>
+    </div>
+  );
+}
+
+function ModelSelect({
+  sessionId,
+  currentProvider,
+  currentModel,
+}: {
+  sessionId: string;
+  currentProvider: string | null;
+  currentModel: string | null;
+}) {
+  const client = useApp((s) => s.client);
+  const setSessionModel = useApp((s) => s.setSessionModel);
+  const [models, setModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (currentProvider && client) {
+      void client
+        .models(currentProvider)
+        .then((r) => {
+          if (!cancelled && r.models.length > 0) setModels(r.models);
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [client, currentProvider]);
+
+  if (models.length > 0) {
+    return (
+      <select
+        className="model-select"
+        value={currentModel ?? ""}
+        title={`Provider: ${currentProvider ?? "default"} · Model`}
+        onChange={(e) => {
+          if (e.target.value) {
+            void setSessionModel(sessionId, e.target.value, currentProvider ?? undefined);
+          }
+        }}
+      >
+        {models.map((m) => (
+          <option key={m} value={m}>
+            {currentProvider}/{m}
+          </option>
+        ))}
+        {currentModel && !models.includes(currentModel) && (
+          <option value={currentModel}>
+            {currentProvider}/{currentModel}
+          </option>
+        )}
+      </select>
+    );
+  }
+
+  return (
+    <span className="small muted">
+      {currentProvider}/{currentModel}
+    </span>
+  );
+}
+
 function SessionView() {
   const { activeId, meta, threads, review, toggleReview } = useApp();
   const [deleting, setDeleting] = useState(false);
@@ -76,8 +203,12 @@ function SessionView() {
               <span className="chip project-chip">▤ {baseName(meta?.projectDir ?? meta?.directory ?? "")}</span>
               {meta?.branch && <span className="chip branch-chip">⎇ {meta.branch}</span>}
             </div>
-            <strong data-testid="session-title">{meta?.title || "Session"}</strong>
-            <span className="small muted">{meta?.provider}/{meta?.model}</span>
+            <SessionTitle sessionId={activeId} title={meta?.title ?? null} />
+            <ModelSelect
+              sessionId={activeId}
+              currentProvider={meta?.provider ?? null}
+              currentModel={meta?.model ?? null}
+            />
           </div>
           <div className="row">
             <ModeSelect sessionId={activeId} />

@@ -106,6 +106,8 @@ interface AppState {
   closeSession: () => void;
   createSession: (req: CreateSessionRequest) => Promise<void>;
   deleteSession: (id: string, opts?: { cleanupWorktree?: boolean; deleteBranch?: boolean }) => Promise<void>;
+  renameSession: (id: string, title: string) => Promise<void>;
+  setSessionModel: (id: string, model: string, providerId?: string) => Promise<void>;
   send: (text: string) => Promise<void>;
   stop: () => Promise<void>;
   respond: (requestId: string, decision: PermissionDecision) => Promise<void>;
@@ -381,6 +383,35 @@ export const useApp = create<AppState>((set, get) => {
       await client.deleteSession(id, opts);
       if (get().activeId === id) get().closeSession();
       await get().refreshSessions();
+    },
+
+    renameSession: async (id, title) => {
+      const client = get().client;
+      if (!client) return;
+      const clean = title.trim() || null;
+      await client.renameSession(id, clean);
+      if (get().activeId === id) {
+        set((s) => ({ meta: s.meta ? { ...s.meta, title: clean } : null }));
+      }
+      patchSession(id, (s) => ({ ...s, title: clean ?? s.title }));
+    },
+
+    setSessionModel: async (id, model, providerId) => {
+      const client = get().client;
+      if (!client) return;
+      await client.setSessionModel(id, model, providerId);
+      if (get().activeId === id) {
+        set((s) => ({
+          meta: s.meta
+            ? { ...s.meta, model, provider: providerId ?? s.meta.provider }
+            : null,
+        }));
+      }
+      patchSession(id, (s) => ({
+        ...s,
+        model,
+        provider: providerId ?? s.provider,
+      }));
     },
 
     send: async (text) => {

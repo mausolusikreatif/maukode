@@ -25,7 +25,10 @@ export function Sidebar() {
       const key = projectOf(s);
       map.set(key, [...(map.get(key) ?? []), s]);
     }
-    return [...map.entries()];
+    return [...map.entries()].map(([project, items]) => [
+      project,
+      [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+    ] as const);
   }, [sessions]);
 
   const needsYou = sessions.filter((s) => s.pending_permission_count > 0).length;
@@ -89,7 +92,9 @@ export function Sidebar() {
                         <span>{shortAgo(s.updated_at)}</span>
                       )}
                       {s.worktree_branch && (
-                        <span className="branch" title={s.worktree_branch}>⎇ worktree</span>
+                        <span className="branch" title={s.worktree_branch}>
+                          ⎇ {s.worktree_branch.replace(/^maukode\//, "")}
+                        </span>
                       )}
                     </span>
                   </button>
