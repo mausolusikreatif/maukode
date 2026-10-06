@@ -148,3 +148,14 @@ To bridge knowledge gaps beyond training cutoff dates, MauKode equips agents wit
   - Parses raw HTML into token-efficient Markdown, stripping headers, footers, scripts, styles, and advertisements.
 - **Runtime Aliasing**:
   - `ToolRegistry` resolves common LLM aliases (`search_web` $\to$ `web_search`, `fetch_url` / `read_url` $\to$ `fetch_web_content`) without duplicating tool definitions in the system prompt.
+
+---
+
+## 8. Subagents & Client Roadmaps
+
+MauKode provides specialized documentation for multi-agent expansion and client interfaces:
+
+- **[Subagent Architecture & Execution Model](./SUBAGENT_ARCHITECTURE.md)**: Details the subagent orchestration hub, child session runner, token budgeting, physical read-only sandboxing, and parent-child event streaming.
+- **[Terminal UI Roadmap](./TUI_ROADMAP.md)**: Outlines Ratatui interface milestones, live plan timeline widgets, keyboard steering/queuing, session explorer upgrades, and subagent drill-down modals.
+- **[Desktop Product Roadmap](./DESKTOP_ROADMAP.md)**: Covers the Tauri desktop app, session management, composer context mentions, and native desktop shell integrations.
+
