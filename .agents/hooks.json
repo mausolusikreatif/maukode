@@ -1,0 +1,16 @@
+{
+  "block-local-builds-and-tests": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/block-local-build.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
