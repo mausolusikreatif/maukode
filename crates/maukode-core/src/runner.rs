@@ -5,7 +5,8 @@ use crate::store::sqlite::{PermissionAuditRecord, SqliteSessionStore};
 use futures::StreamExt;
 use maukode_llm::{LLMClient, LLMRequest};
 use maukode_protocol::{
-    ContentPart, FinishReason, LLMEvent, Message, Role, SessionState, ToolCall, ToolResult,
+    ContentPart, FinishReason, LLMEvent, Message, Role, SessionState, StopReason, ToolCall,
+    ToolResult,
 };
 use maukode_tools::ToolRegistry;
 use std::sync::Arc;
@@ -23,11 +24,39 @@ impl Default for RunnerConfig {
     fn default() -> Self {
         Self {
             model: "claude-3-7-sonnet-20250219".to_string(),
-            max_steps: 25,
-            max_tokens: Some(4096),
+            max_steps: 50,
+            max_tokens: Some(8192),
             temperature: None,
         }
     }
+}
+
+/// How many times a response cut off by the output limit is resumed automatically.
+const MAX_AUTO_CONTINUATIONS: usize = 2;
+
+/// Every tool call stored in history must have a matching result, or the next provider request
+/// is rejected. Build "cancelled" results for the calls (`(id, name)`) that never got one.
+fn cancelled_results(calls: &[(String, String)], answered: &[ContentPart]) -> Vec<ContentPart> {
+    calls
+        .iter()
+        .filter(|(id, _)| {
+            !answered
+                .iter()
+                .any(|p| matches!(p, ContentPart::ToolResult(r) if &r.tool_call_id == id))
+        })
+        .map(|(id, name)| {
+            ContentPart::ToolResult(ToolResult {
+                tool_call_id: id.clone(),
+                tool_name: name.clone(),
+                content: "Cancelled by user before this tool ran.".to_string(),
+                is_error: true,
+            })
+        })
+        .collect()
+}
+
+fn stopped(reason: StopReason, message: Option<String>) -> LLMEvent {
+    LLMEvent::TurnStopped { reason, message }
 }
 
 pub struct SessionRunner {
@@ -91,12 +120,42 @@ impl SessionRunner {
     }
 
     /// Run the multi-turn agent loop with cancellation support.
+    /// Run one agent turn. Every call ends the event stream with exactly one
+    /// [`LLMEvent::TurnStopped`] (after an [`LLMEvent::Error`] on failure) so clients never have
+    /// to guess whether the agent is done.
     pub async fn run_with_cancellation(
         &self,
         user_prompt: Option<String>,
         event_tx: mpsc::UnboundedSender<LLMEvent>,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> anyhow::Result<()> {
+        match self
+            .run_turn(user_prompt, event_tx.clone(), cancellation_token)
+            .await
+        {
+            Ok((reason, message)) => {
+                let _ = event_tx.send(stopped(reason, message));
+                Ok(())
+            }
+            Err(e) => {
+                let message = e.to_string();
+                error!("Agent turn failed: {message}");
+                self.session.write().await.state = SessionState::Failed(message.clone());
+                let _ = event_tx.send(LLMEvent::Error {
+                    message: message.clone(),
+                });
+                let _ = event_tx.send(stopped(StopReason::Error, Some(message)));
+                Err(e)
+            }
+        }
+    }
+
+    async fn run_turn(
+        &self,
+        user_prompt: Option<String>,
+        event_tx: mpsc::UnboundedSender<LLMEvent>,
+        cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    ) -> anyhow::Result<(StopReason, Option<String>)> {
         let (session_id, session_id_str, mut turn_idx) = {
             let mut session = self.session.write().await;
             if let Some(ref prompt) = user_prompt {
@@ -122,6 +181,8 @@ impl SessionRunner {
 
         let system_prompt = self.context.render_system_context().await;
         let mut step = 0;
+        let mut continuations = 0usize;
+        let mut stop: (StopReason, Option<String>) = (StopReason::Completed, None);
 
         loop {
             step += 1;
@@ -130,9 +191,14 @@ impl SessionRunner {
                     "Max steps ({}) reached. Ending session turn.",
                     self.config.max_steps
                 );
-                let _ = event_tx.send(LLMEvent::Finish {
-                    reason: FinishReason::MaxTokens,
-                });
+                stop = (
+                    StopReason::MaxSteps,
+                    Some(format!(
+                        "Reached the step limit ({}) before the task finished. Send a message \
+                         (e.g. \"continue\") to resume, or raise the limit.",
+                        self.config.max_steps
+                    )),
+                );
                 break;
             }
 
@@ -217,7 +283,7 @@ impl SessionRunner {
                     let _ = event_tx.send(LLMEvent::Finish {
                         reason: FinishReason::Cancelled,
                     });
-                    return Ok(());
+                    return Ok((StopReason::Cancelled, None));
                 }
             }
 
@@ -235,7 +301,7 @@ impl SessionRunner {
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
             let mut provider_items = Vec::new();
-            let mut _finish_reason = FinishReason::EndTurn;
+            let mut finish_reason = FinishReason::EndTurn;
 
             let mut is_cancelled = false;
             while let Some(event_res) = tokio::select! {
@@ -267,21 +333,14 @@ impl SessionRunner {
                                 });
                             }
                             LLMEvent::Finish { reason } => {
-                                _finish_reason = reason.clone();
+                                finish_reason = reason.clone();
                             }
                             _ => {}
                         }
                         let _ = event_tx.send(event);
                     }
-                    Err(e) => {
-                        error!("Error during LLM stream: {e}");
-                        let _ = event_tx.send(LLMEvent::Error {
-                            message: e.to_string(),
-                        });
-                        let mut session = self.session.write().await;
-                        session.state = SessionState::Failed(e.to_string());
-                        return Err(e.into());
-                    }
+                    // The caller reports the failure (Error + TurnStopped) and marks the session.
+                    Err(e) => return Err(e.into()),
                 }
             }
 
@@ -297,40 +356,88 @@ impl SessionRunner {
                 assistant_parts.push(ContentPart::ToolCall(tc.clone()));
             }
 
-            let mut session = self.session.write().await;
-            session.add_message(Message::assistant(assistant_parts));
-            drop(session);
+            // An empty assistant message is invalid for several providers and would poison the
+            // next request, so never store one.
+            let empty_response = assistant_parts.is_empty();
+            if !empty_response {
+                let mut session = self.session.write().await;
+                session.add_message(Message::assistant(assistant_parts));
+            }
 
             // If the turn was cancelled mid-stream, stop after preserving partial output.
             if is_cancelled {
                 debug!("Turn cancelled by user mid-stream.");
+                if !tool_calls.is_empty() {
+                    let meta: Vec<(String, String)> = tool_calls
+                        .iter()
+                        .map(|c| (c.id.clone(), c.name.clone()))
+                        .collect();
+                    self.session.write().await.add_message(Message {
+                        role: Role::User,
+                        parts: cancelled_results(&meta, &[]),
+                    });
+                }
                 let _ = event_tx.send(LLMEvent::Finish {
                     reason: FinishReason::Cancelled,
                 });
                 let mut session = self.session.write().await;
                 session.state = SessionState::Idle;
-                return Ok(());
+                return Ok((StopReason::Cancelled, None));
             }
 
-            // If there are no tool calls to execute, the turn is complete!
+            if empty_response {
+                stop = (
+                    StopReason::Error,
+                    Some("The model returned an empty response. Try again or switch model.".into()),
+                );
+                break;
+            }
+
+            if finish_reason != FinishReason::MaxTokens {
+                continuations = 0;
+            }
+
+            // No tool calls: the model is done, unless the output limit cut it off mid-answer.
             if tool_calls.is_empty() {
+                if finish_reason == FinishReason::MaxTokens {
+                    if continuations < MAX_AUTO_CONTINUATIONS {
+                        continuations += 1;
+                        info!("Response hit the output limit; auto-continuing ({continuations})");
+                        self.session.write().await.add_message(Message::user(
+                            "Your previous response was cut off by the output limit. Continue \
+                             exactly where you left off.",
+                        ));
+                        continue;
+                    }
+                    stop = (
+                        StopReason::MaxTokens,
+                        Some(
+                            "The response was cut off by the output limit (max_tokens) and the \
+                             task is probably unfinished. Send \"continue\" to resume, or raise \
+                             max_tokens."
+                                .into(),
+                        ),
+                    );
+                }
                 debug!("Turn complete with no further tool calls.");
                 break;
             }
 
             // Execute tools
             let mut tool_results = Vec::new();
+            let call_meta: Vec<(String, String)> = tool_calls
+                .iter()
+                .map(|c| (c.id.clone(), c.name.clone()))
+                .collect();
+            let mut cancelled = false;
             for call in tool_calls {
                 let mut keep_result_private = false;
-                if let Some(ref token) = cancellation_token {
-                    if token.is_cancelled() {
-                        let _ = event_tx.send(LLMEvent::Finish {
-                            reason: FinishReason::Cancelled,
-                        });
-                        let mut session = self.session.write().await;
-                        session.state = SessionState::Idle;
-                        return Ok(());
-                    }
+                if cancellation_token
+                    .as_ref()
+                    .is_some_and(|t| t.is_cancelled())
+                {
+                    cancelled = true;
+                    break;
                 }
 
                 info!("Executing tool: {} ({})", call.name, call.id);
@@ -406,21 +513,35 @@ impl SessionRunner {
                             description,
                         };
 
-                        let rx = perm_mgr.register_request(req_id).await;
+                        let rx = perm_mgr.register_request(req_id.clone()).await;
                         let _ = event_tx.send(LLMEvent::PermissionRequest(perm_req));
 
-                        // Wait for user's decision (timeout 5 minutes)
-                        let decision =
-                            match tokio::time::timeout(std::time::Duration::from_secs(300), rx)
-                                .await
-                            {
-                                Ok(Ok(d)) => d,
-                                Ok(Err(_)) => maukode_protocol::PermissionDecision::Deny,
-                                Err(_) => {
-                                    tracing::warn!("Permission request timed out");
-                                    maukode_protocol::PermissionDecision::Deny
+                        // Wait for the user's decision (5 minute timeout); Stop must not have to
+                        // wait for it.
+                        let decision = tokio::select! {
+                            biased;
+                            _ = async {
+                                match &cancellation_token {
+                                    Some(token) => token.cancelled().await,
+                                    None => futures::future::pending::<()>().await,
                                 }
-                            };
+                            } => {
+                                perm_mgr.forget_request(&req_id).await;
+                                cancelled = true;
+                                break;
+                            }
+                            waited = tokio::time::timeout(std::time::Duration::from_secs(300), rx) => {
+                                match waited {
+                                    Ok(Ok(d)) => d,
+                                    Ok(Err(_)) => maukode_protocol::PermissionDecision::Deny,
+                                    Err(_) => {
+                                        tracing::warn!("Permission request timed out");
+                                        perm_mgr.forget_request(&req_id).await;
+                                        maukode_protocol::PermissionDecision::Deny
+                                    }
+                                }
+                            }
+                        };
 
                         if let Some(store) = &self.permission_store {
                             let visibility =
@@ -482,12 +603,8 @@ impl SessionRunner {
                     tokio::select! {
                         biased;
                         _ = token.cancelled() => {
-                            let _ = event_tx.send(LLMEvent::Finish {
-                                reason: FinishReason::Cancelled,
-                            });
-                            let mut session = self.session.write().await;
-                            session.state = SessionState::Idle;
-                            return Ok(());
+                            cancelled = true;
+                            break;
                         }
                         res = self.tools.execute(&call.name, call.arguments) => res,
                     }
@@ -523,6 +640,22 @@ impl SessionRunner {
                 }
             }
 
+            if cancelled {
+                let extra = cancelled_results(&call_meta, &tool_results);
+                tool_results.extend(extra);
+                let mut session = self.session.write().await;
+                session.add_message(Message {
+                    role: Role::User,
+                    parts: tool_results,
+                });
+                session.state = SessionState::Idle;
+                drop(session);
+                let _ = event_tx.send(LLMEvent::Finish {
+                    reason: FinishReason::Cancelled,
+                });
+                return Ok((StopReason::Cancelled, None));
+            }
+
             // Tool calls must have matching results in model history. Private results are replaced
             // by an explicit placeholder so their contents can never enter a later model request.
             let mut session = self.session.write().await;
@@ -536,6 +669,214 @@ impl SessionRunner {
         let mut session = self.session.write().await;
         session.state = SessionState::Idle;
 
-        Ok(())
+        Ok(stop)
+    }
+}
+
+#[cfg(test)]
+mod turn_tests {
+    use super::*;
+    use maukode_llm::{LLMError, LLMStream};
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    type Step = Result<Vec<Result<LLMEvent, LLMError>>, LLMError>;
+
+    /// Replays scripted provider responses, one per request.
+    struct ScriptedLlm(Mutex<VecDeque<Step>>);
+
+    #[async_trait::async_trait]
+    impl LLMClient for ScriptedLlm {
+        async fn stream(&self, _request: LLMRequest) -> Result<LLMStream, LLMError> {
+            let step = self
+                .0
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("script exhausted");
+            step.map(|events| Box::pin(futures::stream::iter(events)) as LLMStream)
+        }
+    }
+
+    fn text(t: &str, reason: FinishReason) -> Step {
+        Ok(vec![
+            Ok(LLMEvent::TextDelta { text: t.into() }),
+            Ok(LLMEvent::Finish { reason }),
+        ])
+    }
+
+    async fn run(
+        script: Vec<Step>,
+        max_steps: usize,
+    ) -> (
+        Vec<LLMEvent>,
+        anyhow::Result<()>,
+        Vec<Message>,
+        SessionState,
+    ) {
+        let dir = std::env::temp_dir();
+        let session = Arc::new(RwLock::new(Session::new(&dir)));
+        let runner = SessionRunner::new(
+            Arc::clone(&session),
+            Arc::new(ScriptedLlm(Mutex::new(script.into()))),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(ContextManager::new(&dir)),
+            RunnerConfig {
+                max_steps,
+                ..RunnerConfig::default()
+            },
+        );
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let result = runner
+            .run_with_cancellation(Some("go".into()), tx, None)
+            .await;
+        let mut events = Vec::new();
+        while let Some(e) = rx.recv().await {
+            events.push(e);
+        }
+        let guard = session.read().await;
+        (events, result, guard.messages.clone(), guard.state.clone())
+    }
+
+    fn stops(events: &[LLMEvent]) -> Vec<(StopReason, Option<String>)> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                LLMEvent::TurnStopped { reason, message } => Some((*reason, message.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn normal_completion_emits_one_completed() {
+        let (events, result, _, _) = run(vec![text("done", FinishReason::EndTurn)], 5).await;
+        assert!(result.is_ok());
+        assert_eq!(stops(&events), vec![(StopReason::Completed, None)]);
+        assert!(matches!(events.last(), Some(LLMEvent::TurnStopped { .. })));
+    }
+
+    #[tokio::test]
+    async fn truncated_response_is_auto_continued() {
+        let (events, _, messages, _) = run(
+            vec![
+                text("part one ", FinishReason::MaxTokens),
+                text("part two", FinishReason::EndTurn),
+            ],
+            5,
+        )
+        .await;
+        assert_eq!(stops(&events), vec![(StopReason::Completed, None)]);
+        // user prompt, assistant part 1, synthetic continue, assistant part 2
+        assert_eq!(messages.len(), 4);
+        assert!(messages[2].text_content().contains("cut off"));
+    }
+
+    #[tokio::test]
+    async fn persistent_truncation_reports_max_tokens() {
+        let script = (0..=MAX_AUTO_CONTINUATIONS)
+            .map(|_| text("x", FinishReason::MaxTokens))
+            .collect();
+        let (events, _, _, _) = run(script, 10).await;
+        let s = stops(&events);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].0, StopReason::MaxTokens);
+        assert!(s[0].1.as_deref().unwrap().contains("continue"));
+    }
+
+    #[tokio::test]
+    async fn step_limit_is_reported_as_max_steps_not_max_tokens() {
+        let call = |id: &str| -> Step {
+            Ok(vec![
+                Ok(LLMEvent::ToolCallFinish {
+                    tool_call: ToolCall {
+                        id: id.into(),
+                        name: "missing_tool".into(),
+                        arguments: serde_json::json!({}),
+                    },
+                }),
+                Ok(LLMEvent::Finish {
+                    reason: FinishReason::ToolUse,
+                }),
+            ])
+        };
+        let (events, result, _, _) = run(vec![call("1"), call("2")], 2).await;
+        assert!(result.is_ok());
+        let s = stops(&events);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].0, StopReason::MaxSteps);
+        // No misleading provider-level MaxTokens finish.
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            LLMEvent::Finish {
+                reason: FinishReason::MaxTokens
+            }
+        )));
+    }
+
+    #[tokio::test]
+    async fn provider_failures_always_close_with_error() {
+        // Failure before the stream opens: previously produced no event at all.
+        let (events, result, _, state) = run(vec![Err(LLMError::Stream("boom".into()))], 5).await;
+        assert!(result.is_err());
+        assert!(events.iter().any(|e| matches!(e, LLMEvent::Error { .. })));
+        let s = stops(&events);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].0, StopReason::Error);
+        assert!(matches!(state, SessionState::Failed(_)));
+    }
+
+    #[tokio::test]
+    async fn empty_response_is_an_error_and_not_stored() {
+        let (events, _, messages, _) = run(
+            vec![Ok(vec![Ok(LLMEvent::Finish {
+                reason: FinishReason::EndTurn,
+            })])],
+            5,
+        )
+        .await;
+        let s = stops(&events);
+        assert_eq!(s[0].0, StopReason::Error);
+        assert!(s[0].1.as_deref().unwrap().contains("empty"));
+        // Only the user prompt: no empty assistant message that would poison the next request.
+        assert_eq!(messages.len(), 1);
+    }
+
+    /// A gateway that reports `Finish(EndTurn)` alongside tool calls must not end the turn: the
+    /// runner keeps going until a response has no tool calls.
+    #[tokio::test]
+    async fn tool_calls_continue_even_if_provider_reports_stop() {
+        let call: Step = Ok(vec![
+            Ok(LLMEvent::ToolCallFinish {
+                tool_call: ToolCall {
+                    id: "1".into(),
+                    name: "missing_tool".into(),
+                    arguments: serde_json::json!({}),
+                },
+            }),
+            Ok(LLMEvent::Finish {
+                reason: FinishReason::EndTurn,
+            }),
+        ]);
+        let (events, result, messages, _) =
+            run(vec![call, text("all done", FinishReason::EndTurn)], 5).await;
+        assert!(result.is_ok());
+        // user, assistant(tool call), user(tool result), assistant(text)
+        assert_eq!(messages.len(), 4);
+        assert_eq!(stops(&events), vec![(StopReason::Completed, None)]);
+        let finishes = events
+            .iter()
+            .filter(|e| matches!(e, LLMEvent::Finish { .. }))
+            .count();
+        assert_eq!(finishes, 2, "the early Finish arrives before the turn ends");
+        let first_finish = events
+            .iter()
+            .position(|e| matches!(e, LLMEvent::Finish { .. }))
+            .unwrap();
+        let stop = events
+            .iter()
+            .position(|e| matches!(e, LLMEvent::TurnStopped { .. }))
+            .unwrap();
+        assert!(first_finish < stop);
     }
 }

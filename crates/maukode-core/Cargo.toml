@@ -22,6 +22,7 @@ tracing.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 rusqlite.workspace = true
+ts-rs = { workspace = true, optional = true }
 dirs.workspace = true
 reqwest.workspace = true
 eventsource-stream.workspace = true
@@ -35,5 +36,8 @@ tree-sitter-typescript.workspace = true
 tree-sitter-python.workspace = true
 tree-sitter-go.workspace = true
  
+[features]
+ts = ["dep:ts-rs", "maukode-protocol/ts"]
+
 [dev-dependencies]
 tempfile.workspace = true

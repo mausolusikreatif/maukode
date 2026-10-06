@@ -1,0 +1,23 @@
+[package]
+name = "maukode-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# Standalone workspace: this crate needs system WebView libraries (WebKitGTK on Linux), so it is
+# excluded from the root workspace and CI's `cargo test --workspace`.
+[workspace]
+
+[features]
+# Serve the bundled UI instead of the dev-server URL; required for release builds.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["sync", "process"] }
+maukode-server = { path = "../../../crates/maukode-server" }

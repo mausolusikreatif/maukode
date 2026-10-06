@@ -461,4 +461,20 @@ mod tests {
         let events = result.expect("[DONE] should end the stream before the server closes");
         assert!(events.iter().any(|event| matches!(event, Ok(LLMEvent::ToolCallFinish { tool_call }) if tool_call.name == "grep")));
     }
+
+    /// Some OpenAI-compatible gateways report `finish_reason: "stop"` even when tool calls were
+    /// streamed. The tool call must still be emitted; callers must not read `Finish` as "done".
+    #[test]
+    fn stop_finish_reason_with_tool_calls_still_emits_the_call() {
+        let mut state = StreamState::default();
+        state.consume(&json!({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "id": "call_1", "function": {"name": "grep", "arguments": r#"{"pattern":"x"}"#}
+        }]}}]}));
+        let done = state.consume(&json!({"choices": [{"finish_reason": "stop"}]}));
+        assert!(matches!(
+            done.as_slice(),
+            [Ok(LLMEvent::ToolCallFinish { tool_call }), Ok(LLMEvent::Finish { reason: FinishReason::EndTurn })]
+            if tool_call.name == "grep"
+        ));
+    }
 }

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionMode {
     /// Ask for confirmation on dangerous commands (default)
@@ -68,6 +69,17 @@ impl PermissionManager {
         self
     }
 
+    /// Create a manager with its own independent mode that still shares pending requests and
+    /// whitelists with `self`, so responses to prompts keep working across forks.
+    pub fn fork(&self) -> Self {
+        Self {
+            mode: Arc::new(AtomicU8::new(self.mode.load(Ordering::Relaxed))),
+            pending: Arc::clone(&self.pending),
+            session_whitelists: Arc::clone(&self.session_whitelists),
+            static_whitelist: Arc::clone(&self.static_whitelist),
+        }
+    }
+
     pub fn mode(&self) -> PermissionMode {
         PermissionMode::from_u8(self.mode.load(Ordering::Relaxed))
     }
@@ -122,6 +134,11 @@ impl PermissionManager {
         let mut guard = self.pending.lock().await;
         guard.insert(request_id, tx);
         rx
+    }
+
+    /// Drop a pending request that nobody will answer (cancelled or timed out).
+    pub async fn forget_request(&self, request_id: &str) {
+        self.pending.lock().await.remove(request_id);
     }
 
     /// Respond to a pending permission request

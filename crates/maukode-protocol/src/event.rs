@@ -1,7 +1,9 @@
 use crate::message::{ToolCall, ToolResult};
+use crate::session::SessionId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
     EndTurn,
@@ -12,15 +14,45 @@ pub enum FinishReason {
     Error,
 }
 
+/// Why an agent turn ended. Exactly one `LLMEvent::TurnStopped` closes every turn; per-step
+/// `Finish` events are provider-level and must not be used to decide the turn is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum StopReason {
+    /// The model finished its answer.
+    Completed,
+    /// The output limit cut the response off (auto-continue was exhausted).
+    MaxTokens,
+    /// The step limit was reached with work possibly unfinished.
+    MaxSteps,
+    Cancelled,
+    /// Provider/stream failure or an empty model response; see the message.
+    Error,
+}
+
+impl StopReason {
+    /// True when the user probably needs to send "continue" to finish the task.
+    pub fn needs_continue(self) -> bool {
+        matches!(self, Self::MaxTokens | Self::MaxSteps)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TokenUsage {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub input_tokens: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub output_tokens: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub cache_read_tokens: Option<u64>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub cache_write_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionDecision {
     AllowOnce,
@@ -32,6 +64,7 @@ pub enum PermissionDecision {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PermissionRequest {
     pub request_id: String,
     pub session_id: String,
@@ -43,6 +76,7 @@ pub struct PermissionRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LLMEvent {
     TextDelta {
@@ -76,15 +110,22 @@ pub enum LLMEvent {
         percent: u32,
         message: String,
     },
+    /// A single provider response ended (one step of a possibly multi-step turn).
     Finish {
         reason: FinishReason,
     },
     Error {
         message: String,
     },
+    /// The whole agent turn is over. Always the last event of a turn.
+    TurnStopped {
+        reason: StopReason,
+        message: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Checkpoint {
     pub id: String,
     pub session_id: String,
@@ -96,6 +137,7 @@ pub struct Checkpoint {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct DiffResponse {
     pub session_id: String,
     pub files_changed: usize,
@@ -106,6 +148,7 @@ pub struct DiffResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UndoResponse {
     pub session_id: String,
     pub target_turn: usize,
@@ -114,18 +157,21 @@ pub struct UndoResponse {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CodebaseMapResponse {
     pub session_id: String,
     pub map: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct InitProjectRequest {
     #[serde(default)]
     pub force: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct InitProjectResponse {
     pub session_id: String,
     pub path: String,
@@ -137,12 +183,14 @@ pub struct InitProjectResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct McpToolInfo {
     pub name: String,
     pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct McpServerStatus {
     pub name: String,
     pub command: String,
@@ -152,17 +200,20 @@ pub struct McpServerStatus {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct McpListResponse {
     pub servers: Vec<McpServerStatus>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CompactRequest {
     #[serde(default)]
     pub focus: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CompactResponse {
     pub session_id: String,
     pub original_messages: usize,
@@ -170,4 +221,74 @@ pub struct CompactResponse {
     pub original_tokens: usize,
     pub compacted_tokens: usize,
     pub summary: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum FileDiffStatus {
+    Added,
+    Modified,
+    Deleted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct FileDiffEntry {
+    pub path: String,
+    pub status: FileDiffStatus,
+    /// `None` for binary files.
+    pub insertions: Option<usize>,
+    pub deletions: Option<usize>,
+    pub binary: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct FileDiffListResponse {
+    pub session_id: String,
+    pub files: Vec<FileDiffEntry>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct FileDiffResponse {
+    pub session_id: String,
+    pub path: String,
+    pub diff: String,
+    /// True when `diff` was cut to the server's size cap.
+    pub truncated: bool,
+}
+
+/// Cross-session activity for dashboards (`GET /api/v1/events`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GlobalEvent {
+    SessionCreated {
+        session_id: SessionId,
+    },
+    /// Title, model or worktree metadata changed.
+    SessionUpdated {
+        session_id: SessionId,
+    },
+    SessionDeleted {
+        session_id: SessionId,
+    },
+    TurnStarted {
+        session_id: SessionId,
+    },
+    TurnFinished {
+        session_id: SessionId,
+        reason: StopReason,
+        message: Option<String>,
+    },
+    PermissionRequested {
+        session_id: SessionId,
+        request: PermissionRequest,
+    },
+    PermissionResolved {
+        session_id: SessionId,
+        request_id: String,
+    },
 }

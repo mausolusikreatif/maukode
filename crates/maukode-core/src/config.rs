@@ -5,7 +5,35 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Agent loop limits applied to every turn started through the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct AgentConfig {
+    #[serde(default = "default_max_steps")]
+    pub max_steps: usize,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+}
+
+fn default_max_steps() -> usize {
+    50
+}
+
+fn default_max_tokens() -> u32 {
+    8192
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            max_steps: default_max_steps(),
+            max_tokens: default_max_tokens(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     Anthropic,
@@ -50,6 +78,7 @@ impl Default for SecurityConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ProviderConfig {
     pub id: String,
     pub name: String,
@@ -113,6 +142,8 @@ pub struct AppConfig {
     pub mcp_servers: std::collections::HashMap<String, McpServerConfig>,
     #[serde(default)]
     pub web_search: WebSearchConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 impl Default for AppConfig {
@@ -176,6 +207,7 @@ impl Default for AppConfig {
                 },
             ],
             security: SecurityConfig::default(),
+            agent: AgentConfig::default(),
         };
         Self::sync_from_opencode_if_present(&mut cfg);
         cfg
@@ -184,7 +216,7 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn config_path() -> PathBuf {
-        if let Some(mut dir) = dirs::config_dir() {
+        if let Some(mut dir) = crate::paths::config_dir() {
             dir.push("maukode");
             dir.push("config.json");
             dir
@@ -334,6 +366,20 @@ impl AppConfig {
         let _ = self.save();
     }
 
+    /// Remove a provider. The active provider cannot be removed; returns whether it existed.
+    pub fn remove_provider(&mut self, id: &str) -> Result<bool> {
+        if self.active_provider == id {
+            anyhow::bail!("Cannot remove the active provider; switch to another one first");
+        }
+        let before = self.providers.len();
+        self.providers.retain(|p| p.id != id);
+        let removed = self.providers.len() != before;
+        if removed {
+            self.save()?;
+        }
+        Ok(removed)
+    }
+
     pub fn set_active_provider(&mut self, id: &str) -> Result<()> {
         let provider = self
             .get_provider(id)
@@ -343,7 +389,9 @@ impl AppConfig {
         if provider.kind == ProviderKind::ChatGpt
             && crate::chatgpt_auth::ChatGptAuth::new()?.status()?.is_none()
         {
-            anyhow::bail!("Sign in with ChatGPT first: maukode auth login");
+            anyhow::bail!(
+                "Sign in with ChatGPT first (Settings → ChatGPT, or `maukode auth login`)"
+            );
         }
 
         self.active_provider = provider.id;
@@ -367,9 +415,14 @@ impl AppConfig {
     }
 
     pub fn create_active_llm_client(&self) -> Result<Arc<dyn LLMClient>> {
+        self.create_llm_client_for(&self.active_provider)
+    }
+
+    /// Build a client for a specific provider (used for per-session provider/model pinning).
+    pub fn create_llm_client_for(&self, provider_id: &str) -> Result<Arc<dyn LLMClient>> {
         let provider = self
-            .get_active_provider()
-            .ok_or_else(|| anyhow::anyhow!("No active provider configured"))?;
+            .get_provider(provider_id)
+            .ok_or_else(|| anyhow::anyhow!("Provider '{provider_id}' not found"))?;
 
         match provider.kind {
             ProviderKind::ChatGpt => {

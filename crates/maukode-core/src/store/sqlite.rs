@@ -3,13 +3,14 @@ use crate::session::Session;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use maukode_protocol::{Message, PermissionDecision, SessionId, SessionState};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SessionSummary {
     pub id: SessionId,
     pub directory: String,
@@ -18,11 +19,18 @@ pub struct SessionSummary {
     pub provider: String,
     pub model: String,
     pub updated_at: DateTime<Utc>,
+    /// Original repository when the session runs in an isolated git worktree.
+    #[serde(default)]
+    pub project_dir: Option<String>,
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PermissionAuditRecord {
     pub session_id: SessionId,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub turn_id: i64,
     pub tool_call_id: String,
     pub tool_name: String,
@@ -35,8 +43,10 @@ pub struct PermissionAuditRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PermissionModeAuditRecord {
     pub session_id: SessionId,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub turn_id: i64,
     pub previous_mode: PermissionMode,
     pub new_mode: PermissionMode,
@@ -45,9 +55,12 @@ pub struct PermissionModeAuditRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CompactionAuditRecord {
     pub session_id: SessionId,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub source_turn_start: i64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub source_turn_end: i64,
     pub original_message_count: usize,
     pub compacted_message_count: usize,
@@ -56,6 +69,52 @@ pub struct CompactionAuditRecord {
     pub trigger: String,
     pub summary: String,
     pub created_at: DateTime<Utc>,
+}
+
+fn is_busy(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(f, _)
+            if matches!(
+                f.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    )
+}
+
+/// Retry an operation that hit lock contention, backing off for up to ~10 seconds.
+fn retry_busy<T>(mut op: impl FnMut() -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut delay = std::time::Duration::from_millis(5);
+    loop {
+        match op() {
+            Err(e) if is_busy(&e) && std::time::Instant::now() < deadline => {
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(std::time::Duration::from_millis(100));
+            }
+            result => return result,
+        }
+    }
+}
+
+/// Structured provenance for a session, newest records first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct AuditReport {
+    pub permission_count: usize,
+    pub mode_change_count: usize,
+    pub compaction_count: usize,
+    pub permissions: Vec<PermissionAuditRecord>,
+    pub mode_changes: Vec<PermissionModeAuditRecord>,
+    pub compactions: Vec<CompactionAuditRecord>,
+}
+
+const AUDIT_REPORT_LIMIT: usize = 200;
+
+fn parse_ts(value: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_default()
 }
 
 #[derive(Clone)]
@@ -70,7 +129,7 @@ impl SqliteSessionStore {
     }
 
     pub fn default_db_path() -> PathBuf {
-        if let Some(mut dir) = dirs::data_dir() {
+        if let Some(mut dir) = crate::paths::data_dir() {
             dir.push("maukode");
             dir.push("maukode.db");
             dir
@@ -92,9 +151,21 @@ impl SqliteSessionStore {
         let conn = Connection::open(&db_path)
             .with_context(|| format!("Failed to open sqlite database at {}", db_path.display()))?;
 
+        // Several agents (and CLI/TUI processes) share this file: WAL lets readers run during a
+        // write and the busy timeout turns brief contention into a wait instead of an error.
+        // The timeout must be installed first: switching to WAL takes a lock, and without a busy
+        // handler a concurrent opener fails immediately with "database is locked".
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // Even with a busy handler SQLite reports SQLITE_BUSY at once for some lock upgrades
+        // (it cannot wait without risking deadlock), so setup is retried explicitly.
+        retry_busy(|| {
+            conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
+        })?;
+
         // Initialize schema
-        conn.execute_batch(
-            "
+        retry_busy(|| {
+            conn.execute_batch(
+                "
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 directory TEXT NOT NULL DEFAULT '',
@@ -183,17 +254,30 @@ impl SqliteSessionStore {
                 FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             ",
-        )?;
+            )
+        })?;
 
-        // Safe migration if table previously existed without directory column
-        let _ = conn.execute(
+        // Safe migrations for databases created by older versions. "duplicate column" just means
+        // the migration already ran; anything else (other than lock contention) is a real error.
+        for ddl in [
             "ALTER TABLE sessions ADD COLUMN directory TEXT NOT NULL DEFAULT '';",
-            [],
-        );
-        let _ = conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_directory ON sessions(directory);",
-            [],
-        );
+            "ALTER TABLE sessions ADD COLUMN custom_title TEXT;",
+            "ALTER TABLE sessions ADD COLUMN project_dir TEXT;",
+            "ALTER TABLE sessions ADD COLUMN worktree_branch TEXT;",
+            "ALTER TABLE sessions ADD COLUMN base_commit TEXT;",
+        ] {
+            match retry_busy(|| conn.execute(ddl, [])) {
+                Ok(_) => {}
+                Err(e) if e.to_string().contains("duplicate column name") => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        retry_busy(|| {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_directory ON sessions(directory);",
+                [],
+            )
+        })?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -202,28 +286,29 @@ impl SqliteSessionStore {
     }
 
     pub async fn save_session(&self, session: &Session, provider: &str, model: &str) -> Result<()> {
-        let conn = self.conn.lock().await;
+        let mut conn = self.conn.lock().await;
 
         let title = session
             .messages
             .first()
             .map(|m| {
                 let text = m.text_content();
-                if text.len() > 40 {
-                    format!("{}...", &text[..40])
+                if text.chars().count() > 40 {
+                    format!("{}...", text.chars().take(40).collect::<String>())
                 } else {
                     text
                 }
             })
             .unwrap_or_else(|| "New Session".to_string());
 
+        let tx = conn.transaction()?;
         let state_str = serde_json::to_string(&session.state)?;
         let id_str = session.id.to_string();
         let directory_str = session.directory.to_string_lossy().to_string();
         let created_at_str = session.created_at.to_rfc3339();
         let updated_at_str = session.updated_at.to_rfc3339();
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO sessions (id, directory, title, provider, model, state, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET
@@ -246,7 +331,7 @@ impl SqliteSessionStore {
         )?;
 
         // Replace messages
-        conn.execute(
+        tx.execute(
             "DELETE FROM messages WHERE session_id = ?1;",
             params![id_str],
         )?;
@@ -256,20 +341,21 @@ impl SqliteSessionStore {
             let parts_json = serde_json::to_string(&msg.parts)?;
             let now = Utc::now().to_rfc3339();
 
-            conn.execute(
+            tx.execute(
                 "INSERT INTO messages (session_id, role, parts_json, created_at)
                  VALUES (?1, ?2, ?3, ?4);",
                 params![id_str, role_str, parts_json, now],
             )?;
 
             // Retain full uncompressed message in messages_audit for historical auditing
-            let _ = conn.execute(
+            let _ = tx.execute(
                 "INSERT OR IGNORE INTO messages_audit (session_id, role, parts_json, created_at)
                  VALUES (?1, ?2, ?3, ?4);",
                 params![id_str, role_str, parts_json, now],
             );
         }
 
+        tx.commit()?;
         Ok(())
     }
 
@@ -319,6 +405,244 @@ impl SqliteSessionStore {
         }
 
         Ok(messages)
+    }
+
+    /// Set (or clear, with `None`) a user-chosen title. Returns whether the session exists.
+    pub async fn set_session_title(&self, id: SessionId, title: Option<&str>) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let updated = conn.execute(
+            "UPDATE sessions SET custom_title = ?1 WHERE id = ?2",
+            params![title, id.to_string()],
+        )?;
+        Ok(updated > 0)
+    }
+
+    pub async fn session_title(&self, id: SessionId) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let title = conn
+            .query_row(
+                "SELECT COALESCE(custom_title, title) FROM sessions WHERE id = ?1",
+                params![id.to_string()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        Ok(title.flatten())
+    }
+
+    /// Machine-readable audit data (permission decisions, mode changes, compactions).
+    pub async fn audit_report(&self, session_id: SessionId) -> Result<AuditReport> {
+        let conn = self.conn.lock().await;
+        let id = session_id.to_string();
+        let count = |table: &str| -> Result<usize> {
+            let n: i64 = conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE session_id = ?1"),
+                params![id],
+                |row| row.get(0),
+            )?;
+            Ok(n as usize)
+        };
+        let mut report = AuditReport {
+            permission_count: count("permission_audit")?,
+            mode_change_count: count("permission_mode_audit")?,
+            compaction_count: count("compaction_audit")?,
+            ..Default::default()
+        };
+
+        let mut stmt = conn.prepare(
+            "SELECT turn_id, tool_call_id, tool_name, action_key, mode, decision, risk_level,
+                    result_visibility, created_at
+             FROM permission_audit WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, AUDIT_REPORT_LIMIT as i64], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+            ))
+        })?;
+        for row in rows {
+            let (turn_id, tool_call_id, tool_name, action_key, mode, decision, risk, vis, ts) =
+                row?;
+            report.permissions.push(PermissionAuditRecord {
+                session_id,
+                turn_id,
+                tool_call_id,
+                tool_name,
+                action_key,
+                mode: serde_json::from_str(&mode)?,
+                decision: serde_json::from_str(&decision)?,
+                risk_level: risk,
+                result_visibility: vis,
+                created_at: parse_ts(&ts),
+            });
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT turn_id, previous_mode, new_mode, source, created_at
+             FROM permission_mode_audit WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, AUDIT_REPORT_LIMIT as i64], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (turn_id, previous, new, source, ts) = row?;
+            report.mode_changes.push(PermissionModeAuditRecord {
+                session_id,
+                turn_id,
+                previous_mode: serde_json::from_str(&previous)?,
+                new_mode: serde_json::from_str(&new)?,
+                source,
+                created_at: parse_ts(&ts),
+            });
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT source_turn_start, source_turn_end, original_message_count,
+                    compacted_message_count, original_tokens, compacted_tokens, trigger, summary,
+                    created_at
+             FROM compaction_audit WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, AUDIT_REPORT_LIMIT as i64], |row| {
+            Ok(CompactionAuditRecord {
+                session_id,
+                source_turn_start: row.get(0)?,
+                source_turn_end: row.get(1)?,
+                original_message_count: row.get::<_, i64>(2)? as usize,
+                compacted_message_count: row.get::<_, i64>(3)? as usize,
+                original_tokens: row.get::<_, i64>(4)? as usize,
+                compacted_tokens: row.get::<_, i64>(5)? as usize,
+                trigger: row.get(6)?,
+                summary: row.get(7)?,
+                created_at: parse_ts(&row.get::<_, String>(8)?),
+            })
+        })?;
+        for row in rows {
+            report.compactions.push(row?);
+        }
+        Ok(report)
+    }
+
+    pub async fn set_worktree(
+        &self,
+        id: SessionId,
+        info: &crate::worktree::WorktreeInfo,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE sessions SET project_dir = ?1, worktree_branch = ?2, base_commit = ?3
+             WHERE id = ?4",
+            params![
+                info.project_dir.to_string_lossy(),
+                info.branch,
+                info.base_commit,
+                id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Worktree metadata for a session; the worktree path is the session's `directory`.
+    pub async fn get_worktree(
+        &self,
+        id: SessionId,
+    ) -> Result<Option<crate::worktree::WorktreeInfo>> {
+        let conn = self.conn.lock().await;
+        let row = conn
+            .query_row(
+                "SELECT directory, project_dir, worktree_branch, base_commit
+                 FROM sessions WHERE id = ?1",
+                params![id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        Ok(match row {
+            Some((path, Some(project), Some(branch), Some(base))) => {
+                Some(crate::worktree::WorktreeInfo {
+                    project_dir: PathBuf::from(project),
+                    path: PathBuf::from(path),
+                    branch,
+                    base_commit: base,
+                })
+            }
+            _ => None,
+        })
+    }
+
+    /// The provider/model pinned to this session.
+    pub async fn session_model(&self, id: SessionId) -> Result<Option<(String, String)>> {
+        let conn = self.conn.lock().await;
+        let row = conn
+            .query_row(
+                "SELECT provider, model FROM sessions WHERE id = ?1",
+                params![id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .optional()?;
+        Ok(match row {
+            Some((Some(p), Some(m))) if !p.is_empty() && !m.is_empty() => Some((p, m)),
+            _ => None,
+        })
+    }
+
+    pub async fn set_session_model(
+        &self,
+        id: SessionId,
+        provider: &str,
+        model: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let n = conn.execute(
+            "UPDATE sessions SET provider = ?1, model = ?2 WHERE id = ?3",
+            params![provider, model, id.to_string()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Delete a session and its dependent rows. Returns whether the session existed.
+    pub async fn delete_session(&self, id: SessionId) -> Result<bool> {
+        let mut conn = self.conn.lock().await;
+        let id = id.to_string();
+        let tx = conn.transaction()?;
+        for table in [
+            "messages",
+            "messages_audit",
+            "session_turns",
+            "permission_audit",
+            "permission_mode_audit",
+            "compaction_audit",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE session_id = ?1"),
+                params![id],
+            )?;
+        }
+        let deleted = tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(deleted > 0)
     }
 
     pub async fn audit_summary(&self, session_id: SessionId) -> Result<String> {
@@ -513,7 +837,7 @@ impl SqliteSessionStore {
     pub async fn list_all_sessions(&self) -> Result<Vec<SessionSummary>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.directory, s.title, s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count
+            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count, s.project_dir, s.worktree_branch
              FROM sessions s
              LEFT JOIN messages m ON s.id = m.session_id
              GROUP BY s.id
@@ -529,6 +853,8 @@ impl SqliteSessionStore {
             let model: String = row.get(4).unwrap_or_default();
             let updated_at_str: String = row.get(5)?;
             let msg_count: i64 = row.get(6).unwrap_or(0);
+            let project_dir: Option<String> = row.get(7).unwrap_or(None);
+            let worktree_branch: Option<String> = row.get(8).unwrap_or(None);
             Ok((
                 id_str,
                 directory,
@@ -537,11 +863,23 @@ impl SqliteSessionStore {
                 model,
                 updated_at_str,
                 msg_count,
+                project_dir,
+                worktree_branch,
             ))
         })?;
 
         let mut summaries = Vec::new();
-        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten()
+        for (
+            id_str,
+            directory,
+            title,
+            provider,
+            model,
+            updated_at_str,
+            msg_count,
+            project_dir,
+            worktree_branch,
+        ) in rows.flatten()
         {
             if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
                 let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
@@ -555,6 +893,8 @@ impl SqliteSessionStore {
                     provider,
                     model,
                     updated_at,
+                    project_dir,
+                    worktree_branch,
                 });
             }
         }
@@ -566,10 +906,10 @@ impl SqliteSessionStore {
         let dir_str = dir.to_string_lossy().to_string();
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.directory, s.title, s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count
+            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count, s.project_dir, s.worktree_branch
              FROM sessions s
              LEFT JOIN messages m ON s.id = m.session_id
-             WHERE s.directory = ?1
+             WHERE s.directory = ?1 OR s.project_dir = ?1
              GROUP BY s.id
              ORDER BY s.updated_at DESC
              LIMIT 50;",
@@ -583,6 +923,8 @@ impl SqliteSessionStore {
             let model: String = row.get(4).unwrap_or_default();
             let updated_at_str: String = row.get(5)?;
             let msg_count: i64 = row.get(6).unwrap_or(0);
+            let project_dir: Option<String> = row.get(7).unwrap_or(None);
+            let worktree_branch: Option<String> = row.get(8).unwrap_or(None);
             Ok((
                 id_str,
                 directory,
@@ -591,11 +933,23 @@ impl SqliteSessionStore {
                 model,
                 updated_at_str,
                 msg_count,
+                project_dir,
+                worktree_branch,
             ))
         })?;
 
         let mut summaries = Vec::new();
-        for (id_str, directory, title, provider, model, updated_at_str, msg_count) in rows.flatten()
+        for (
+            id_str,
+            directory,
+            title,
+            provider,
+            model,
+            updated_at_str,
+            msg_count,
+            project_dir,
+            worktree_branch,
+        ) in rows.flatten()
         {
             if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
                 let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
@@ -609,6 +963,8 @@ impl SqliteSessionStore {
                     provider,
                     model,
                     updated_at,
+                    project_dir,
+                    worktree_branch,
                 });
             }
         }
@@ -690,5 +1046,95 @@ mod tests {
             audit_after[1].text_content(),
             "Turn 1 assistant response with 500 lines of build output"
         );
+    }
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn concurrent_writers_across_connections_do_not_fail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        // Two stores on one file stand in for the daemon plus a local CLI/TUI process.
+        let stores = [
+            SqliteSessionStore::new(&path).unwrap(),
+            SqliteSessionStore::new(&path).unwrap(),
+        ];
+        let mut tasks = Vec::new();
+        for i in 0..40 {
+            let store = stores[i % 2].clone();
+            tasks.push(tokio::spawn(async move {
+                let mut session = Session::new("/tmp/x");
+                for n in 0..20 {
+                    session.add_message(Message::user(format!("m{n}")));
+                }
+                store.save_session(&session, "p", "m").await?;
+                store.save_session(&session, "p", "m").await?;
+                anyhow::Ok(session.id)
+            }));
+        }
+        for t in tasks {
+            let id = t.await.unwrap().unwrap();
+            let loaded = stores[0].load_session(id).await.unwrap().unwrap();
+            assert_eq!(loaded.messages.len(), 20);
+        }
+        let mode: String = stores[0]
+            .conn
+            .lock()
+            .await
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+    }
+
+    /// Many processes/tests opening a brand-new database at once used to fail with "database is
+    /// locked" because the WAL switch ran before the busy timeout was installed.
+    #[test]
+    fn simultaneous_first_open_of_a_new_database_succeeds() {
+        for round in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(format!("fresh{round}.sqlite"));
+            let barrier = Arc::new(std::sync::Barrier::new(16));
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    let (path, barrier) = (path.clone(), Arc::clone(&barrier));
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        SqliteSessionStore::new(path).map(|_| ())
+                    })
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap().expect("open failed");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_session_removes_dependents_and_worktree_metadata_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(dir.path().join("db.sqlite")).unwrap();
+        let mut session = Session::new("/tmp/wt");
+        session.add_message(Message::user("hi"));
+        store.save_session(&session, "p", "m").await.unwrap();
+        let info = crate::worktree::WorktreeInfo {
+            project_dir: "/repo".into(),
+            path: "/tmp/wt".into(),
+            branch: "maukode/abc".into(),
+            base_commit: "deadbeef".into(),
+        };
+        store.set_worktree(session.id, &info).await.unwrap();
+        assert_eq!(store.get_worktree(session.id).await.unwrap(), Some(info));
+        let listed = store
+            .list_sessions_by_directory(Path::new("/repo"))
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].worktree_branch.as_deref(), Some("maukode/abc"));
+        assert!(store.delete_session(session.id).await.unwrap());
+        assert!(store.load_session(session.id).await.unwrap().is_none());
+        assert!(!store.delete_session(session.id).await.unwrap());
     }
 }

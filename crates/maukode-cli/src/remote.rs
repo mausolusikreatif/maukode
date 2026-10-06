@@ -111,11 +111,23 @@ pub async fn run_remote_turn(
                         .respond_permission(session_id, &req.request_id, decision)
                         .await;
                 }
-                LLMEvent::Finish { .. } => {
+                LLMEvent::TurnStopped { reason, message } => {
+                    if reason == maukode_protocol::StopReason::Error {
+                        return Err(anyhow::anyhow!(
+                            "Server error: {}",
+                            message.unwrap_or_else(|| "turn failed".into())
+                        ));
+                    }
+                    if reason.needs_continue() {
+                        println!(
+                            "\n\x1b[1;33m⚠️  {}\x1b[0m",
+                            message.unwrap_or_else(|| "Stopped before finishing.".into())
+                        );
+                    }
                     break;
                 }
                 LLMEvent::Error { message } => {
-                    return Err(anyhow::anyhow!("Server error: {message}"));
+                    println!("\n\x1b[1;31mError:\x1b[0m {message}");
                 }
                 _ => {}
             },

@@ -5,8 +5,8 @@ use maukode_core::{
     SqliteSessionStore,
 };
 use maukode_protocol::{
-    ContentPart, FinishReason, LLMEvent, Message, PermissionDecision, PermissionRequest, Role,
-    SessionId, TokenUsage,
+    ContentPart, LLMEvent, Message, PermissionDecision, PermissionRequest, Role, SessionId,
+    StopReason, TokenUsage,
 };
 use maukode_server::ServerClient;
 use maukode_tools::{
@@ -56,14 +56,17 @@ pub(crate) fn append_stream_delta(items: &mut Vec<ChatItem>, role: ChatRole, tex
     });
 }
 
+/// Only `TurnStopped` ends a turn. Per-step `Finish` events (some gateways report `stop` even
+/// when tool calls follow) and `Error` events precede it and must not end the stream early.
 fn remote_turn_result(event: &LLMEvent) -> Option<Result<(), String>> {
     match event {
-        LLMEvent::Error { message } => Some(Err(message.clone())),
-        LLMEvent::Finish { reason } => match reason {
-            FinishReason::ToolUse => None,
-            FinishReason::Error => Some(Err("Provider ended the turn with an error".into())),
-            _ => Some(Ok(())),
-        },
+        LLMEvent::TurnStopped {
+            reason: StopReason::Error,
+            message,
+        } => Some(Err(message
+            .clone()
+            .unwrap_or_else(|| "Turn ended with an error".into()))),
+        LLMEvent::TurnStopped { .. } => Some(Ok(())),
         _ => None,
     }
 }
@@ -911,8 +914,8 @@ impl App {
         let context = Arc::clone(&self.context);
         let runner_config = RunnerConfig {
             model: self.config.active_model.clone(),
-            max_steps: 25,
-            max_tokens: Some(4096),
+            max_steps: self.config.agent.max_steps,
+            max_tokens: Some(self.config.agent.max_tokens),
             temperature: None,
         };
 
@@ -1017,6 +1020,15 @@ impl App {
                     role: ChatRole::System,
                     content: format!("Error: {message}"),
                 });
+            }
+            LLMEvent::TurnStopped { reason, message } if reason.needs_continue() => {
+                let text = message.unwrap_or_else(|| "The turn stopped before finishing.".into());
+                self.set_status("Stopped early — type 'continue' to resume");
+                self.items.push(ChatItem {
+                    role: ChatRole::System,
+                    content: format!("⚠️ {text}"),
+                });
+                self.auto_scroll = true;
             }
             _ => {}
         }
@@ -1363,27 +1375,45 @@ impl App {
 #[cfg(test)]
 mod stream_tests {
     use super::*;
+    use maukode_protocol::FinishReason;
     use std::time::{Duration, Instant};
 
     #[test]
-    fn remote_turn_finishes_on_errors_but_keeps_tool_use_streaming() {
-        assert_eq!(
-            remote_turn_result(&LLMEvent::Error {
-                message: "provider unavailable".into(),
-            }),
-            Some(Err("provider unavailable".into()))
-        );
-        assert_eq!(
-            remote_turn_result(&LLMEvent::Finish {
-                reason: FinishReason::ToolUse,
-            }),
-            None
-        );
-        assert_eq!(
-            remote_turn_result(&LLMEvent::Finish {
+    fn remote_turn_ends_only_on_turn_stopped() {
+        // Step-level and error events never end the turn on their own.
+        for event in [
+            LLMEvent::Finish {
                 reason: FinishReason::EndTurn,
+            },
+            LLMEvent::Finish {
+                reason: FinishReason::MaxTokens,
+            },
+            LLMEvent::Error {
+                message: "provider unavailable".into(),
+            },
+        ] {
+            assert_eq!(remote_turn_result(&event), None);
+        }
+        assert_eq!(
+            remote_turn_result(&LLMEvent::TurnStopped {
+                reason: StopReason::Completed,
+                message: None,
             }),
             Some(Ok(()))
+        );
+        assert_eq!(
+            remote_turn_result(&LLMEvent::TurnStopped {
+                reason: StopReason::MaxSteps,
+                message: Some("limit".into()),
+            }),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            remote_turn_result(&LLMEvent::TurnStopped {
+                reason: StopReason::Error,
+                message: Some("provider unavailable".into()),
+            }),
+            Some(Err("provider unavailable".into()))
         );
     }
 

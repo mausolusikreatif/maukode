@@ -16,5 +16,92 @@ jobs:
         run: cargo fmt --all --check
       - name: Test workspace and TUI behavior/performance smoke tests
         run: cargo test --workspace --locked
+      - name: TypeScript bindings are up to date
+        run: |
+          cargo test --locked -p maukode-protocol -p maukode-core -p maukode-server \
+            --features maukode-protocol/ts,maukode-core/ts,maukode-server/ts export_bindings
+          test -z "$(git status --porcelain -- apps/desktop/src/api/generated)" || {
+            git status --porcelain -- apps/desktop/src/api/generated
+            echo "Generated bindings are stale: regenerate and commit apps/desktop/src/api/generated"
+            exit 1
+          }
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Build the daemon used by the UI tests
+        run: cargo build -p maukode-cli --locked
+      - name: Install, typecheck, unit test
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: End-to-end UI tests (real daemon, scripted LLM gateway)
+        working-directory: apps/desktop
+        run: |
+          npx playwright install --with-deps chromium
+          CI=1 npx playwright test
+
+  tauri:
+    timeout-minutes: 30
+    # Compiles the desktop shell and runs it under a virtual display: the UI must reach the Rust
+    # side over Tauri IPC and make it start an authenticated daemon.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install system libraries
+        # Mirrors occasionally stall; bound each attempt and retry instead of hanging the job.
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2 3; do
+            sudo timeout 240 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update &&
+            sudo timeout 420 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
+              libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev \
+              librsvg2-dev xvfb xauth imagemagick x11-utils libgl1-mesa-dri && exit 0
+            echo "apt attempt $attempt failed; retrying"; sleep 5
+          done
+          exit 1
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: tauri-${{ runner.os }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+      - name: Build the UI bundle and the daemon
+        run: |
+          cargo build -p maukode-cli --locked
+          cd apps/desktop
+          npm ci
+          npm run build
+      - name: Clippy (desktop shell)
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --locked -- -D warnings
+      - name: Run the shell and check it starts an authenticated daemon
+        working-directory: apps/desktop
+        run: SMOKE_SCREENSHOT="$PWD/shell.png" bash scripts/tauri-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          retention-days: 1
+          name: shell-screenshot
+          path: apps/desktop/shell.png
+          if-no-files-found: ignore

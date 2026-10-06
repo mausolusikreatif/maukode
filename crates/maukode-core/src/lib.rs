@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod chatgpt_auth;
 pub mod chatgpt_client;
 pub mod checkpoint;
@@ -6,11 +7,13 @@ pub mod config;
 pub mod context;
 pub mod mcp;
 pub mod memory;
+pub mod paths;
 pub mod permission;
 pub mod repo_map;
 pub mod runner;
 pub mod session;
 pub mod store;
+pub mod worktree;
 
 pub use chatgpt_auth::{AuthEndpoints, ChatGptAuth, LoginAttempt};
 pub use chatgpt_client::ChatGptClient;
@@ -19,7 +22,8 @@ pub use compaction::{
     CompactionResult, ContextPruner, ContextUsage, ConversationCompactor, TokenEstimator,
 };
 pub use config::{
-    AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig, WebSearchConfig,
+    AgentConfig, AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig,
+    WebSearchConfig,
 };
 pub use context::ContextManager;
 pub use mcp::{McpClient, McpManager, McpTool};

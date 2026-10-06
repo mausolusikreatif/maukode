@@ -36,7 +36,7 @@ impl ProjectMemory {
     /// Check global user rules in ~/.config/maukode/ or ~/.maukode/
     pub async fn discover_global_rules(&self) -> Option<DiscoveredRule> {
         let mut candidates = Vec::new();
-        if let Some(config_dir) = dirs::config_dir() {
+        if let Some(config_dir) = crate::paths::config_dir() {
             candidates.push(config_dir.join("maukode").join("RULES.md"));
             candidates.push(config_dir.join("maukode").join("AGENTS.md"));
         }

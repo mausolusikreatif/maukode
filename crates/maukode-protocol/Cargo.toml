@@ -11,3 +11,8 @@ serde_json.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
+ts-rs = { workspace = true, optional = true }
+
+[features]
+# Generate TypeScript bindings (see `.cargo/config.toml` for the output directory).
+ts = ["dep:ts-rs"]

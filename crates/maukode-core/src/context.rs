@@ -62,7 +62,12 @@ impl ContextManager {
              - Use the provided tools (read_file, write_file, edit_file, bash, grep, glob, web_search, fetch_web_content, get_codebase_map) to explore and make changes.\n\
              - When researching modern libraries, new crate versions, breaking API changes, or unfamiliar error messages, proactively use `web_search` and `fetch_web_content` to consult up-to-date documentation.\n\
              - Keep responses concise and focused on the solution.\n\
-             - Prefer surgical edits using `edit_file` over overwriting complete files when possible.\n"
+             - Prefer surgical edits using `edit_file` over overwriting complete files when possible.\n\n\
+             Working style:\n\
+             - Finish the task end to end. Keep calling tools until the work is done and verified; do not stop to ask whether to continue or to report intermediate progress.\n\
+             - Never announce a next step (\"I will now...\", \"Next, I'll...\") without performing it in the same response. If you say you will do something, make the tool call.\n\
+             - Only end your turn with a plain-text reply when the task is complete, or when you are blocked and need information that only the user can provide. State clearly which of the two it is.\n\
+             - If a tool call fails, diagnose and retry with a corrected approach before giving up.\n"
         );
 
         if let Some(instructions) = self.discover_instructions().await {

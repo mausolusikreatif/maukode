@@ -12,7 +12,7 @@ pub struct DaemonInfo {
 }
 
 pub fn daemon_file_path() -> PathBuf {
-    if let Some(mut dir) = dirs::data_dir() {
+    if let Some(mut dir) = maukode_core::paths::data_dir() {
         dir.push("maukode");
         dir.push("daemon.json");
         dir
@@ -26,7 +26,7 @@ pub fn daemon_file_path() -> PathBuf {
 }
 
 pub fn daemon_log_path() -> PathBuf {
-    if let Some(mut dir) = dirs::data_dir() {
+    if let Some(mut dir) = maukode_core::paths::data_dir() {
         dir.push("maukode");
         dir.push("server.log");
         dir
@@ -97,8 +97,53 @@ pub async fn stop_daemon() -> Result<bool> {
     Ok(true)
 }
 
+/// Held while starting a daemon so concurrent starters (GUI + CLI, or two UI windows) cannot both
+/// spawn one: the loser would otherwise register its own token for a daemon that is not running.
+struct StartLock(#[allow(dead_code)] std::fs::File);
+
+async fn acquire_start_lock() -> Result<StartLock> {
+    let path = daemon_file_path().with_file_name("daemon.lock");
+    tokio::task::spawn_blocking(move || -> Result<StartLock> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            // Blocks until the current holder finishes; released when the file is closed.
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+        }
+        Ok(StartLock(file))
+    })
+    .await?
+}
+
+/// True if `url` accepts `token` (health alone is public, so it proves nothing about auth).
+async fn accepts_token(url: &str, token: Option<&str>) -> bool {
+    match ServerClient::new(url, token.map(str::to_string)) {
+        Ok(client) => matches!(
+            tokio::time::timeout(Duration::from_millis(800), client.list_providers()).await,
+            Ok(Ok(_))
+        ),
+        Err(_) => false,
+    }
+}
+
 pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> Result<DaemonInfo> {
     // 1. Check if existing daemon is alive
+    if let Ok(Some(info)) = get_daemon_status().await {
+        return Ok(info);
+    }
+
+    // Serialize starters, then look again: whoever held the lock may have just started one.
+    let _lock = acquire_start_lock().await?;
     if let Ok(Some(info)) = get_daemon_status().await {
         return Ok(info);
     }
@@ -119,9 +164,11 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
 
     let mut cmd = std::process::Command::new(&current_exe);
     cmd.arg("server").arg("--bind").arg(&bind_addr);
-    if let Some(ref t) = token {
-        cmd.arg("--token").arg(t);
-    }
+    // Via the environment, not argv: command lines are readable by every local user (`ps`).
+    match token {
+        Some(ref t) => cmd.env("MAUKODE_AUTH_TOKEN", t),
+        None => cmd.env_remove("MAUKODE_AUTH_TOKEN"),
+    };
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::from(log_file.try_clone()?))
         .stderr(std::process::Stdio::from(log_file));
@@ -169,6 +216,18 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
         ));
     }
 
+    // Something answered /health, but is it *our* daemon? A stale daemon on the port with a
+    // different token would pass the health check while rejecting the token we are about to save.
+    if !accepts_token(&url, token.as_deref()).await || matches!(child.try_wait(), Ok(Some(_))) {
+        let _ = child.kill();
+        return Err(anyhow!(
+            "Port {default_port} is already served by another MauKode daemon that does not accept \
+             this token (or the new daemon exited). Stop it with `maukode server stop` or pick \
+             another port. Log: {}",
+            log_path.display()
+        ));
+    }
+
     let info = DaemonInfo { url, pid, token };
 
     let daemon_file = daemon_file_path();
@@ -176,7 +235,67 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
         let _ = std::fs::create_dir_all(parent);
     }
     let json = serde_json::to_string_pretty(&info)?;
-    let _ = std::fs::write(&daemon_file, json);
+    write_private(&daemon_file, &json)?;
 
     Ok(info)
+}
+
+/// Write a file only the current user can read: it holds the daemon's bearer token.
+fn write_private(path: &std::path::Path, contents: &str) -> Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    // `mode` only applies on creation; tighten a pre-existing file as well.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents.as_bytes())?;
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn start_lock_serializes_concurrent_starters() {
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("MAUKODE_HOME", home.path());
+        let first = acquire_start_lock().await.unwrap();
+        let second = tokio::spawn(acquire_start_lock());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !second.is_finished(),
+            "second starter must wait for the first"
+        );
+        drop(first);
+        let waited = tokio::time::timeout(Duration::from_secs(5), second).await;
+        assert!(
+            waited.is_ok(),
+            "second starter proceeds once the lock is released"
+        );
+    }
+
+    #[test]
+    fn daemon_file_is_private_even_when_it_already_existed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("daemon.json");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, "{\"token\":\"t\"}").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"token\":\"t\"}");
+    }
 }
