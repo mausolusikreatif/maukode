@@ -44,9 +44,10 @@ CI fails if `src/api/generated` is stale.
 
 `src-tauri` is excluded from the root Cargo workspace because it needs the platform WebView
 (WebKitGTK on Linux). Build it with `npm run tauri dev` / `npm run tauri build` after installing
-the [Tauri prerequisites](https://tauri.app/start/prerequisites/). It was written against the
-Tauri 2 API but has **not been compiled yet** (no WebView libraries in the authoring
-environment); a Windows `.ico` and macOS `.icns` still need to be generated with `tauri icon`.
+the [Tauri prerequisites](https://tauri.app/start/prerequisites/). The new-session dialog uses a
+native folder picker in the desktop shell and keeps the eight most recently used repositories;
+browser development retains the editable path field. A Windows `.ico` and macOS `.icns` still
+need to be generated with `tauri icon`.
 
 ## Reviewing agent work
 
