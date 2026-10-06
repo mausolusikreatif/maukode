@@ -81,4 +81,25 @@ describe("thread reducer", () => {
     expect(items.map((i) => i.kind)).toEqual(["user", "assistant", "tool"]);
     expect(items[2]).toMatchObject({ status: "done", result: "files", args: '{"command":"ls"}' });
   });
+
+  it("handles plan_created and plan_step_updated events", () => {
+    const plan = {
+      id: "p1",
+      title: "Refactor auth",
+      steps: [
+        { id: "s1", title: "Inspect auth race", status: "pending" as const },
+        { id: "s2", title: "Implement fix", status: "pending" as const },
+      ],
+    };
+    let s = applyEvent(emptyThread(), { type: "plan_created", plan }, 1);
+    expect(s.plan).toEqual(plan);
+    expect(s.plan?.steps[0].status).toBe("pending");
+
+    s = applyEvent(s, { type: "plan_step_updated", plan_id: "p1", step_id: "s1", status: "in_progress" }, 2);
+    expect(s.plan?.steps[0].status).toBe("in_progress");
+
+    s = applyEvent(s, { type: "plan_step_updated", plan_id: "p1", step_id: "s1", status: "completed" }, 3);
+    expect(s.plan?.steps[0].status).toBe("completed");
+    expect(s.plan?.steps[1].status).toBe("pending");
+  });
 });

@@ -21,4 +21,4 @@ message_total: number,
 /**
  * Index in the full history of `messages[0]`.
  */
-messages_start: number, directory: string, state: SessionState, messages: Array<Message>, created_at: string, updated_at: string, };
+messages_start: number, directory: string, state: SessionState, messages: Array<Message>, created_at: string, updated_at: string, queued_prompts?: Array<string>, };

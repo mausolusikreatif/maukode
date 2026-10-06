@@ -3,6 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApp } from "../state/store";
 import type { ThreadItem, ThreadState } from "../state/thread";
+import { PlanTimeline } from "./PlanTimeline";
 
 function prettyArgs(args: string): string {
   try {
@@ -132,6 +133,8 @@ function Item({ item, isStreaming }: { item: ThreadItem; isStreaming: boolean })
           <div>{item.text}</div>
         </details>
       );
+    case "plan":
+      return <PlanTimeline plan={item.plan} />;
     case "tool":
       return <ToolCard item={item} />;
   }
@@ -145,7 +148,7 @@ export function Thread({ thread }: { thread: ThreadState }) {
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [thread.items, thread.notices, thread.pending.length]);
+  }, [thread.items, thread.notices, thread.pending.length, thread.plan]);
 
   useEffect(() => {
     stickToBottom.current = true;
@@ -172,6 +175,7 @@ export function Thread({ thread }: { thread: ThreadState }) {
           Describe a task below. It works in this project and asks before risky actions.
         </div>
       )}
+      {thread.plan && <PlanTimeline plan={thread.plan} />}
       {thread.items.map((item, idx) => (
         <Item
           key={item.id}
@@ -179,6 +183,21 @@ export function Thread({ thread }: { thread: ThreadState }) {
           isStreaming={thread.running && idx === thread.items.length - 1}
         />
       ))}
+      {thread.queue && thread.queue.length > 0 && (
+        <div className="thread-queued-box" data-testid="thread-queued-box">
+          <div className="thread-queued-head">
+            <span className="thread-queued-title">Queued next ({thread.queue.length})</span>
+          </div>
+          <div className="thread-queued-items">
+            {thread.queue.map((promptText, qIdx) => (
+              <div key={qIdx} className="thread-queued-item">
+                <span className="thread-queued-index">#{qIdx + 1}</span>
+                <span className="thread-queued-text">{promptText}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {thread.running && thread.pending.length === 0 && <div className="working muted" data-testid="working">Working…</div>}
     </div>
   );

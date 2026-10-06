@@ -11,9 +11,9 @@ use axum::{
 };
 use futures::Stream;
 use maukode_core::worktree::{self, WorktreeError, WorktreeInfo};
-use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner};
-use maukode_protocol::{GlobalEvent, LLMEvent, Message, SessionId, SessionState, StopReason};
-use maukode_tools::create_default_registry;
+use maukode_protocol::{
+    GlobalEvent, LLMEvent, Message, QueueSteeringPrompt, SessionId, SessionState, StopReason,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::convert::Infallible;
@@ -144,6 +144,8 @@ pub struct SessionDetailResponse {
     pub messages: Vec<Message>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub queued_prompts: Vec<String>,
 }
 
 /// Provider/model a session runs with: its pinned pair if the provider still exists, otherwise
@@ -328,6 +330,7 @@ pub async fn get_session(
     let messages_start = query
         .limit
         .map_or(0, |limit| message_total.saturating_sub(limit.min(MAX_PAGE)));
+    let queued_prompts = state.get_queued_prompts(id).await;
     let detail = SessionDetailResponse {
         id: session.id,
         title,
@@ -344,6 +347,7 @@ pub async fn get_session(
         messages: session.messages[messages_start..].to_vec(),
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
+        queued_prompts,
     };
 
     Ok(Json(detail))
@@ -548,6 +552,30 @@ async fn start_turn(
             reason,
             message,
         });
+
+        // Automatically start next queued prompt if turn completed successfully
+        if reason == StopReason::Completed {
+            if let Some(next_prompt) = state.pop_queued_prompt(id).await {
+                if let Some(next_token) = state.try_register_active_turn(id).await {
+                    let next_state = Arc::clone(&state);
+                    let next_session = Arc::clone(&session_arc);
+                    tokio::spawn(async move {
+                        if let Err(err) = start_turn(
+                            next_state.clone(),
+                            id,
+                            next_session,
+                            next_prompt,
+                            next_token,
+                        )
+                        .await
+                        {
+                            next_state.clear_active_turn(id).await;
+                            tracing::error!(session = %id, error = ?err, "Failed to start queued turn");
+                        }
+                    });
+                }
+            }
+        }
     });
 
     Ok(())
@@ -577,6 +605,123 @@ pub async fn cancel_prompt(
         "status": status,
         "session_id": id,
     })))
+}
+
+pub async fn queue_prompt(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<QueueSteeringPrompt>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = load_session(&state, id).await?;
+    let is_running = state.is_running(id).await;
+
+    if !is_running {
+        if let Some(cancellation_token) = state.try_register_active_turn(id).await {
+            if let Err(err) = start_turn(
+                Arc::clone(&state),
+                id,
+                session_arc,
+                payload.prompt,
+                cancellation_token,
+            )
+            .await
+            {
+                state.clear_active_turn(id).await;
+                return Err(err);
+            }
+            return Ok(Json(json!({
+                "status": "started",
+                "session_id": id,
+                "queue_len": 0,
+            })));
+        }
+    }
+
+    let queue_len = state.queue_prompt(id, payload.prompt).await;
+    Ok(Json(json!({
+        "status": "queued",
+        "session_id": id,
+        "queue_len": queue_len,
+    })))
+}
+
+pub async fn get_session_queue(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let _ = load_session(&state, id).await?;
+    let queue = state.get_queued_prompts(id).await;
+    Ok(Json(json!({
+        "session_id": id,
+        "queue": queue,
+    })))
+}
+
+pub async fn clear_session_queue(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let _ = load_session(&state, id).await?;
+    let cleared_count = state.clear_queued_prompts(id).await;
+    Ok(Json(json!({
+        "status": "cleared",
+        "session_id": id,
+        "cleared_count": cleared_count,
+    })))
+}
+
+pub async fn steer_prompt(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<QueueSteeringPrompt>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session_arc = load_session(&state, id).await?;
+    let is_running = state.is_running(id).await;
+
+    if is_running {
+        let prompt_text = payload.prompt.clone();
+        {
+            let mut session = session_arc.write().await;
+            session.add_message(Message::user(format!("[Steer]: {}", prompt_text)));
+        }
+        state
+            .publish_event(
+                id,
+                LLMEvent::TextDelta {
+                    text: format!("\n\n> 🧭 *Steering guidance injected: {}*\n\n", prompt_text),
+                },
+            )
+            .await;
+
+        Ok(Json(json!({
+            "status": "steered",
+            "session_id": id,
+        })))
+    } else {
+        if let Some(cancellation_token) = state.try_register_active_turn(id).await {
+            if let Err(err) = start_turn(
+                Arc::clone(&state),
+                id,
+                session_arc,
+                payload.prompt,
+                cancellation_token,
+            )
+            .await
+            {
+                state.clear_active_turn(id).await;
+                return Err(err);
+            }
+            Ok(Json(json!({
+                "status": "started",
+                "session_id": id,
+            })))
+        } else {
+            Err((
+                StatusCode::CONFLICT,
+                "Unable to claim turn slot".to_string(),
+            ))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

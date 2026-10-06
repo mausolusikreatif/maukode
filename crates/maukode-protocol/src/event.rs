@@ -63,6 +63,64 @@ pub enum PermissionDecision {
     Deny,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum StepStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct PlanStep {
+    pub id: String,
+    pub title: String,
+    pub status: StepStatus,
+}
+
+impl PlanStep {
+    pub fn new(id: impl Into<String>, title: impl Into<String>, status: StepStatus) -> Self {
+        Self {
+            id: id.into(),
+            title: title.into(),
+            status,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct Plan {
+    pub id: String,
+    pub title: Option<String>,
+    pub steps: Vec<PlanStep>,
+}
+
+impl Plan {
+    pub fn new(id: impl Into<String>, steps: Vec<PlanStep>) -> Self {
+        Self {
+            id: id.into(),
+            title: None,
+            steps,
+        }
+    }
+
+    pub fn with_title(
+        id: impl Into<String>,
+        title: impl Into<String>,
+        steps: Vec<PlanStep>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            title: Some(title.into()),
+            steps,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PermissionRequest {
@@ -109,6 +167,16 @@ pub enum LLMEvent {
         max_tokens: usize,
         percent: u32,
         message: String,
+    },
+    /// A structured plan was created for the agent's task.
+    PlanCreated {
+        plan: Plan,
+    },
+    /// A single step of an active plan transitioned status.
+    PlanStepUpdated {
+        plan_id: String,
+        step_id: String,
+        status: StepStatus,
     },
     /// A single provider response ended (one step of a possibly multi-step turn).
     Finish {
@@ -292,3 +360,5 @@ pub enum GlobalEvent {
         request_id: String,
     },
 }
+
+pub use crate::command::QueueSteeringPrompt;
