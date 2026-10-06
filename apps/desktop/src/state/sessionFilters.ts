@@ -192,12 +192,12 @@ export function groupSessionsByProject(
     }
   }
 
-  const entries = [...map.entries()].map(([project, items]) => [
+  const entries: [string, SessionListItem[]][] = [...map.entries()].map(([project, items]) => [
     project,
     sortSessions(items, pinnedIds),
-  ] as const);
+  ]);
 
-  return entries.sort(([projA, itemsA], [projB, itemsB]) => {
+  return entries.sort(([, itemsA], [, itemsB]) => {
     const aHasPinned = itemsA.some((s) => pinnedIds.has(s.id));
     const bHasPinned = itemsB.some((s) => pinnedIds.has(s.id));
     if (aHasPinned !== bHasPinned) return aHasPinned ? -1 : 1;

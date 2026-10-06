@@ -13,7 +13,7 @@ import {
   savePinnedSessions,
   sortSessions,
 } from "./sessionFilters";
-import type { ThreadState } from "./thread";
+import { emptyThread, type ThreadState } from "./thread";
 
 const mockSession = (overrides: Partial<SessionListItem> = {}): SessionListItem => ({
   id: "session-1",
@@ -108,14 +108,11 @@ describe("matchesSearch", () => {
 
   it("matches thread messages if available", () => {
     const thread: ThreadState = {
+      ...emptyThread(),
       items: [
         { id: "1", kind: "user", text: "Please investigate SQLite checkpoint deadlock" },
         { id: "2", kind: "assistant", text: "I found the issue in transaction rollback." },
       ],
-      notices: [],
-      running: false,
-      pending: [],
-      lastSeq: 0,
     };
     expect(matchesSearch(session, "sqlite", thread)).toBe(true);
     expect(matchesSearch(session, "transaction", thread)).toBe(true);
