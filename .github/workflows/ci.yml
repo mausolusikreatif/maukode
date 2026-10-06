@@ -101,6 +101,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          retention-days: 1
           name: shell-screenshot
           path: apps/desktop/shell.png
           if-no-files-found: ignore

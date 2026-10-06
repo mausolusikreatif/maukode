@@ -83,6 +83,7 @@ jobs:
           sha256sum "$D.tar.gz" | tee "$D.tar.gz.sha256"
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: maukode-linux-x86_64
           path: |
             maukode-linux-x86_64-*.tar.gz
