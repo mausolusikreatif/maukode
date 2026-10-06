@@ -1,5 +1,6 @@
 use crate::message::{ToolCall, ToolResult};
 use crate::session::SessionId;
+use crate::subagent::SubagentStatus;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +178,27 @@ pub enum LLMEvent {
         plan_id: String,
         step_id: String,
         status: StepStatus,
+    },
+    /// A specialized child subagent was spawned by the parent agent.
+    SubagentSpawned {
+        subagent_id: String,
+        parent_session_id: SessionId,
+        profile_name: String,
+        goal: String,
+    },
+    /// Fine-grained progress update from an executing subagent.
+    SubagentProgress {
+        subagent_id: String,
+        step: usize,
+        action: String,
+        tokens_used: usize,
+    },
+    /// A child subagent completed its execution.
+    SubagentFinished {
+        subagent_id: String,
+        status: SubagentStatus,
+        summary: String,
+        tokens_used: usize,
     },
     /// A single provider response ended (one step of a possibly multi-step turn).
     Finish {

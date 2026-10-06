@@ -138,6 +138,9 @@ export function applyEvent(state: ThreadState, event: LLMEvent, seq?: number): T
     }
     case "finish":
     case "provider_item":
+    case "subagent_spawned":
+    case "subagent_progress":
+    case "subagent_finished":
       return next; // per-step bookkeeping; the turn is only over at `turn_stopped`
   }
 }

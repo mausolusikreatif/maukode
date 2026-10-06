@@ -42,3 +42,47 @@ pub fn create_default_registry_with_jail(cwd: impl Into<PathBuf>, jail: PathJail
     registry.register_alias("read_url", "fetch_web_content");
     registry
 }
+
+pub fn create_readonly_registry(cwd: impl Into<PathBuf>) -> ToolRegistry {
+    let cwd = cwd.into();
+    let jail = PathJail::new(&cwd);
+    create_readonly_registry_with_jail(cwd, jail)
+}
+
+pub fn create_readonly_registry_with_jail(cwd: impl Into<PathBuf>, jail: PathJail) -> ToolRegistry {
+    let cwd = cwd.into();
+    let mut registry = ToolRegistry::new();
+    registry.register(Arc::new(ReadFileTool::with_jail(cwd.clone(), jail.clone())));
+    registry.register(Arc::new(GlobTool::with_jail(cwd.clone(), jail.clone())));
+    registry.register(Arc::new(GrepTool::with_jail(cwd, jail)));
+    registry.register(Arc::new(WebSearchTool::new()));
+    registry.register_alias("search_web", "web_search");
+    registry.register(Arc::new(FetchWebContentTool::new()));
+    registry.register_alias("fetch_url", "fetch_web_content");
+    registry.register_alias("read_url", "fetch_web_content");
+    registry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_readonly_registry_excludes_mutating_tools() {
+        let temp_dir = std::env::temp_dir();
+        let registry = create_readonly_registry(temp_dir);
+
+        assert!(registry.get("read_file").is_some());
+        assert!(registry.get("grep").is_some());
+        assert!(registry.get("glob").is_some());
+        assert!(registry.get("web_search").is_some());
+        assert!(registry.get("fetch_web_content").is_some());
+        assert!(registry.get("search_web").is_some());
+        assert!(registry.get("read_url").is_some());
+
+        assert!(registry.get("write_file").is_none());
+        assert!(registry.get("edit_file").is_none());
+        assert!(registry.get("bash").is_none());
+    }
+}
+
