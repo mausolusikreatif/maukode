@@ -1574,7 +1574,7 @@ impl App {
 #[cfg(test)]
 mod stream_tests {
     use super::*;
-    use maukode_protocol::FinishReason;
+    use maukode_protocol::{FinishReason, PlanStep, StepStatus};
     use std::time::{Duration, Instant};
 
     #[test]
