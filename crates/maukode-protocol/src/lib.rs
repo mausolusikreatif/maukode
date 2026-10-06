@@ -2,6 +2,7 @@ pub mod command;
 pub mod event;
 pub mod message;
 pub mod session;
+pub mod subagent;
 
 pub use command::QueueSteeringPrompt;
 pub use event::{
@@ -13,3 +14,4 @@ pub use event::{
 };
 pub use message::{ContentPart, Message, Role, ToolCall, ToolResult};
 pub use session::{SessionId, SessionMetadata, SessionState};
+pub use subagent::{ModelTier, SubagentProfile, SubagentStatus, SubagentToolMode};

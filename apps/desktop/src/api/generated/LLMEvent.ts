@@ -2,11 +2,13 @@
 import type { FinishReason } from "./FinishReason";
 import type { PermissionRequest } from "./PermissionRequest";
 import type { Plan } from "./Plan";
+import type { SessionId } from "./SessionId";
 import type { StepStatus } from "./StepStatus";
 import type { StopReason } from "./StopReason";
+import type { SubagentStatus } from "./SubagentStatus";
 import type { TokenUsage } from "./TokenUsage";
 import type { ToolCall } from "./ToolCall";
 import type { ToolResult } from "./ToolResult";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type LLMEvent = { "type": "text_delta", text: string, } | { "type": "reasoning_delta", text: string, } | { "type": "provider_item", item: JsonValue, } | { "type": "tool_call_start", id: string, name: string, } | { "type": "tool_call_delta", id: string, delta: string, } | { "type": "tool_call_finish", tool_call: ToolCall, } | { "type": "tool_result" } & ToolResult | { "type": "private_tool_result" } & ToolResult | { "type": "permission_request" } & PermissionRequest | { "type": "usage" } & TokenUsage | { "type": "context_warning", current_tokens: number, max_tokens: number, percent: number, message: string, } | { "type": "plan_created", plan: Plan, } | { "type": "plan_step_updated", plan_id: string, step_id: string, status: StepStatus, } | { "type": "finish", reason: FinishReason, } | { "type": "error", message: string, } | { "type": "turn_stopped", reason: StopReason, message: string | null, };
+export type LLMEvent = { "type": "text_delta", text: string, } | { "type": "reasoning_delta", text: string, } | { "type": "provider_item", item: JsonValue, } | { "type": "tool_call_start", id: string, name: string, } | { "type": "tool_call_delta", id: string, delta: string, } | { "type": "tool_call_finish", tool_call: ToolCall, } | { "type": "tool_result" } & ToolResult | { "type": "private_tool_result" } & ToolResult | { "type": "permission_request" } & PermissionRequest | { "type": "usage" } & TokenUsage | { "type": "context_warning", current_tokens: number, max_tokens: number, percent: number, message: string, } | { "type": "plan_created", plan: Plan, } | { "type": "plan_step_updated", plan_id: string, step_id: string, status: StepStatus, } | { "type": "subagent_spawned", subagent_id: string, parent_session_id: SessionId, profile_name: string, goal: string, } | { "type": "subagent_progress", subagent_id: string, step: number, action: string, tokens_used: number, } | { "type": "subagent_finished", subagent_id: string, status: SubagentStatus, summary: string, tokens_used: number, } | { "type": "finish", reason: FinishReason, } | { "type": "error", message: string, } | { "type": "turn_stopped", reason: StopReason, message: string | null, };
