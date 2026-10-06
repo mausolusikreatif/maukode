@@ -13,7 +13,7 @@ import type {
   StopReason,
   WorktreeStatus,
 } from "../api/types";
-import { forgetBootstrap, saveBootstrap } from "../platform";
+import { focusWindow, forgetBootstrap, saveBootstrap } from "../platform";
 import {
   disableNotifications,
   enableNotifications,
@@ -135,6 +135,20 @@ interface AppState {
   undoLast: () => Promise<void>;
   commitWorktree: (message: string) => Promise<void>;
   mergeWorktree: (message: string) => Promise<void>;
+
+  sidebarOpen: boolean;
+  newSessionOpen: boolean;
+  newSessionInitialDir: string | null;
+  shortcutsOpen: boolean;
+  commandPaletteOpen: boolean;
+
+  toggleSidebar: () => void;
+  openNewSession: (dir?: string | null) => void;
+  closeNewSession: () => void;
+  toggleShortcuts: () => void;
+  closeShortcuts: () => void;
+  toggleCommandPalette: () => void;
+  closeCommandPalette: () => void;
 }
 
 // Stream controllers live outside the store: they are resources, not UI state.
@@ -183,7 +197,7 @@ export const useApp = create<AppState>((set, get) => {
       if (notice) {
         const id = "session_id" in e ? e.session_id : null;
         showNotice(notice, () => {
-          window.focus();
+          void focusWindow();
           if (id) void get().openSession(id);
         });
       }
@@ -275,6 +289,12 @@ export const useApp = create<AppState>((set, get) => {
     view: "home",
     lastStop: {},
     notificationsOn: loadNotificationsPref(),
+    sidebarOpen: true,
+    newSessionOpen: false,
+    newSessionInitialDir: null,
+    shortcutsOpen: false,
+    commandPaletteOpen: false,
+
     sessionSearchQuery: "",
     sessionStatusFilter: "all",
     pinnedSessionIds: loadPinnedSessions(),
@@ -294,6 +314,14 @@ export const useApp = create<AppState>((set, get) => {
       saveArchivedSessions(next);
       set({ archivedSessionIds: next });
     },
+
+    toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+    openNewSession: (dir = null) => set({ newSessionOpen: true, newSessionInitialDir: dir }),
+    closeNewSession: () => set({ newSessionOpen: false, newSessionInitialDir: null }),
+    toggleShortcuts: () => set((s) => ({ shortcutsOpen: !s.shortcutsOpen })),
+    closeShortcuts: () => set({ shortcutsOpen: false }),
+    toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
+    closeCommandPalette: () => set({ commandPaletteOpen: false }),
 
     refreshProviders: async () => {
       const client = get().client;

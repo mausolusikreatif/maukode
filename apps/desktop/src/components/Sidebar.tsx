@@ -8,7 +8,6 @@ import {
 } from "../state/sessionFilters";
 import { useApp } from "../state/store";
 import { DeleteDialog } from "./DeleteDialog";
-import { NewSessionDialog } from "./NewSessionDialog";
 
 function PinIcon({ pinned }: { pinned: boolean }) {
   return (
@@ -104,6 +103,8 @@ export function Sidebar() {
     view,
     goHome,
     openSettings,
+    openNewSession,
+    toggleShortcuts,
     threads,
     sessionSearchQuery,
     sessionStatusFilter,
@@ -114,8 +115,6 @@ export function Sidebar() {
     togglePinSession,
     toggleArchiveSession,
   } = useApp();
-
-  const [creating, setCreating] = useState<string | null | false>(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -182,10 +181,20 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-head">
         <strong>MauKode</strong>
-        <span data-testid="connection" className={`dot ${connection}`} title={connection} />
+        <div className="row">
+          <button
+            type="button"
+            className="link icon-btn"
+            title="Keyboard shortcuts (?)"
+            data-testid="btn-shortcuts"
+            onClick={toggleShortcuts}
+          >
+            ?
+          </button>
+          <span data-testid="connection" className={`dot ${connection}`} title={connection} />
+        </div>
       </div>
-
-      <button data-testid="new-session" className="primary" onClick={() => setCreating(null)}>
+      <button data-testid="new-session" className="primary" onClick={() => openNewSession(null)}>
         New session
       </button>
 
@@ -288,7 +297,7 @@ export function Sidebar() {
                   className="project-add"
                   title={`New session in ${baseName(project)}`}
                   aria-label={`New session in ${baseName(project)}`}
-                  onClick={() => setCreating(project)}
+                  onClick={() => openNewSession(project)}
                 >
                   +
                 </button>
@@ -406,7 +415,6 @@ export function Sidebar() {
           </div>
         )}
       </nav>
-
       {/* Floating context menu */}
       {contextMenu && (
         <div
@@ -462,9 +470,6 @@ export function Sidebar() {
         </div>
       )}
 
-      {creating !== false && (
-        <NewSessionDialog initialDir={creating} onClose={() => setCreating(false)} />
-      )}
       {deletingId && (
         <DeleteDialog sessionId={deletingId} onClose={() => setDeletingId(null)} />
       )}

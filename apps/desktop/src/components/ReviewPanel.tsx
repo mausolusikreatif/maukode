@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { FileDiffEntry } from "../api/types";
+import { openInEditor, revealInFileManager } from "../platform";
 import { parseUnifiedDiff } from "../state/diff";
 import { useApp, type ActionResult } from "../state/store";
 
@@ -104,11 +105,39 @@ function WorktreeSection() {
 }
 
 export function ReviewPanel({ running }: { running: boolean }) {
-  const { review, selectFile, refreshReview, undoLast } = useApp();
+  const { review, meta, selectFile, refreshReview, undoLast } = useApp();
+  const [editorNotice, setEditorNotice] = useState<string | null>(null);
+
   const totals = review.files.reduce(
     (t, f) => ({ add: t.add + (f.insertions ?? 0), del: t.del + (f.deletions ?? 0) }),
     { add: 0, del: 0 },
   );
+
+  const selectedPath = useMemo(() => {
+    if (!review.selected) return null;
+    if (meta?.directory) {
+      return `${meta.directory}/${review.selected}`;
+    }
+    return review.selected;
+  }, [meta?.directory, review.selected]);
+
+  const handleOpen = async (editor: "code" | "cursor") => {
+    if (!selectedPath) return;
+    const res = await openInEditor(selectedPath, editor);
+    if (!res.success && res.error) {
+      setEditorNotice(res.error);
+      setTimeout(() => setEditorNotice(null), 4000);
+    }
+  };
+
+  const handleReveal = async () => {
+    if (!selectedPath) return;
+    const res = await revealInFileManager(selectedPath);
+    if (!res.success && res.error) {
+      setEditorNotice(res.error);
+      setTimeout(() => setEditorNotice(null), 4000);
+    }
+  };
 
   return (
     <aside data-testid="review-panel" className="review">
@@ -138,6 +167,43 @@ export function ReviewPanel({ running }: { running: boolean }) {
       </div>
 
       <div className="review-diff">
+        {review.selected && (
+          <div className="diff-toolbar" data-testid="diff-toolbar">
+            <span className="diff-file-path" title={selectedPath ?? review.selected}>
+              {review.selected}
+            </span>
+            <div className="diff-file-actions">
+              <button
+                type="button"
+                data-testid="file-open-vscode"
+                className="btn-sm"
+                title={`Open in VS Code (${selectedPath})`}
+                onClick={() => void handleOpen("code")}
+              >
+                VS Code
+              </button>
+              <button
+                type="button"
+                data-testid="file-open-cursor"
+                className="btn-sm"
+                title={`Open in Cursor (${selectedPath})`}
+                onClick={() => void handleOpen("cursor")}
+              >
+                Cursor
+              </button>
+              <button
+                type="button"
+                data-testid="file-reveal-manager"
+                className="btn-sm"
+                title={`Reveal in File Manager (${selectedPath})`}
+                onClick={() => void handleReveal()}
+              >
+                Reveal
+              </button>
+            </div>
+          </div>
+        )}
+        {editorNotice && <div className="notice warn small pad">{editorNotice}</div>}
         {review.selected && review.diff && <DiffView text={review.diff.diff} truncated={review.diff.truncated} />}
       </div>
 

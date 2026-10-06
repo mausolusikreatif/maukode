@@ -224,3 +224,40 @@ test("the audit trail lists approval decisions for a session", async ({ page }) 
   await expect(dialog.getByTestId("audit-decision")).toHaveText("allow_once");
   await expect(dialog).toContainText("ask → strict");
 });
+
+test("command palette, keyboard shortcuts, and external editor actions", async ({ page }) => {
+  const repo = gitRepo();
+  await connectAndCreate(page, repo);
+
+  // Repository action buttons are visible on the session header
+  await expect(page.getByTestId("open-vscode")).toBeVisible();
+  await expect(page.getByTestId("open-cursor")).toBeVisible();
+  await expect(page.getByTestId("reveal-file-manager")).toBeVisible();
+
+  // Open Command Palette with Ctrl+K
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+  await expect(page.getByTestId("palette-input")).toBeFocused();
+
+  // Search for Toggle Sidebar action
+  await page.getByTestId("palette-input").fill("Toggle Sidebar");
+  await expect(page.getByTestId("palette-item")).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("command-palette")).not.toBeVisible();
+  // Sidebar is now closed; toggle button appears in crumbs
+  await expect(page.getByTestId("toggle-sidebar-btn")).toBeVisible();
+
+  // Re-open palette and toggle sidebar back
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+  await page.getByTestId("palette-input").fill("Toggle Sidebar");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("new-session")).toBeVisible();
+
+  // Open shortcut cheat sheet with '?'
+  await page.keyboard.press("?");
+  await expect(page.getByTestId("shortcut-modal")).toBeVisible();
+  await page.getByTestId("close-shortcuts").click();
+  await expect(page.getByTestId("shortcut-modal")).not.toBeVisible();
+});
+
