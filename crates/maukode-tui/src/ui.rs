@@ -340,21 +340,29 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
             summary,
         } => {
             let (badge, status_style) = match status {
-                maukode_protocol::SubagentStatus::Running => (
+                None => (
                     "◉ Running",
                     Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
                 ),
-                maukode_protocol::SubagentStatus::Completed => (
+                Some(maukode_protocol::SubagentStatus::Completed) => (
                     "✓ Completed",
                     Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
                 ),
-                maukode_protocol::SubagentStatus::Failed => (
+                Some(maukode_protocol::SubagentStatus::Failed) => (
                     "✗ Failed",
                     Style::default()
                         .fg(COLOR_AMBER)
                         .add_modifier(Modifier::BOLD),
                 ),
-                maukode_protocol::SubagentStatus::Cancelled => ("⊘ Cancelled", theme::dim_style()),
+                Some(maukode_protocol::SubagentStatus::BudgetExceeded) => (
+                    "⚠ Budget Exceeded",
+                    Style::default()
+                        .fg(COLOR_AMBER)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Some(maukode_protocol::SubagentStatus::Cancelled) => {
+                    ("⊘ Cancelled", theme::dim_style())
+                }
             };
 
             lines.push(Line::from(vec![
@@ -375,7 +383,7 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
             ]));
 
             match status {
-                maukode_protocol::SubagentStatus::Running => {
+                None => {
                     lines.push(Line::from(vec![
                         Span::styled("│ ", theme::border_style()),
                         Span::styled("Status: ", theme::dim_style()),
@@ -389,7 +397,7 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
                         Span::styled("[/subagents or F3 to inspect]", theme::dim_style()),
                     ]));
                 }
-                maukode_protocol::SubagentStatus::Completed => {
+                Some(maukode_protocol::SubagentStatus::Completed) => {
                     if let Some(sum) = summary {
                         let first_line = sum.lines().next().unwrap_or(sum.as_str());
                         lines.push(Line::from(vec![
@@ -409,8 +417,9 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
                         Span::styled("[/subagents or F3 to inspect trace]", theme::dim_style()),
                     ]));
                 }
-                maukode_protocol::SubagentStatus::Failed
-                | maukode_protocol::SubagentStatus::Cancelled => {
+                Some(maukode_protocol::SubagentStatus::Failed)
+                | Some(maukode_protocol::SubagentStatus::BudgetExceeded)
+                | Some(maukode_protocol::SubagentStatus::Cancelled) => {
                     if let Some(sum) = summary {
                         lines.push(Line::from(vec![
                             Span::styled("│ ", theme::border_style()),
@@ -1847,15 +1856,16 @@ fn draw_subagent_modal(
     for (i, agent) in subagents.iter().enumerate() {
         let is_current = i == selected_idx;
         let status_mark = match agent.status {
-            maukode_protocol::SubagentStatus::Running => "◉",
-            maukode_protocol::SubagentStatus::Completed => "✓",
-            maukode_protocol::SubagentStatus::Failed => "✗",
-            maukode_protocol::SubagentStatus::Cancelled => "⊘",
+            None => "◉",
+            Some(maukode_protocol::SubagentStatus::Completed) => "✓",
+            Some(maukode_protocol::SubagentStatus::Failed) => "✗",
+            Some(maukode_protocol::SubagentStatus::BudgetExceeded) => "⚠",
+            Some(maukode_protocol::SubagentStatus::Cancelled) => "⊘",
         };
         let label = format!(" [{}: {} ({status_mark})] ", i + 1, agent.profile_name);
         let tab_style = if is_current {
             Style::default()
-                .fg(COLOR_BG)
+                .fg(COLOR_SURFACE)
                 .bg(COLOR_CYAN)
                 .add_modifier(Modifier::BOLD)
         } else {
@@ -1869,10 +1879,13 @@ fn draw_subagent_modal(
     // 1. Agent overview metadata
     if let Some(agent) = active_agent {
         let (status_str, status_color) = match agent.status {
-            maukode_protocol::SubagentStatus::Running => ("◉ Running", COLOR_CYAN),
-            maukode_protocol::SubagentStatus::Completed => ("✓ Completed", COLOR_MINT),
-            maukode_protocol::SubagentStatus::Failed => ("✗ Failed", COLOR_AMBER),
-            maukode_protocol::SubagentStatus::Cancelled => ("⊘ Cancelled", COLOR_MUTED),
+            None => ("◉ Running", COLOR_CYAN),
+            Some(maukode_protocol::SubagentStatus::Completed) => ("✓ Completed", COLOR_MINT),
+            Some(maukode_protocol::SubagentStatus::Failed) => ("✗ Failed", COLOR_AMBER),
+            Some(maukode_protocol::SubagentStatus::BudgetExceeded) => {
+                ("⚠ Budget Exceeded", COLOR_AMBER)
+            }
+            Some(maukode_protocol::SubagentStatus::Cancelled) => ("⊘ Cancelled", COLOR_MUTED),
         };
         let meta_lines = vec![
             Line::from(vec![
@@ -2227,7 +2240,7 @@ mod chat_viewport_tests {
             parent_session_id: maukode_protocol::SessionId::new(),
             profile_name: "Codebase Researcher".into(),
             goal: "Audit mutex usage".into(),
-            status: maukode_protocol::SubagentStatus::Running,
+            status: None,
             current_step: 1,
             tokens_used: 120,
             summary: None,
@@ -2260,7 +2273,7 @@ mod chat_viewport_tests {
                 id: "sub-1".into(),
                 profile_name: "Security Auditor".into(),
                 goal: "Check token expiration".into(),
-                status: maukode_protocol::SubagentStatus::Completed,
+                status: Some(maukode_protocol::SubagentStatus::Completed),
                 step: 3,
                 last_action: "Finished".into(),
                 tokens_used: 450,

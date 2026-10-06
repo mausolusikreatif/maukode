@@ -32,7 +32,7 @@ pub struct SubagentSessionState {
     pub parent_session_id: SessionId,
     pub profile_name: String,
     pub goal: String,
-    pub status: SubagentStatus,
+    pub status: Option<SubagentStatus>,
     pub current_step: usize,
     pub tokens_used: usize,
     pub summary: Option<String>,
@@ -59,7 +59,7 @@ pub enum ChatRole {
         id: String,
         profile_name: String,
         goal: String,
-        status: SubagentStatus,
+        status: Option<SubagentStatus>,
         step: usize,
         last_action: String,
         tokens_used: usize,
@@ -1099,7 +1099,7 @@ impl App {
                     parent_session_id,
                     profile_name: profile_name.clone(),
                     goal: goal.clone(),
-                    status: SubagentStatus::Running,
+                    status: None,
                     current_step: 0,
                     tokens_used: 0,
                     summary: None,
@@ -1115,7 +1115,7 @@ impl App {
                         id: subagent_id,
                         profile_name,
                         goal,
-                        status: SubagentStatus::Running,
+                        status: None,
                         step: 0,
                         last_action: init_action,
                         tokens_used: 0,
@@ -1168,7 +1168,7 @@ impl App {
             } => {
                 let now = chrono::Local::now().format("%H:%M:%S").to_string();
                 if let Some(subagent) = self.subagents.iter_mut().find(|s| s.id == subagent_id) {
-                    subagent.status = status;
+                    subagent.status = Some(status);
                     subagent.summary = Some(summary.clone());
                     subagent.tokens_used = tokens_used;
                     let last_step = subagent.current_step;
@@ -1189,7 +1189,7 @@ impl App {
                         ..
                     } = &mut item.role
                     {
-                        *s_status = status;
+                        *s_status = Some(status);
                         *s_summary = Some(summary.clone());
                         *s_tokens = tokens_used;
                     }
@@ -1732,7 +1732,7 @@ mod stream_tests {
 
         assert_eq!(app.subagents.len(), 1);
         assert_eq!(app.subagents[0].profile_name, "Codebase Researcher");
-        assert_eq!(app.subagents[0].status, SubagentStatus::Running);
+        assert_eq!(app.subagents[0].status, None);
         assert!(matches!(
             app.items.last().unwrap().role,
             ChatRole::Subagent { ref id, ref profile_name, .. } if id == &sub_id && profile_name == "Codebase Researcher"
@@ -1756,13 +1756,13 @@ mod stream_tests {
             tokens_used: 420,
         });
 
-        assert_eq!(app.subagents[0].status, SubagentStatus::Completed);
+        assert_eq!(app.subagents[0].status, Some(SubagentStatus::Completed));
         assert_eq!(app.subagents[0].summary.as_deref(), Some("Found 2 files"));
         assert_eq!(app.subagents[0].tokens_used, 420);
         assert!(matches!(
             app.items.last().unwrap().role,
             ChatRole::Subagent {
-                status: SubagentStatus::Completed,
+                status: Some(SubagentStatus::Completed),
                 tokens_used: 420,
                 ..
             }
