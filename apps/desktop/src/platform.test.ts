@@ -27,11 +27,11 @@ describe("platform native helpers", () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const res = await openInEditor("/path/to/project", "code");
     expect(res.success).toBe(true);
-    expect(openSpy).toHaveBeenCalledWith("vscode://file/%2Fpath%2Fto%2Fproject");
+    expect(openSpy).toHaveBeenCalledWith("vscode://file//path/to/project");
 
     const cursorRes = await openInEditor("/path/to/project", "cursor");
     expect(cursorRes.success).toBe(true);
-    expect(openSpy).toHaveBeenCalledWith("cursor://file/%2Fpath%2Fto%2Fproject");
+    expect(openSpy).toHaveBeenCalledWith("cursor://file//path/to/project");
   });
 
   it("handles revealInFileManager gracefully in browser mode", async () => {
