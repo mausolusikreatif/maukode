@@ -6,6 +6,7 @@ import type {
   ChatGptLoginStatus,
   ChatGptStatus,
   Checkpoint,
+  CodebaseMapResponse,
   CreateSessionRequest,
   CreateSessionResponse,
   FileDiffListResponse,
@@ -185,6 +186,9 @@ export class ApiClient {
       "GET",
       `/api/v1/models${provider ? `?provider=${enc(provider)}` : ""}`,
     );
+  }
+  codebaseMap(id: string, maxTokens = 1000) {
+    return this.request<CodebaseMapResponse>("GET", `/api/v1/sessions/${id}/map?max_tokens=${maxTokens}`);
   }
   diffFiles(id: string) {
     return this.request<FileDiffListResponse>("GET", `/api/v1/sessions/${id}/diff/files`);
