@@ -5,8 +5,8 @@ use maukode_core::{
     SqliteSessionStore,
 };
 use maukode_protocol::{
-    ContentPart, LLMEvent, Message, PermissionDecision, PermissionRequest, Plan, PlanStep, Role,
-    SessionId, StepStatus, StopReason, SubagentStatus, TokenUsage,
+    ContentPart, LLMEvent, Message, PermissionDecision, PermissionRequest, Plan, Role, SessionId,
+    StopReason, SubagentStatus, TokenUsage,
 };
 use maukode_server::ServerClient;
 use maukode_tools::{
@@ -1168,7 +1168,7 @@ impl App {
             } => {
                 let now = chrono::Local::now().format("%H:%M:%S").to_string();
                 if let Some(subagent) = self.subagents.iter_mut().find(|s| s.id == subagent_id) {
-                    subagent.status = Some(status);
+                    subagent.status = Some(status.clone());
                     subagent.summary = Some(summary.clone());
                     subagent.tokens_used = tokens_used;
                     let last_step = subagent.current_step;
@@ -1189,7 +1189,7 @@ impl App {
                         ..
                     } = &mut item.role
                     {
-                        *s_status = Some(status);
+                        *s_status = Some(status.clone());
                         *s_summary = Some(summary.clone());
                         *s_tokens = tokens_used;
                     }
