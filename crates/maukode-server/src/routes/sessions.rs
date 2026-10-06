@@ -11,9 +11,11 @@ use axum::{
 };
 use futures::Stream;
 use maukode_core::worktree::{self, WorktreeError, WorktreeInfo};
+use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner};
 use maukode_protocol::{
     GlobalEvent, LLMEvent, Message, QueueSteeringPrompt, SessionId, SessionState, StopReason,
 };
+use maukode_tools::create_default_registry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::convert::Infallible;
