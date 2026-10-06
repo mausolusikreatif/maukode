@@ -251,6 +251,13 @@ h3 { font-size: 12px; }
 .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; width: min(480px, 92vw); max-height: 90vh; overflow: auto; box-shadow: var(--shadow); }
 .modal h2 { margin-top: 0; font-size: 16px; }
 .modal.wide { width: min(900px, 94vw); max-height: 86vh; }
+.directory-picker { display: flex; gap: 7px; }
+.directory-picker input { min-width: 0; }
+.directory-picker button { flex: none; }
+.recent-repositories { display: grid; gap: 5px; margin: -4px 0 12px; }
+.repository-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.repository-list button { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-list button.selected { border-color: var(--focus); background: var(--hover); }
 .table-wrap { overflow: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; }
 th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }

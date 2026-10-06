@@ -43,6 +43,22 @@ export function saveBootstrap(b: Bootstrap): void {
   }
 }
 
+export async function pickDirectory(defaultPath?: string): Promise<string | null> {
+  if (!window.__TAURI_INTERNALS__) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: defaultPath || undefined,
+    title: "Choose a project repository",
+  });
+  return typeof selected === "string" ? selected : null;
+}
+
+export function isDesktop(): boolean {
+  return Boolean(window.__TAURI_INTERNALS__);
+}
+
 export function forgetBootstrap(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
