@@ -188,12 +188,25 @@ function ModelSelect({
 }
 
 function SessionView() {
-  const { activeId, meta, threads, review, toggleReview } = useApp();
+  const {
+    activeId,
+    meta,
+    threads,
+    review,
+    toggleReview,
+    pinnedSessionIds,
+    archivedSessionIds,
+    togglePinSession,
+    toggleArchiveSession,
+  } = useApp();
   const [deleting, setDeleting] = useState(false);
   const [auditing, setAuditing] = useState(false);
   const view = useApp((s) => s.view);
   if (!activeId) return view === "settings" ? <SettingsPage /> : <Dashboard />;
   const thread = threads[activeId] ?? emptyThread();
+  const isPinned = pinnedSessionIds.includes(activeId);
+  const isArchived = archivedSessionIds.includes(activeId);
+
   return (
     <div className={`session-layout ${review.open ? "with-review" : ""}`}>
       <main className="session-view">
@@ -202,6 +215,7 @@ function SessionView() {
             <div className="crumbs" title={meta?.projectDir ?? meta?.directory}>
               <span className="chip project-chip">▤ {baseName(meta?.projectDir ?? meta?.directory ?? "")}</span>
               {meta?.branch && <span className="chip branch-chip">⎇ {meta.branch}</span>}
+              {isArchived && <span className="chip">archived</span>}
             </div>
             <SessionTitle sessionId={activeId} title={meta?.title ?? null} />
             <ModelSelect
@@ -218,6 +232,22 @@ function SessionView() {
             <span data-testid="run-state" className={`badge ${thread.running ? "run" : ""}`}>
               {thread.running ? "running" : "idle"}
             </span>
+            <button
+              data-testid="pin-active-session"
+              className="link"
+              title={isPinned ? "Unpin session" : "Pin session"}
+              onClick={() => togglePinSession(activeId)}
+            >
+              {isPinned ? "Unpin" : "Pin"}
+            </button>
+            <button
+              data-testid="archive-active-session"
+              className="link"
+              title={isArchived ? "Restore session from archive" : "Archive session"}
+              onClick={() => toggleArchiveSession(activeId)}
+            >
+              {isArchived ? "Restore" : "Archive"}
+            </button>
             <button data-testid="audit-button" className="link" onClick={() => setAuditing(true)}>
               Audit
             </button>
