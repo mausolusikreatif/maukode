@@ -85,4 +85,3 @@ mod tests {
         assert!(registry.get("bash").is_none());
     }
 }
-
