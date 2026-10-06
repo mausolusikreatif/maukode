@@ -450,7 +450,7 @@ fn start_turn(
         let (provider_id, model) = effective_model(&state, id).await;
         let session_dir = session_arc.read().await.directory.clone();
 
-        let (llm_client, runner_config, mut tool_registry) = {
+        let (llm_client, runner_config, mut tool_registry, jail) = {
             let config_guard = state.config.read().await;
             let llm_client = config_guard
                 .create_llm_client_for(&provider_id)
