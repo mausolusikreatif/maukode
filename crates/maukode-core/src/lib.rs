@@ -13,6 +13,7 @@ pub mod repo_map;
 pub mod runner;
 pub mod session;
 pub mod store;
+pub mod subagent;
 pub mod worktree;
 
 pub use chatgpt_auth::{AuthEndpoints, ChatGptAuth, LoginAttempt};
@@ -36,3 +37,4 @@ pub use repo_map::{CodebaseMapTool, RepoMapGenerator};
 pub use runner::{RunnerConfig, SessionRunner};
 pub use session::Session;
 pub use store::{InMemorySessionStore, SessionStore, SessionSummary, SqliteSessionStore};
+pub use subagent::SubagentTool;
