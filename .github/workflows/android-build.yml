@@ -1,0 +1,58 @@
+name: Android build
+
+# Builds a sideloadable debug APK (arm64) of the Tauri Android client. It is a remote client: it
+# connects to a daemon over HTTPS (e.g. `tailscale serve`) and does not start one itself.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/**"]
+    paths:
+      - "apps/desktop/**"
+      - ".github/workflows/android-build.yml"
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+            ~/.gradle/caches
+          key: android-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'apps/desktop/src-tauri/gen/android/**/*.gradle*') }}
+      - name: Android SDK components
+        run: |
+          # The runner image ships the SDK; make sure the platform the project targets is there.
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+      - name: Build APK
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri android build --debug --apk --target aarch64 --ci
+      - name: Locate APK
+        run: |
+          find apps/desktop/src-tauri/gen/android -name '*.apk' -print
+          mkdir -p dist-apk
+          cp "$(find apps/desktop/src-tauri/gen/android -name '*.apk' | head -1)" dist-apk/maukode-android-arm64-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maukode-android-apk
+          path: dist-apk/*.apk
+          retention-days: 1

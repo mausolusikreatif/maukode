@@ -3,5 +3,10 @@ dist
 test-results
 playwright-report
 src-tauri/target
-src-tauri/gen
+src-tauri/gen/*
+!src-tauri/gen/android
+src-tauri/gen/android/.tauri
+src-tauri/gen/android/**/tauri.properties
+src-tauri/gen/android/app/src/main/jniLibs
+src-tauri/gen/android/app/src/main/assets
 shell.png

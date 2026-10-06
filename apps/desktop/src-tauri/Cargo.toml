@@ -8,6 +8,10 @@ license = "MIT OR Apache-2.0"
 # excluded from the root workspace and CI's `cargo test --workspace`.
 [workspace]
 
+[lib]
+name = "maukode_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [features]
 # Serve the bundled UI instead of the dev-server URL; required for release builds.
 custom-protocol = ["tauri/custom-protocol"]
@@ -17,6 +21,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+
+# Desktop only: the daemon lifecycle code (and the whole server stack behind it) is not built for
+# Android, where the app talks to a remote daemon.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", features = ["sync", "process"] }
