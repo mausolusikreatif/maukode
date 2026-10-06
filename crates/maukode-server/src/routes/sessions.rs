@@ -430,6 +430,7 @@ async fn persist_session(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn start_turn(
     state: Arc<ServerState>,
     id: SessionId,
