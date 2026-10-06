@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApp } from "../state/store";
@@ -25,35 +25,110 @@ function argHint(args: string): string {
   return "";
 }
 
-function ToolCard({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
-  const label = { running: "running…", done: "done", error: "failed", private: "shown only to you" }[item.status];
+function CodeBlock({ className, children, ...props }: React.ComponentProps<"code">) {
+  const [copied, setCopied] = useState(false);
+  const match = /language-(\w+)/.exec(className || "");
+  const isInline = !match && typeof children === "string" && !children.includes("\n");
+
+  if (isInline) {
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  }
+
+  const codeText = String(children).replace(/\n$/, "");
+
+  const copy = () => {
+    void navigator.clipboard.writeText(codeText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <details data-testid="tool-card" className={`tool ${item.status}`}>
+    <div className="code-block">
+      <div className="code-head">
+        <span className="code-lang">{match ? match[1] : "text"}</span>
+        <button type="button" className="code-copy-btn" onClick={copy} title="Copy code">
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
+      <pre>
+        <code className={className} {...props}>
+          {children}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
+function ToolCard({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
+  const [copied, setCopied] = useState(false);
+  const label = { running: "running…", done: "done", error: "failed", private: "shown only to you" }[item.status];
+
+  const copyOutput = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const content = item.result ?? item.args ?? "";
+    void navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <details data-testid="tool-card" className={`tool ${item.status}`} open={item.status === "running" ? true : undefined}>
       <summary>
         <span className="tool-name">{item.name || "tool"}</span>
         <span className="tool-hint">{argHint(item.args ?? "")}</span>
         <span data-testid="tool-status" className="tool-status">{label}</span>
       </summary>
-      {item.args && <pre className="args">{prettyArgs(item.args)}</pre>}
-      {item.result !== undefined && <pre className="result">{item.result}</pre>}
+      <div className="tool-body">
+        {item.args && (
+          <div className="tool-section">
+            <span className="tool-sec-label">Input</span>
+            <pre className="args">{prettyArgs(item.args)}</pre>
+          </div>
+        )}
+        {item.result !== undefined && (
+          <div className="tool-section">
+            <div className="tool-sec-head">
+              <span className="tool-sec-label">Output</span>
+              <button type="button" className="link tool-copy-btn" onClick={copyOutput}>
+                {copied ? "Copied" : "Copy output"}
+              </button>
+            </div>
+            <pre className="result">{item.result}</pre>
+          </div>
+        )}
+      </div>
     </details>
   );
 }
 
-function Item({ item }: { item: ThreadItem }) {
+function Item({ item, isStreaming }: { item: ThreadItem; isStreaming: boolean }) {
   switch (item.kind) {
     case "user":
       return <div data-testid="user-msg" className="msg user">{item.text}</div>;
     case "assistant":
       return (
         <div data-testid="assistant-msg" className="msg assistant">
-          <Markdown remarkPlugins={[remarkGfm]}>{item.text}</Markdown>
+          <Markdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              code: CodeBlock,
+            }}
+          >
+            {item.text}
+          </Markdown>
         </div>
       );
     case "reasoning":
       return (
-        <details className="reasoning">
-          <summary>Thinking</summary>
+        <details className="reasoning" open={isStreaming ? true : undefined}>
+          <summary>
+            <span>Thinking</span>
+            {isStreaming && <span className="thinking-pulse" />}
+          </summary>
           <div>{item.text}</div>
         </details>
       );
@@ -97,8 +172,12 @@ export function Thread({ thread }: { thread: ThreadState }) {
           Describe a task below. It works in this project and asks before risky actions.
         </div>
       )}
-      {thread.items.map((item) => (
-        <Item key={item.id} item={item} />
+      {thread.items.map((item, idx) => (
+        <Item
+          key={item.id}
+          item={item}
+          isStreaming={thread.running && idx === thread.items.length - 1}
+        />
       ))}
       {thread.running && thread.pending.length === 0 && <div className="working muted" data-testid="working">Working…</div>}
     </div>

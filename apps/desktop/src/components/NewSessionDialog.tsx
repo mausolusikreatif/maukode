@@ -1,14 +1,32 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../state/store";
 
 export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void; initialDir?: string | null }) {
-  const { providers, sessions, createSession } = useApp();
+  const { client, providers, sessions, createSession } = useApp();
   const [directory, setDirectory] = useState(initialDir ?? sessions[0]?.project_dir ?? sessions[0]?.directory ?? "");
   const [isolate, setIsolate] = useState(true);
   const [provider, setProvider] = useState(providers?.active_provider ?? "");
   const [model, setModel] = useState("");
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (provider && client) {
+      void client
+        .models(provider)
+        .then((r) => {
+          if (!cancelled) setAvailableModels(r.models);
+        })
+        .catch(() => undefined);
+    } else {
+      setAvailableModels([]);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [client, provider]);
 
   const submit = async () => {
     setBusy(true);
@@ -72,7 +90,20 @@ export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void;
         </label>
         <label>
           Model <span className="muted">(blank = provider default)</span>
-          <input data-testid="model-input" value={model} onChange={(e) => setModel(e.target.value)} />
+          <input
+            data-testid="model-input"
+            list="dialog-model-options"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder={availableModels[0] ? `e.g. ${availableModels[0]}` : "Leave blank for provider default"}
+          />
+          {availableModels.length > 0 && (
+            <datalist id="dialog-model-options">
+              {availableModels.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          )}
         </label>
         {error && <div className="notice error">{error}</div>}
         <div className="row end">
