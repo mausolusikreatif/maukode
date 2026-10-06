@@ -447,4 +447,17 @@ impl ServerClient {
         }
         Ok(resp.json().await?)
     }
+
+    pub async fn list_subagent_profiles(&self) -> Result<Vec<maukode_protocol::SubagentProfile>> {
+        let resp = self
+            .http
+            .get(format!("{}/api/v1/subagents/profiles", self.base_url))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to list subagent profiles: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
 }

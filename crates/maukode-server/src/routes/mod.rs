@@ -121,6 +121,11 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/permissions/mode",
             get(sessions::get_permission_mode).post(sessions::set_permission_mode),
         )
+        // Subagents
+        .route(
+            "/api/v1/subagents/profiles",
+            get(sessions::list_subagent_profiles),
+        )
         // Sessions
         .route(
             "/api/v1/sessions",
