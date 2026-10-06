@@ -146,10 +146,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .post(sessions::queue_prompt)
                 .delete(sessions::clear_session_queue),
         )
-        .route(
-            "/api/v1/sessions/{id}/steer",
-            post(sessions::steer_prompt),
-        )
+        .route("/api/v1/sessions/{id}/steer", post(sessions::steer_prompt))
         .route(
             "/api/v1/sessions/{id}/cancel",
             post(sessions::cancel_prompt),
