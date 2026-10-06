@@ -6,6 +6,7 @@ export type { ChatGptAccount } from "./generated/ChatGptAccount";
 export type { ChatGptLoginStarted } from "./generated/ChatGptLoginStarted";
 export type { ChatGptLoginStatus } from "./generated/ChatGptLoginStatus";
 export type { ChatGptStatus } from "./generated/ChatGptStatus";
+export type { CodebaseMapResponse } from "./generated/CodebaseMapResponse";
 export type { ContentPart } from "./generated/ContentPart";
 export type { CreateSessionRequest } from "./generated/CreateSessionRequest";
 export type { CreateSessionResponse } from "./generated/CreateSessionResponse";

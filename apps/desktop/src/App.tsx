@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import type { PermissionMode } from "./api/types";
 import { AuditDialog } from "./components/AuditDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { Composer } from "./components/Composer";
 import { ConnectScreen } from "./components/ConnectScreen";
 import { Dashboard } from "./components/Dashboard";
 import { DeleteDialog } from "./components/DeleteDialog";
+import { ModelSelect } from "./components/ModelSelect";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Prompts } from "./components/Prompts";
 import { ReviewPanel } from "./components/ReviewPanel";
@@ -18,50 +18,6 @@ import { baseName } from "./state/format";
 import { useApp } from "./state/store";
 import { titleFor } from "./state/notify";
 import { emptyThread } from "./state/thread";
-
-const MODES: { value: PermissionMode; label: string }[] = [
-  { value: "ask", label: "Ask for risky actions" },
-  { value: "strict", label: "Ask for everything" },
-  { value: "review", label: "Review (private results)" },
-  { value: "trust", label: "Trust (no prompts)" },
-];
-
-/** Approval mode for this session only; loads the server's current value when the session opens. */
-function ModeSelect({ sessionId }: { sessionId: string }) {
-  const client = useApp((s) => s.client);
-  const [mode, setMode] = useState<PermissionMode | "">("");
-
-  useEffect(() => {
-    let cancelled = false;
-    setMode("");
-    void client
-      ?.request<{ mode: PermissionMode }>("GET", `/api/v1/permissions/mode?session_id=${sessionId}`)
-      .then((r) => !cancelled && setMode(r.mode))
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [client, sessionId]);
-
-  return (
-    <select
-      data-testid="perm-mode"
-      value={mode}
-      disabled={!mode}
-      onChange={(e) => {
-        const next = e.target.value as PermissionMode;
-        setMode(next);
-        void client?.setPermissionMode(next, sessionId);
-      }}
-    >
-      {MODES.map((m) => (
-        <option key={m.value} value={m.value}>
-          {m.label}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 function SessionTitle({ sessionId, title }: { sessionId: string; title: string | null }) {
   const [editing, setEditing] = useState(false);
@@ -129,69 +85,20 @@ function SessionTitle({ sessionId, title }: { sessionId: string; title: string |
   );
 }
 
-function ModelSelect({
-  sessionId,
-  currentProvider,
-  currentModel,
-}: {
-  sessionId: string;
-  currentProvider: string | null;
-  currentModel: string | null;
-}) {
-  const client = useApp((s) => s.client);
-  const setSessionModel = useApp((s) => s.setSessionModel);
-  const [models, setModels] = useState<string[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (currentProvider && client) {
-      void client
-        .models(currentProvider)
-        .then((r) => {
-          if (!cancelled && r.models.length > 0) setModels(r.models);
-        })
-        .catch(() => undefined);
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [client, currentProvider]);
-
-  if (models.length > 0) {
-    return (
-      <select
-        className="model-select"
-        value={currentModel ?? ""}
-        title={`Provider: ${currentProvider ?? "default"} · Model`}
-        onChange={(e) => {
-          if (e.target.value) {
-            void setSessionModel(sessionId, e.target.value, currentProvider ?? undefined);
-          }
-        }}
-      >
-        {models.map((m) => (
-          <option key={m} value={m}>
-            {currentProvider}/{m}
-          </option>
-        ))}
-        {currentModel && !models.includes(currentModel) && (
-          <option value={currentModel}>
-            {currentProvider}/{currentModel}
-          </option>
-        )}
-      </select>
-    );
-  }
-
-  return (
-    <span className="small muted">
-      {currentProvider}/{currentModel}
-    </span>
-  );
-}
-
 function SessionView() {
-  const { activeId, meta, threads, review, toggleReview, sidebarOpen, toggleSidebar } = useApp();
+  const {
+    activeId,
+    meta,
+    threads,
+    review,
+    toggleReview,
+    sidebarOpen,
+    toggleSidebar,
+    pinnedSessionIds,
+    archivedSessionIds,
+    togglePinSession,
+    toggleArchiveSession,
+  } = useApp();
   const [deleting, setDeleting] = useState(false);
   const [auditing, setAuditing] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -217,6 +124,8 @@ function SessionView() {
       setTimeout(() => setToastMsg(null), 4000);
     }
   };
+  const isPinned = pinnedSessionIds.includes(activeId);
+  const isArchived = archivedSessionIds.includes(activeId);
 
   return (
     <div className={`session-layout ${review.open ? "with-review" : ""}`}>
@@ -238,6 +147,7 @@ function SessionView() {
                 )}
                 <span className="chip project-chip">▤ {baseName(meta?.projectDir ?? meta?.directory ?? "")}</span>
                 {meta?.branch && <span className="chip branch-chip">⎇ {meta.branch}</span>}
+                {isArchived && <span className="chip">archived</span>}
               </div>
               {currentDir && (
                 <div className="repo-actions" data-testid="repo-actions">
@@ -279,13 +189,28 @@ function SessionView() {
             />
           </div>
           <div className="row">
-            <ModeSelect sessionId={activeId} />
             <button data-testid="toggle-review" className={review.open ? "primary" : ""} onClick={() => void toggleReview()}>
               Changes{review.files.length > 0 ? ` (${review.files.length})` : ""}
             </button>
             <span data-testid="run-state" className={`badge ${thread.running ? "run" : ""}`}>
               {thread.running ? "running" : "idle"}
             </span>
+            <button
+              data-testid="pin-active-session"
+              className="link"
+              title={isPinned ? "Unpin session" : "Pin session"}
+              onClick={() => togglePinSession(activeId)}
+            >
+              {isPinned ? "Unpin" : "Pin"}
+            </button>
+            <button
+              data-testid="archive-active-session"
+              className="link"
+              title={isArchived ? "Restore session from archive" : "Archive session"}
+              onClick={() => toggleArchiveSession(activeId)}
+            >
+              {isArchived ? "Restore" : "Archive"}
+            </button>
             <button data-testid="audit-button" className="link" onClick={() => setAuditing(true)}>
               Audit
             </button>

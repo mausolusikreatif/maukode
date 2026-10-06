@@ -22,6 +22,13 @@ import {
   showNotice,
 } from "./notify";
 import {
+  loadArchivedSessions,
+  loadPinnedSessions,
+  saveArchivedSessions,
+  savePinnedSessions,
+  type SessionStatusFilter,
+} from "./sessionFilters";
+import {
   addNotice,
   applyEvent,
   emptyThread,
@@ -94,6 +101,15 @@ interface AppState {
   view: "home" | "settings";
   lastStop: Record<string, LastStop>;
   notificationsOn: boolean;
+  sessionSearchQuery: string;
+  sessionStatusFilter: SessionStatusFilter;
+  pinnedSessionIds: string[];
+  archivedSessionIds: string[];
+
+  setSessionSearchQuery: (query: string) => void;
+  setSessionStatusFilter: (filter: SessionStatusFilter) => void;
+  togglePinSession: (id: string) => void;
+  toggleArchiveSession: (id: string) => void;
 
   refreshProviders: () => Promise<void>;
   goHome: () => void;
@@ -279,6 +295,26 @@ export const useApp = create<AppState>((set, get) => {
     shortcutsOpen: false,
     commandPaletteOpen: false,
 
+    sessionSearchQuery: "",
+    sessionStatusFilter: "all",
+    pinnedSessionIds: loadPinnedSessions(),
+    archivedSessionIds: loadArchivedSessions(),
+
+    setSessionSearchQuery: (query) => set({ sessionSearchQuery: query }),
+    setSessionStatusFilter: (filter) => set({ sessionStatusFilter: filter }),
+    togglePinSession: (id) => {
+      const current = get().pinnedSessionIds;
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      savePinnedSessions(next);
+      set({ pinnedSessionIds: next });
+    },
+    toggleArchiveSession: (id) => {
+      const current = get().archivedSessionIds;
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      saveArchivedSessions(next);
+      set({ archivedSessionIds: next });
+    },
+
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     openNewSession: (dir = null) => set({ newSessionOpen: true, newSessionInitialDir: dir }),
     closeNewSession: () => set({ newSessionOpen: false, newSessionInitialDir: null }),
@@ -409,6 +445,11 @@ export const useApp = create<AppState>((set, get) => {
       if (!client) return;
       await client.deleteSession(id, opts);
       if (get().activeId === id) get().closeSession();
+      const pinned = get().pinnedSessionIds.filter((x) => x !== id);
+      const archived = get().archivedSessionIds.filter((x) => x !== id);
+      savePinnedSessions(pinned);
+      saveArchivedSessions(archived);
+      set({ pinnedSessionIds: pinned, archivedSessionIds: archived });
       await get().refreshSessions();
     },
 
