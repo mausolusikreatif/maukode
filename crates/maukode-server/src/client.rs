@@ -3,7 +3,7 @@ use eventsource_stream::Eventsource;
 use futures::{Stream, StreamExt};
 use maukode_core::SessionSummary;
 use maukode_protocol::{
-    LLMEvent, Message, SessionId, SessionMetadata, SessionState, SkillDefinition,
+    LLMEvent, Message, PluginManifest, SessionId, SessionMetadata, SessionState, SkillDefinition,
 };
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
@@ -487,6 +487,72 @@ impl ServerClient {
         if !resp.status().is_success() {
             let err = resp.text().await.unwrap_or_default();
             return Err(anyhow!("Failed to get skill '{name}': {err}"));
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn list_plugins(&self, directory: Option<&str>) -> Result<Vec<PluginManifest>> {
+        let mut req = self.http.get(format!("{}/api/v1/plugins", self.base_url));
+        if let Some(dir) = directory {
+            req = req.query(&[("directory", dir)]);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to list plugins: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn get_plugin(&self, name: &str, directory: Option<&str>) -> Result<PluginManifest> {
+        let mut req = self
+            .http
+            .get(format!("{}/api/v1/plugins/{name}", self.base_url));
+        if let Some(dir) = directory {
+            req = req.query(&[("directory", dir)]);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to get plugin '{name}': {err}"));
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn enable_plugin(
+        &self,
+        name: &str,
+        directory: Option<&str>,
+    ) -> Result<PluginManifest> {
+        let mut req = self
+            .http
+            .post(format!("{}/api/v1/plugins/{name}/enable", self.base_url));
+        if let Some(dir) = directory {
+            req = req.query(&[("directory", dir)]);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to enable plugin '{name}': {err}"));
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn disable_plugin(
+        &self,
+        name: &str,
+        directory: Option<&str>,
+    ) -> Result<PluginManifest> {
+        let mut req = self
+            .http
+            .post(format!("{}/api/v1/plugins/{name}/disable", self.base_url));
+        if let Some(dir) = directory {
+            req = req.query(&[("directory", dir)]);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to disable plugin '{name}': {err}"));
         }
         Ok(resp.json().await?)
     }

@@ -254,6 +254,12 @@ impl SkillManager {
             }
         }
 
+        // 4. Enabled plugin skills
+        let plugin_manager = crate::PluginManager::new();
+        for skill in plugin_manager.enabled_skills(workspace_dir) {
+            map.insert(skill.name.clone(), skill);
+        }
+
         let mut result: Vec<SkillDefinition> = map.into_values().collect();
         result.sort_by(|a, b| a.name.cmp(&b.name));
         result
@@ -281,7 +287,15 @@ impl SkillManager {
             }
         }
 
-        // 3. Built-in skills fallback
+        // 3. Enabled plugin skills
+        let plugin_manager = crate::PluginManager::new();
+        for skill in plugin_manager.enabled_skills(workspace_dir) {
+            if skill.name == name {
+                return Some(skill);
+            }
+        }
+
+        // 4. Built-in skills fallback
         self.built_in_skills.get(name).cloned()
     }
 
