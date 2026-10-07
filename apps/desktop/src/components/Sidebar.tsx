@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArchiveRestore, Pin, Plus, Search } from "lucide-react";
+import {
+  ChevronDown,
+  CircleHelp,
+  House,
+  Plus,
+  Search,
+  Settings2,
+} from "lucide-react";
 import { baseName, shortAgo } from "../state/format";
 import {
   filterSessions,
@@ -103,23 +110,31 @@ export function Sidebar() {
   const running = counts.running;
 
   return (
-    <aside className="sidebar flex w-72 shrink-0 flex-col gap-2 border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground">
-      <div className="sidebar-head flex items-center justify-between px-1">
-        <strong className="text-sm font-semibold tracking-tight text-primary">MauKode</strong>
-        <div className="flex items-center gap-2">
+    <aside className="sidebar flex w-[288px] shrink-0 flex-col gap-2 border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground shadow-[4px_0_24px_-20px_rgba(0,0,0,0.8)]">
+      <div className="sidebar-head flex items-center justify-between px-2 py-1">
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-left transition hover:bg-sidebar-accent"
+          title="Workspace menu"
+        >
+          <span className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">M</span>
+          <span className="text-sm font-semibold tracking-tight">MauKode</span>
+          <ChevronDown className="size-3.5 text-muted-foreground" />
+        </button>
+        <div className="flex items-center gap-0.5">
           <button
             type="button"
-            className="btn-shortcuts rounded-md px-1.5 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            className="rounded-md p-1.5 text-muted-foreground transition hover:bg-sidebar-accent hover:text-foreground"
             title="Keyboard shortcuts (?)"
             data-testid="btn-shortcuts"
             onClick={toggleShortcuts}
           >
-            ?
+            <CircleHelp className="size-4" />
           </button>
           <span
             data-testid="connection"
             className={cn(
-              "dot size-2 rounded-full",
+              "mx-1 size-1.5 rounded-full",
               connection === "online" && "bg-success",
               connection === "connecting" && "bg-warning",
               connection === "reconnecting" && "bg-warning",
@@ -130,34 +145,49 @@ export function Sidebar() {
         </div>
       </div>
 
-      <Button data-testid="new-session" size="sm" className="w-full" onClick={() => openNewSession(null)}>
-        New session
-      </Button>
-
-      <div className="summary px-1 text-xs text-muted-foreground" data-testid="summary">
-        {running} running · {needsYou} need you
+      <div className="px-1 pt-2">
+        <Button data-testid="new-session" size="sm" className="h-9 w-full justify-start gap-2 rounded-lg px-3 shadow-sm" onClick={() => openNewSession(null)}>
+          <Plus className="size-4" />
+          <span>New session</span>
+          <kbd className="ml-auto rounded border border-primary-foreground/20 px-1.5 py-0.5 text-[10px] font-normal opacity-70">⌘ N</kbd>
+        </Button>
       </div>
 
-      <div className="row nav grid grid-cols-2 gap-1">
+      <div className="summary flex items-center gap-2 px-2 pt-2 text-[11px] text-muted-foreground" data-testid="summary">
+        <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-primary" />{running} running</span>
+        <span className="text-border">·</span>
+        <span className={cn(needsYou > 0 && "text-warning")}>{needsYou} need you</span>
+      </div>
+
+      <nav className="mt-2 space-y-0.5 px-1" aria-label="Main navigation">
         <Button
           data-testid="nav-overview"
           variant={!activeId && view === "home" ? "secondary" : "ghost"}
           size="sm"
+          className="h-8 w-full justify-start gap-2 rounded-md px-2.5 text-xs"
           onClick={goHome}
         >
-          Overview
+          <House className="size-3.5" /> Overview
         </Button>
         <Button
           data-testid="nav-settings"
           variant={!activeId && view === "settings" ? "secondary" : "ghost"}
           size="sm"
+          className="h-8 w-full justify-start gap-2 rounded-md px-2.5 text-xs"
           onClick={openSettings}
         >
-          Settings
+          <Settings2 className="size-3.5" /> Settings
         </Button>
+      </nav>
+
+      <div className="my-3 h-px bg-sidebar-border" />
+      <div className="flex items-center justify-between px-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Sessions</span>
+        <button type="button" className="rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" title="Search sessions" onClick={() => document.querySelector<HTMLInputElement>("[data-testid='session-search']")?.focus()}>
+          <Search className="size-3.5" />
+        </button>
       </div>
 
-      {/* Session search input */}
       <div className="sidebar-search relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -369,10 +399,14 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Floating context menu */}
+      <div className="sidebar-foot mt-auto border-t border-sidebar-border pt-2">
+        <button type="button" className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" onClick={toggleShortcuts}>
+          <CircleHelp className="size-3.5" /> Help & shortcuts <kbd className="ml-auto text-[10px] opacity-60">?</kbd>
+        </button>
+      </div>
+
       {contextMenu && (
         <div
-          ref={menuRef}
           className="session-context-menu fixed z-50 min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-xl"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           role="menu"
