@@ -3,20 +3,42 @@ import type { FileDiffEntry } from "../api/types";
 import { openInEditor, revealInFileManager } from "../platform";
 import { parseUnifiedDiff } from "../state/diff";
 import { useApp, type ActionResult } from "../state/store";
+import { cn } from "@/lib/utils";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 
 const STATUS_LABEL: Record<FileDiffEntry["status"], string> = { added: "A", modified: "M", deleted: "D" };
 
 function FileRow({ file, active, onSelect }: { file: FileDiffEntry; active: boolean; onSelect: () => void }) {
   return (
-    <button data-testid="diff-file" className={`diff-file ${active ? "active" : ""}`} onClick={onSelect} title={file.path}>
-      <span className={`status ${file.status}`}>{STATUS_LABEL[file.status]}</span>
-      <span className="path">{file.path}</span>
-      <span className="counts">
+    <button
+      data-testid="diff-file"
+      className={cn(
+        "diff-file flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
+        active ? "active bg-accent" : "hover:bg-accent/50",
+      )}
+      onClick={onSelect}
+      title={file.path}
+    >
+      <span
+        className={cn(
+          "status font-mono font-semibold",
+          file.status === "added" && "text-success",
+          file.status === "modified" && "text-warning",
+          file.status === "deleted" && "text-destructive",
+          file.status,
+        )}
+      >
+        {STATUS_LABEL[file.status]}
+      </span>
+      <span className="path flex-1 truncate">{file.path}</span>
+      <span className="counts shrink-0 font-mono text-[11px]">
         {file.binary ? (
           "binary"
         ) : (
           <>
-            <span className="plus">+{file.insertions ?? 0}</span> <span className="minus">−{file.deletions ?? 0}</span>
+            <span className="plus text-success">+{file.insertions ?? 0}</span>{" "}
+            <span className="minus text-destructive">−{file.deletions ?? 0}</span>
           </>
         )}
       </span>
@@ -26,37 +48,59 @@ function FileRow({ file, active, onSelect }: { file: FileDiffEntry; active: bool
 
 function DiffView({ text, truncated }: { text: string; truncated: boolean }) {
   const parsed = useMemo(() => parseUnifiedDiff(text), [text]);
-  if (parsed.binary) return <div className="muted pad">Binary file: no preview.</div>;
-  if (parsed.hunks.length === 0) return <div className="muted pad">No textual changes.</div>;
+  if (parsed.binary) return <div className="muted pad p-3 text-sm text-muted-foreground">Binary file: no preview.</div>;
+  if (parsed.hunks.length === 0) return <div className="muted pad p-3 text-sm text-muted-foreground">No textual changes.</div>;
   return (
-    <div data-testid="diff-view" className="diff-view">
+    <div data-testid="diff-view" className="diff-view scrollbar-thin overflow-auto font-mono text-xs">
       {parsed.hunks.map((h, i) => (
         <div key={i} className="hunk">
-          <div className="hunk-head">{h.header}</div>
+          <div className="hunk-head bg-secondary/50 px-2 py-1 text-muted-foreground">{h.header}</div>
           {h.lines.map((l, j) => (
-            <div key={j} data-kind={l.kind} className={`dline ${l.kind}`}>
-              <span className="no">{l.oldNo ?? ""}</span>
-              <span className="no">{l.newNo ?? ""}</span>
-              <span className="sign">{l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}</span>
-              <code>{l.text}</code>
+            <div
+              key={j}
+              data-kind={l.kind}
+              className={cn(
+                "dline flex gap-2 px-2",
+                l.kind === "add" && "bg-success/10",
+                l.kind === "del" && "bg-destructive/10",
+                l.kind,
+              )}
+            >
+              <span className="no w-8 shrink-0 select-none text-right text-muted-foreground">{l.oldNo ?? ""}</span>
+              <span className="no w-8 shrink-0 select-none text-right text-muted-foreground">{l.newNo ?? ""}</span>
+              <span className="sign w-3 shrink-0 select-none">{l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}</span>
+              <code className="whitespace-pre">{l.text}</code>
             </div>
           ))}
         </div>
       ))}
-      {truncated && <div className="notice warn">Diff truncated at 1 MiB.</div>}
+      {truncated && (
+        <div className="notice warn rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+          Diff truncated at 1 MiB.
+        </div>
+      )}
     </div>
   );
 }
 
 function Result({ result }: { result: ActionResult }) {
   return (
-    <div data-testid="review-result" className={`notice ${result.level === "ok" ? "ok" : result.level}`}>
+    <div
+      data-testid="review-result"
+      className={cn(
+        "notice rounded-md border px-3 py-2 text-sm",
+        result.level === "ok"
+          ? "border-success/40 bg-success/10 text-success"
+          : "border-destructive/40 bg-destructive/10 text-destructive",
+        result.level === "ok" ? "ok" : result.level,
+      )}
+    >
       <div>{result.text}</div>
       {result.files && (
-        <ul data-testid="conflict-files">
+        <ul data-testid="conflict-files" className="mt-1 list-disc pl-5">
           {result.files.map((f) => (
             <li key={f}>
-              <code>{f}</code>
+              <code className="font-mono">{f}</code>
             </li>
           ))}
         </ul>
@@ -71,34 +115,41 @@ function WorktreeSection() {
   const wt = review.worktree;
   if (!wt) return null;
   return (
-    <section data-testid="worktree" className="worktree">
-      <h4>
-        Worktree <code>{wt.branch}</code>
+    <section data-testid="worktree" className="worktree mt-3 space-y-2 rounded-lg border border-border bg-card/40 p-3">
+      <h4 className="text-sm font-semibold">
+        Worktree <code className="rounded bg-secondary px-1 font-mono text-xs">{wt.branch}</code>
       </h4>
-      <div className="muted small">
+      <div className="text-xs text-muted-foreground">
         {wt.dirty ? "Uncommitted changes" : "Clean"} · {wt.commits_ahead} commit{wt.commits_ahead === 1 ? "" : "s"} ahead of{" "}
-        <code>{wt.base_commit.slice(0, 8)}</code>
+        <code className="font-mono">{wt.base_commit.slice(0, 8)}</code>
         <br />
-        Merges into the branch currently checked out in <code>{meta?.projectDir ?? wt.project_dir}</code>.
+        Merges into the branch currently checked out in{" "}
+        <code className="font-mono">{meta?.projectDir ?? wt.project_dir}</code>.
       </div>
-      <input
+      <Input
         data-testid="commit-message"
         placeholder="Commit / merge message (optional)"
         value={message}
         onChange={(e) => setMessage(e.target.value)}
       />
-      <div className="row">
-        <button data-testid="commit-button" disabled={review.busy || !wt.dirty} onClick={() => void commitWorktree(message)}>
+      <div className="row flex gap-2">
+        <Button
+          data-testid="commit-button"
+          variant="outline"
+          size="sm"
+          disabled={review.busy || !wt.dirty}
+          onClick={() => void commitWorktree(message)}
+        >
           Commit changes
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="merge-button"
-          className="primary"
+          size="sm"
           disabled={review.busy || (!wt.dirty && wt.commits_ahead === 0)}
           onClick={() => void mergeWorktree(message)}
         >
           Merge into project
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -140,43 +191,61 @@ export function ReviewPanel({ running }: { running: boolean }) {
   };
 
   return (
-    <aside data-testid="review-panel" className="review">
-      <header className="review-head">
+    <aside
+      data-testid="review-panel"
+      className="review flex w-96 shrink-0 flex-col border-l border-border bg-card/30"
+    >
+      <header className="review-head flex items-center gap-2 border-b border-border px-3 py-2 text-sm">
         <strong>Changes</strong>
-        <span data-testid="review-summary" className="muted small">
-          {review.files.length} file{review.files.length === 1 ? "" : "s"} · <span className="plus">+{totals.add}</span>{" "}
-          <span className="minus">−{totals.del}</span>
+        <span data-testid="review-summary" className="text-xs text-muted-foreground">
+          {review.files.length} file{review.files.length === 1 ? "" : "s"} ·{" "}
+          <span className="plus text-success">+{totals.add}</span>{" "}
+          <span className="minus text-destructive">−{totals.del}</span>
         </span>
-        <button className="link" onClick={() => void refreshReview()} disabled={review.loading}>
+        <button
+          className="ml-auto text-xs text-primary hover:underline"
+          onClick={() => void refreshReview()}
+          disabled={review.loading}
+        >
           Refresh
         </button>
       </header>
 
-      {running && <div className="notice warn small">The agent is running: changes may still be incoming. Undo, commit and merge are disabled until it finishes.</div>}
-      {review.error && <div className="notice error">{review.error}</div>}
+      {running && (
+        <div className="notice warn m-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+          The agent is running: changes may still be incoming. Undo, commit and merge are disabled until it finishes.
+        </div>
+      )}
+      {review.error && (
+        <div className="notice error m-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {review.error}
+        </div>
+      )}
 
-      <div className="review-files">
+      <div className="review-files scrollbar-thin max-h-56 overflow-y-auto py-1">
         {review.files.map((f) => (
           <FileRow key={f.path} file={f} active={f.path === review.selected} onSelect={() => void selectFile(f.path)} />
         ))}
         {!review.loading && review.files.length === 0 && (
-          <p data-testid="no-changes" className="muted pad">
-            {review.checkpoints === 0 ? "No checkpoints yet: changes are tracked from the first turn." : "No changes since the first turn."}
+          <p data-testid="no-changes" className="muted pad p-3 text-xs text-muted-foreground">
+            {review.checkpoints === 0
+              ? "No checkpoints yet: changes are tracked from the first turn."
+              : "No changes since the first turn."}
           </p>
         )}
       </div>
 
-      <div className="review-diff">
+      <div className="review-diff flex-1 overflow-hidden border-t border-border">
         {review.selected && (
-          <div className="diff-toolbar" data-testid="diff-toolbar">
-            <span className="diff-file-path" title={selectedPath ?? review.selected}>
+          <div className="diff-toolbar flex items-center gap-2 border-b border-border px-2 py-1" data-testid="diff-toolbar">
+            <span className="diff-file-path flex-1 truncate text-xs" title={selectedPath ?? review.selected}>
               {review.selected}
             </span>
-            <div className="diff-file-actions">
+            <div className="diff-file-actions flex items-center gap-1">
               <button
                 type="button"
                 data-testid="file-open-vscode"
-                className="btn-sm"
+                className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-accent"
                 title={`Open in VS Code (${selectedPath})`}
                 onClick={() => void handleOpen("code")}
               >
@@ -185,7 +254,7 @@ export function ReviewPanel({ running }: { running: boolean }) {
               <button
                 type="button"
                 data-testid="file-open-cursor"
-                className="btn-sm"
+                className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-accent"
                 title={`Open in Cursor (${selectedPath})`}
                 onClick={() => void handleOpen("cursor")}
               >
@@ -194,7 +263,7 @@ export function ReviewPanel({ running }: { running: boolean }) {
               <button
                 type="button"
                 data-testid="file-reveal-manager"
-                className="btn-sm"
+                className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-accent"
                 title={`Reveal in File Manager (${selectedPath})`}
                 onClick={() => void handleReveal()}
               >
@@ -203,22 +272,30 @@ export function ReviewPanel({ running }: { running: boolean }) {
             </div>
           </div>
         )}
-        {editorNotice && <div className="notice warn small pad">{editorNotice}</div>}
+        {editorNotice && (
+          <div className="notice warn small pad m-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+            {editorNotice}
+          </div>
+        )}
         {review.selected && review.diff && <DiffView text={review.diff.diff} truncated={review.diff.truncated} />}
       </div>
 
-      <div className="review-actions">
-        <div className="row">
-          <button
+      <div className="review-actions space-y-2 border-t border-border p-3">
+        <div className="row flex items-center gap-2">
+          <Button
             data-testid="undo-button"
+            variant="outline"
+            size="sm"
             disabled={review.busy || running || review.checkpoints === 0}
             onClick={() => {
               if (confirm("Undo the last turn's file changes? The conversation is kept; files are restored.")) void undoLast();
             }}
           >
             Undo last turn
-          </button>
-          <span className="muted small">{review.checkpoints} checkpoint{review.checkpoints === 1 ? "" : "s"}</span>
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {review.checkpoints} checkpoint{review.checkpoints === 1 ? "" : "s"}
+          </span>
         </div>
         <WorktreeSection />
         {review.result && <Result result={review.result} />}

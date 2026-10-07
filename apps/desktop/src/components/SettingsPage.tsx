@@ -10,6 +10,11 @@ import type {
 } from "../api/types";
 import { notificationsSupported } from "../state/notify";
 import { useApp } from "../state/store";
+import { cn } from "@/lib/utils";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 
 const MODES: { value: PermissionMode; label: string }[] = [
   { value: "ask", label: "Ask for risky actions" },
@@ -22,8 +27,11 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <section data-testid={`settings-${id}`} className="settings-section">
-      <h2>{title}</h2>
+    <section
+      data-testid={`settings-${id}`}
+      className="settings-section space-y-3 rounded-xl border border-border bg-card/40 p-4"
+    >
+      <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
       {children}
     </section>
   );
@@ -61,17 +69,19 @@ function GeneralSection() {
 
   return (
     <Section id="general" title="General">
-      <label>
-        Approval mode for new sessions
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="default-mode">Approval mode for new sessions</Label>
         <select
+          id="default-mode"
           data-testid="default-mode"
+          className="h-9 w-72 rounded-md border border-input bg-background/60 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
           value={security?.permission_mode ?? ""}
           disabled={!security}
           onChange={async (e) => {
-            const mode = e.target.value as PermissionMode;
-            setSecurity((s) => (s ? { ...s, permission_mode: mode } : s));
+            const m = e.target.value as PermissionMode;
+            setSecurity((s) => (s ? { ...s, permission_mode: m } : s));
             try {
-              await client!.setDefaultPermissionMode(mode);
+              await client!.setDefaultPermissionMode(m);
               setMsg({ level: "ok", text: "Default approval mode saved." });
             } catch (err) {
               setMsg({ level: "error", text: errText(err) });
@@ -84,48 +94,56 @@ function GeneralSection() {
             </option>
           ))}
         </select>
-        <span className="muted small">Existing sessions keep their own mode.</span>
-      </label>
+        <span className="text-xs text-muted-foreground">Existing sessions keep their own mode.</span>
+      </div>
 
-      <div className="row">
-        <label>
-          Max steps per turn
-          <input
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="max-steps">Max steps per turn</Label>
+          <Input
+            id="max-steps"
             data-testid="max-steps"
             type="number"
             min={1}
             max={200}
             value={steps}
             disabled={!agent}
+            className="w-32"
             onChange={(e) => setSteps(e.target.value)}
           />
-        </label>
-        <label>
-          Max output tokens
-          <input
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="max-tokens">Max output tokens</Label>
+          <Input
+            id="max-tokens"
             data-testid="max-tokens"
             type="number"
             min={1}
             max={200000}
             value={tokens}
             disabled={!agent}
+            className="w-36"
             onChange={(e) => setTokens(e.target.value)}
           />
-        </label>
-        <button
+        </div>
+        <Button
           data-testid="save-limits"
+          variant="secondary"
           disabled={!agent || (Number(steps) === agent.max_steps && Number(tokens) === agent.max_tokens)}
           onClick={() => void saveLimits()}
         >
           Save limits
-        </button>
+        </Button>
       </div>
-      <p className="muted small">If your model rejects large outputs, lower the token limit; raise the step limit for long tasks.</p>
+      <p className="text-xs text-muted-foreground">
+        If your model rejects large outputs, lower the token limit; raise the step limit for long tasks.
+      </p>
 
-      <label className="check">
+      <label className="check flex items-center gap-2 text-sm">
         <input
           data-testid="notifications-toggle"
           type="checkbox"
+          className="size-4 accent-[var(--primary)]"
           checked={notificationsOn}
           disabled={!notificationsSupported()}
           onChange={async (e) => {
@@ -134,9 +152,22 @@ function GeneralSection() {
           }}
         />
         Desktop notifications when an agent needs approval or finishes
-        {!notificationsSupported() && <span className="muted"> — not supported here</span>}
+        {!notificationsSupported() && <span className="text-muted-foreground"> — not supported here</span>}
       </label>
-      {msg && <div data-testid="settings-msg" className={`notice ${msg.level === "ok" ? "ok" : "error"}`}>{msg.text}</div>}
+      {msg && (
+        <div
+          data-testid="settings-msg"
+          className={cn(
+            "notice rounded-md border px-3 py-2 text-sm",
+            msg.level === "ok"
+              ? "border-success/40 bg-success/10 text-success"
+              : "border-destructive/40 bg-destructive/10 text-destructive",
+            msg.level === "ok" ? "ok" : "error",
+          )}
+        >
+          {msg.text}
+        </div>
+      )}
     </Section>
   );
 }
@@ -170,7 +201,6 @@ function ProviderEditor({
         name: f.name.trim() || f.id.trim(),
         kind: f.kind,
         base_url: f.base_url.trim(),
-        // null keeps the stored key, "" removes it, anything else replaces it.
         api_key: f.removeKey ? "" : f.api_key || null,
         default_model: f.default_model.trim() || null,
       });
@@ -184,46 +214,59 @@ function ProviderEditor({
   return (
     <form
       data-testid="provider-form"
-      className="provider-form"
+      className="provider-form mt-2 space-y-2 rounded-lg border border-border bg-background/40 p-3"
       onSubmit={(e) => {
         e.preventDefault();
         void save();
       }}
     >
       {isNew && (
-        <label>
-          Id <input data-testid="pf-id" value={f.id} onChange={(e) => set("id", e.target.value)} placeholder="e.g. openrouter" required />
-        </label>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="pf-id">Id</Label>
+          <Input id="pf-id" data-testid="pf-id" value={f.id} onChange={(e) => set("id", e.target.value)} placeholder="e.g. openrouter" required />
+        </div>
       )}
-      <label>
-        Name <input data-testid="pf-name" value={f.name} onChange={(e) => set("name", e.target.value)} />
-      </label>
-      <label>
-        Kind
-        <select data-testid="pf-kind" value={f.kind} disabled={!isNew} onChange={(e) => set("kind", e.target.value as ProviderKind)}>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="pf-name">Name</Label>
+        <Input id="pf-name" data-testid="pf-name" value={f.name} onChange={(e) => set("name", e.target.value)} />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="pf-kind">Kind</Label>
+        <select
+          id="pf-kind"
+          data-testid="pf-kind"
+          className="h-9 w-72 rounded-md border border-input bg-background/60 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+          value={f.kind}
+          disabled={!isNew}
+          onChange={(e) => set("kind", e.target.value as ProviderKind)}
+        >
           <option value="open_ai_compatible">OpenAI-compatible</option>
           <option value="anthropic">Anthropic</option>
         </select>
-      </label>
-      <label>
-        Base URL <input data-testid="pf-base-url" value={f.base_url} onChange={(e) => set("base_url", e.target.value)} required />
-      </label>
-      <label>
-        Default model <input data-testid="pf-model" value={f.default_model} onChange={(e) => set("default_model", e.target.value)} />
-      </label>
-      <label>
-        API key <span className="muted">{isNew ? "" : "(leave blank to keep the stored key)"}</span>
-        <input data-testid="pf-key" type="password" autoComplete="off" value={f.api_key} onChange={(e) => set("api_key", e.target.value)} />
-      </label>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="pf-base-url">Base URL</Label>
+        <Input id="pf-base-url" data-testid="pf-base-url" value={f.base_url} onChange={(e) => set("base_url", e.target.value)} required />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="pf-model">Default model</Label>
+        <Input id="pf-model" data-testid="pf-model" value={f.default_model} onChange={(e) => set("default_model", e.target.value)} />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="pf-key">
+          API key <span className="text-muted-foreground">{isNew ? "" : "(leave blank to keep the stored key)"}</span>
+        </Label>
+        <Input id="pf-key" data-testid="pf-key" type="password" autoComplete="off" value={f.api_key} onChange={(e) => set("api_key", e.target.value)} />
+      </div>
       {!isNew && (
-        <label className="check">
-          <input type="checkbox" checked={f.removeKey} onChange={(e) => set("removeKey", e.target.checked)} /> Remove the stored key
+        <label className="check flex items-center gap-2 text-sm">
+          <input type="checkbox" className="size-4 accent-[var(--primary)]" checked={f.removeKey} onChange={(e) => set("removeKey", e.target.checked)} /> Remove the stored key
         </label>
       )}
-      {error && <div className="notice error">{error}</div>}
-      <div className="row end">
-        <button type="button" onClick={onDone}>Cancel</button>
-        <button data-testid="pf-save" className="primary">Save</button>
+      {error && <div className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={onDone}>Cancel</Button>
+        <Button data-testid="pf-save" size="sm" type="submit">Save</Button>
       </div>
     </form>
   );
@@ -246,28 +289,28 @@ function ProvidersSection() {
 
   return (
     <Section id="providers" title="Providers">
-      <p className="muted small">API keys are stored on the daemon and never sent back to this window.</p>
+      <p className="text-xs text-muted-foreground">API keys are stored on the daemon and never sent back to this window.</p>
       {providers?.providers.map((p) => (
-        <div key={p.id} data-testid="provider-row" className="provider-row">
-          <div>
-            <strong>{p.name}</strong> <code>{p.id}</code>
-            {p.id === providers.active_provider && <span className="badge run">default</span>}
-            <div className="muted small">
+        <div key={p.id} data-testid="provider-row" className="provider-row space-y-2 rounded-lg border border-border bg-background/30 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <strong className="text-sm">{p.name}</strong> <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs">{p.id}</code>
+            {p.id === providers.active_provider && <Badge variant="primary" className="badge run">default</Badge>}
+            <div className="w-full text-xs text-muted-foreground">
               {p.kind === "chat_gpt" ? "ChatGPT plan (see below)" : `${p.base_url} · ${p.has_api_key ? "key stored" : "no key"}`}
               {p.default_model && <> · model {p.default_model}</>}
             </div>
           </div>
-          <div className="row">
+          <div className="flex gap-2">
             {p.id !== providers.active_provider && (
-              <button data-testid="make-default" onClick={() => void run(() => client!.setActiveProvider(p.id))}>Make default</button>
+              <Button data-testid="make-default" variant="outline" size="sm" onClick={() => void run(() => client!.setActiveProvider(p.id))}>Make default</Button>
             )}
             {p.kind !== "chat_gpt" && (
-              <button data-testid="edit-provider" onClick={() => setEditing(p.id)}>Edit</button>
+              <Button data-testid="edit-provider" variant="outline" size="sm" onClick={() => setEditing(p.id)}>Edit</Button>
             )}
             {p.id !== providers.active_provider && (
               <button
                 data-testid="delete-provider"
-                className="link"
+                className="text-xs text-destructive hover:underline"
                 onClick={() => {
                   if (confirm(`Remove provider “${p.name}”?`)) void run(() => client!.deleteProvider(p.id));
                 }}
@@ -285,11 +328,11 @@ function ProvidersSection() {
           )}
         </div>
       ))}
-      {msg && <div data-testid="providers-msg" className="notice error">{msg}</div>}
+      {msg && <div data-testid="providers-msg" className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{msg}</div>}
       {editing === "new" ? (
         <ProviderEditor isNew initial={blankForm()} onDone={() => setEditing(null)} />
       ) : (
-        <button data-testid="add-provider" onClick={() => setEditing("new")}>Add provider</button>
+        <Button data-testid="add-provider" variant="secondary" size="sm" onClick={() => setEditing("new")}>Add provider</Button>
       )}
     </Section>
   );
@@ -319,12 +362,10 @@ function ChatGptSection() {
   useEffect(() => {
     void refresh();
     return () => {
-      // Leaving the page abandons an unfinished sign-in so its callback listener is closed.
       if (attempt.current) void client?.chatgptCancelLogin(attempt.current).catch(() => undefined);
     };
   }, [client, refresh]);
 
-  // Poll the daemon while the user approves the sign-in in their browser.
   useEffect(() => {
     if (login.phase !== "waiting") return;
     const { attemptId } = login;
@@ -371,14 +412,14 @@ function ChatGptSection() {
   const signedIn = !!status?.email;
   return (
     <Section id="chatgpt" title="ChatGPT plan">
-      <p className="muted small">
+      <p className="text-xs text-muted-foreground">
         Use your ChatGPT Plus/Pro allowance through “Sign in with ChatGPT”. The browser that approves the sign-in must run on
         the <strong>same computer as the MauKode daemon</strong> (the callback is a local address). Availability is controlled by
         OpenAI; if sign-in is refused, this app may not be enrolled in their program.
       </p>
-      <div data-testid="chatgpt-status">
+      <div data-testid="chatgpt-status" className="text-sm">
         {status === null ? (
-          <span className="muted">Checking…</span>
+          <span className="text-muted-foreground">Checking…</span>
         ) : signedIn ? (
           <>Signed in as <strong data-testid="chatgpt-email">{status.email}</strong></>
         ) : (
@@ -386,11 +427,11 @@ function ChatGptSection() {
         )}
       </div>
       {status && status.accounts.length > 1 && (
-        <ul className="plain">
+        <ul className="plain space-y-1 text-sm">
           {status.accounts.map((a) => (
-            <li key={a.client_id}>
-              {a.email} {a.active ? <span className="badge run">active</span> : (
-                <button className="link" onClick={async () => { await client!.chatgptUseAccount(a.client_id); await refresh(); }}>Use</button>
+            <li key={a.client_id} className="flex items-center gap-2">
+              {a.email} {a.active ? <Badge variant="primary" className="badge run">active</Badge> : (
+                <button className="text-primary hover:underline" onClick={async () => { await client!.chatgptUseAccount(a.client_id); await refresh(); }}>Use</button>
               )}
             </li>
           ))}
@@ -398,30 +439,31 @@ function ChatGptSection() {
       )}
 
       {login.phase === "waiting" && (
-        <div data-testid="chatgpt-waiting" className="notice warn">
+        <div data-testid="chatgpt-waiting" className="notice warn space-y-1 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
           <div>Waiting for you to approve the sign-in in your browser…</div>
-          <div className="small">
-            Page didn’t open? <a data-testid="chatgpt-url" href={login.url} target="_blank" rel="noopener noreferrer">Open the sign-in page</a>
+          <div className="text-xs">
+            Page didn’t open? <a data-testid="chatgpt-url" className="underline" href={login.url} target="_blank" rel="noopener noreferrer">Open the sign-in page</a>
           </div>
-          <button data-testid="chatgpt-cancel" onClick={() => void cancel()}>Cancel</button>
+          <Button data-testid="chatgpt-cancel" variant="outline" size="sm" onClick={() => void cancel()}>Cancel</Button>
         </div>
       )}
-      {login.phase === "failed" && <div data-testid="chatgpt-error" className="notice error">Sign-in failed: {login.error}</div>}
-      {msg && <div className="notice error">{msg}</div>}
+      {login.phase === "failed" && <div data-testid="chatgpt-error" className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">Sign-in failed: {login.error}</div>}
+      {msg && <div className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{msg}</div>}
 
-      <div className="row">
-        <button
+      <div className="flex items-center gap-2">
+        <Button
           data-testid="chatgpt-signin"
-          className={signedIn ? "" : "primary"}
+          variant={signedIn ? "outline" : "default"}
+          size="sm"
           disabled={login.phase === "starting" || login.phase === "waiting"}
           onClick={() => void start(signedIn)}
         >
           {signedIn ? "Add another account" : login.phase === "failed" ? "Try again" : "Sign in with ChatGPT"}
-        </button>
+        </Button>
         {signedIn && (
           <button
             data-testid="chatgpt-signout"
-            className="link"
+            className="text-xs text-destructive hover:underline"
             onClick={async () => {
               if (!confirm("Sign out of ChatGPT? This revokes the session on OpenAI’s side.")) return;
               try {
@@ -452,24 +494,25 @@ function ReadOnlySection() {
   return (
     <>
       <Section id="mcp" title="MCP servers">
-        <p className="muted small">Read-only. Servers start when an agent first uses them (listing never starts one); they run commands, so they are configured in the config file (<code>mcpServers</code>) or a project’s <code>.maukode/mcp.json</code>.</p>
-        {mcp?.servers.length === 0 && <p className="muted">None configured.</p>}
+        <p className="text-xs text-muted-foreground">Read-only. Servers start when an agent first uses them (listing never starts one); they run commands, so they are configured in the config file (<code>mcpServers</code>) or a project’s <code>.maukode/mcp.json</code>.</p>
+        {mcp?.servers.length === 0 && <p className="text-sm text-muted-foreground">None configured.</p>}
         {mcp?.servers.map((s) => (
-          <div key={s.name} className="provider-row">
-            <div>
-              <strong>{s.name}</strong> <code>{s.command}</code> <span className="badge">{s.status === "not_started" ? "not started" : s.status}</span>
-              <div className="muted small">{s.tools.length} tool{s.tools.length === 1 ? "" : "s"}{s.error && <> · {s.error}</>}</div>
+          <div key={s.name} className="provider-row space-y-1 rounded-lg border border-border bg-background/30 p-3">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <strong>{s.name}</strong> <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs">{s.command}</code>{" "}
+              <Badge variant="outline">{s.status === "not_started" ? "not started" : s.status}</Badge>
             </div>
+            <div className="text-xs text-muted-foreground">{s.tools.length} tool{s.tools.length === 1 ? "" : "s"}{s.error && <> · {s.error}</>}</div>
           </div>
         ))}
       </Section>
       <Section id="security" title="Security">
-        <p className="muted small">Read-only: edit these in the config file and restart the daemon.</p>
+        <p className="text-xs text-muted-foreground">Read-only: edit these in the config file and restart the daemon.</p>
         {security && (
-          <ul className="plain">
+          <ul className="plain space-y-1 text-sm">
             <li>Restrict file tools to the project directory: <strong>{security.jail_path_traversal ? "on" : "off"}</strong></li>
             <li>Extra allowed paths: {security.allowed_external_paths.length ? security.allowed_external_paths.join(", ") : "none"}</li>
-            <li>Commands that never ask: {security.bash_whitelist.length ? <code>{security.bash_whitelist.join(", ")}</code> : "none"}</li>
+            <li>Commands that never ask: {security.bash_whitelist.length ? <code className="font-mono">{security.bash_whitelist.join(", ")}</code> : "none"}</li>
           </ul>
         )}
       </Section>
@@ -481,18 +524,20 @@ function ConnectionSection() {
   const { client, disconnect } = useApp();
   return (
     <Section id="connection" title="Connection">
-      <p>
-        Connected to <code>{client?.baseUrl}</code>
+      <p className="text-sm">
+        Connected to <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs">{client?.baseUrl}</code>
       </p>
-      <button data-testid="disconnect" onClick={() => disconnect()}>Disconnect</button>
+      <Button data-testid="disconnect" variant="outline" size="sm" onClick={() => disconnect()}>Disconnect</Button>
     </Section>
   );
 }
 
 export function SettingsPage() {
   return (
-    <main data-testid="settings" className="settings">
-      <h1>Settings</h1>
+    <main data-testid="settings" className="settings scrollbar-thin flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
+      </div>
       <GeneralSection />
       <ProvidersSection />
       <ChatGptSection />

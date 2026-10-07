@@ -13,11 +13,14 @@ import { SettingsPage } from "./components/SettingsPage";
 import { ShortcutModal } from "./components/ShortcutModal";
 import { Sidebar } from "./components/Sidebar";
 import { Thread } from "./components/Thread";
+import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
 import { getBootstrap, openInEditor, revealInFileManager, type Bootstrap } from "./platform";
 import { baseName } from "./state/format";
 import { useApp } from "./state/store";
 import { titleFor } from "./state/notify";
 import { emptyThread } from "./state/thread";
+import { cn } from "./lib/utils";
 
 function SessionTitle({ sessionId, title }: { sessionId: string; title: string | null }) {
   const [editing, setEditing] = useState(false);
@@ -38,50 +41,34 @@ function SessionTitle({ sessionId, title }: { sessionId: string; title: string |
   if (editing) {
     return (
       <form
-        className="title-edit-form"
+        className="title-edit-form flex items-center gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           void commit();
         }}
       >
         <input
+          data-testid="session-title-input"
+          className="title-input h-7 w-64 rounded-md border border-input bg-background/60 px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           autoFocus
-          className="title-input"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onBlur={() => void commit()}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setValue(title || "");
-              setEditing(false);
-            }
-          }}
-          placeholder="Session title…"
         />
       </form>
     );
   }
 
   return (
-    <div className="title-row">
-      <strong
-        data-testid="session-title"
-        className="title-text"
-        title="Double click or click pencil to rename"
-        onDoubleClick={() => setEditing(true)}
-      >
-        {title || "Session"}
-      </strong>
-      <button
-        type="button"
-        className="link icon-btn"
-        title="Rename session"
-        aria-label="Rename session"
-        onClick={() => setEditing(true)}
-      >
-        ✎
-      </button>
-    </div>
+    <button
+      type="button"
+      data-testid="session-title"
+      className="title-text truncate rounded-md px-1 text-left text-sm font-medium hover:bg-accent"
+      title="Rename session"
+      onClick={() => setEditing(true)}
+    >
+      {title || "Untitled session"}
+    </button>
   );
 }
 
@@ -90,14 +77,14 @@ function SessionView() {
     activeId,
     meta,
     threads,
-    review,
-    toggleReview,
     sidebarOpen,
-    toggleSidebar,
-    pinnedSessionIds,
+    review,
     archivedSessionIds,
+    pinnedSessionIds,
+    toggleSidebar,
     togglePinSession,
     toggleArchiveSession,
+    toggleReview,
   } = useApp();
   const [deleting, setDeleting] = useState(false);
   const [auditing, setAuditing] = useState(false);
@@ -124,20 +111,24 @@ function SessionView() {
       setTimeout(() => setToastMsg(null), 4000);
     }
   };
+
   const isPinned = pinnedSessionIds.includes(activeId);
   const isArchived = archivedSessionIds.includes(activeId);
 
   return (
-    <div className={`session-layout ${review.open ? "with-review" : ""}`}>
-      <main className="session-view">
-        <header className="session-head">
-          <div>
-            <div className="crumbs-row">
-              <div className="crumbs" title={meta?.projectDir ?? meta?.directory}>
+    <div className="session-layout flex min-h-0 flex-1">
+      <main className="session-view flex min-w-0 flex-1 flex-col">
+        <header className="session-head flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-6 py-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            <div className="crumbs-row flex items-center gap-2 text-xs text-muted-foreground">
+              <div
+                className="crumbs flex min-w-0 items-center gap-2"
+                title={meta?.projectDir ?? meta?.directory}
+              >
                 {!sidebarOpen && (
                   <button
                     type="button"
-                    className="link icon-btn toggle-sidebar-btn"
+                    className="toggle-sidebar-btn rounded-md px-1.5 py-0.5 hover:bg-accent"
                     data-testid="toggle-sidebar-btn"
                     title="Open Sidebar (Ctrl+B)"
                     onClick={toggleSidebar}
@@ -145,16 +136,24 @@ function SessionView() {
                     ☰
                   </button>
                 )}
-                <span className="chip project-chip">▤ {baseName(meta?.projectDir ?? meta?.directory ?? "")}</span>
-                {meta?.branch && <span className="chip branch-chip">⎇ {meta.branch}</span>}
-                {isArchived && <span className="chip">archived</span>}
+                <span className="project-chip truncate rounded-md bg-secondary px-2 py-0.5 font-mono text-[11px]">
+                  ▤ {baseName(meta?.projectDir ?? meta?.directory ?? "")}
+                </span>
+                {meta?.branch && (
+                  <span className="branch-chip rounded-md bg-secondary px-2 py-0.5 font-mono text-[11px]">
+                    ⎇ {meta.branch}
+                  </span>
+                )}
+                {isArchived && (
+                  <span className="rounded-md bg-secondary px-2 py-0.5 font-mono text-[11px]">archived</span>
+                )}
               </div>
               {currentDir && (
-                <div className="repo-actions" data-testid="repo-actions">
+                <div className="repo-actions flex items-center gap-1" data-testid="repo-actions">
                   <button
                     type="button"
                     data-testid="open-vscode"
-                    className="btn-sm"
+                    className="rounded-md border border-border px-2 py-0.5 text-[11px] hover:bg-accent"
                     title={`Open repository in VS Code (${currentDir})`}
                     onClick={() => void handleOpenEditor("code")}
                   >
@@ -163,7 +162,7 @@ function SessionView() {
                   <button
                     type="button"
                     data-testid="open-cursor"
-                    className="btn-sm"
+                    className="rounded-md border border-border px-2 py-0.5 text-[11px] hover:bg-accent"
                     title={`Open repository in Cursor (${currentDir})`}
                     onClick={() => void handleOpenEditor("cursor")}
                   >
@@ -172,7 +171,7 @@ function SessionView() {
                   <button
                     type="button"
                     data-testid="reveal-file-manager"
-                    className="btn-sm"
+                    className="rounded-md border border-border px-2 py-0.5 text-[11px] hover:bg-accent"
                     title={`Reveal repository in File Manager (${currentDir})`}
                     onClick={() => void handleReveal()}
                   >
@@ -181,23 +180,34 @@ function SessionView() {
                 </div>
               )}
             </div>
-            <SessionTitle sessionId={activeId} title={meta?.title ?? null} />
-            <ModelSelect
-              sessionId={activeId}
-              currentProvider={meta?.provider ?? null}
-              currentModel={meta?.model ?? null}
-            />
+            <div className="flex items-center gap-3">
+              <SessionTitle sessionId={activeId} title={meta?.title ?? null} />
+              <ModelSelect
+                sessionId={activeId}
+                currentProvider={meta?.provider ?? null}
+                currentModel={meta?.model ?? null}
+              />
+            </div>
           </div>
-          <div className="row">
-            <button data-testid="toggle-review" className={review.open ? "primary" : ""} onClick={() => void toggleReview()}>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <Button
+              data-testid="toggle-review"
+              variant={review.open ? "default" : "outline"}
+              size="sm"
+              onClick={() => void toggleReview()}
+            >
               Changes{review.files.length > 0 ? ` (${review.files.length})` : ""}
-            </button>
-            <span data-testid="run-state" className={`badge ${thread.running ? "run" : ""}`}>
+            </Button>
+            <Badge
+              data-testid="run-state"
+              variant={thread.running ? "primary" : "outline"}
+              className={cn("badge font-mono", thread.running && "run")}
+            >
               {thread.running ? "running" : "idle"}
-            </span>
+            </Badge>
             <button
               data-testid="pin-active-session"
-              className="link"
+              className="text-muted-foreground hover:text-foreground"
               title={isPinned ? "Unpin session" : "Pin session"}
               onClick={() => togglePinSession(activeId)}
             >
@@ -205,16 +215,24 @@ function SessionView() {
             </button>
             <button
               data-testid="archive-active-session"
-              className="link"
+              className="text-muted-foreground hover:text-foreground"
               title={isArchived ? "Restore session from archive" : "Archive session"}
               onClick={() => toggleArchiveSession(activeId)}
             >
               {isArchived ? "Restore" : "Archive"}
             </button>
-            <button data-testid="audit-button" className="link" onClick={() => setAuditing(true)}>
+            <button
+              data-testid="audit-button"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={() => setAuditing(true)}
+            >
               Audit
             </button>
-            <button data-testid="delete-session" className="link" onClick={() => setDeleting(true)}>
+            <button
+              data-testid="delete-session"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => setDeleting(true)}
+            >
               Delete
             </button>
           </div>
@@ -227,7 +245,10 @@ function SessionView() {
       {auditing && <AuditDialog sessionId={activeId} onClose={() => setAuditing(false)} />}
       {deleting && <DeleteDialog sessionId={activeId} onClose={() => setDeleting(false)} />}
       {toastMsg && (
-        <div className="toast" data-testid="toast-message">
+        <div
+          className="fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-md border border-destructive/40 bg-popover px-4 py-2 text-sm text-destructive shadow-lg"
+          data-testid="toast-message"
+        >
           {toastMsg}
         </div>
       )}
@@ -274,26 +295,23 @@ export default function App() {
     document.title = titleFor(sessions);
   }, [sessions]);
 
-  // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
       const target = e.target as HTMLElement | null;
       const isInput =
-        target &&
+        !!target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
           target.tagName === "SELECT" ||
           target.isContentEditable);
 
-      // Ctrl+K / Cmd+K: Command Palette
       if (isCmdOrCtrl && e.key.toLowerCase() === "k") {
         e.preventDefault();
         toggleCommandPalette();
         return;
       }
 
-      // Escape: close open dialogs/palettes
       if (e.key === "Escape") {
         if (commandPaletteOpen) {
           e.preventDefault();
@@ -312,28 +330,24 @@ export default function App() {
         }
       }
 
-      // Ctrl+/ / Cmd+/ or '?' (outside input): Keyboard Shortcuts Help
       if ((isCmdOrCtrl && e.key === "/") || (!isInput && e.key === "?")) {
         e.preventDefault();
         toggleShortcuts();
         return;
       }
 
-      // Ctrl+B / Cmd+B: Toggle Sidebar
       if (isCmdOrCtrl && e.key.toLowerCase() === "b") {
         e.preventDefault();
         toggleSidebar();
         return;
       }
 
-      // Ctrl+N / Cmd+N: New Task / Session
       if (isCmdOrCtrl && e.key.toLowerCase() === "n") {
         e.preventDefault();
         openNewSession(null);
         return;
       }
 
-      // Ctrl+Shift+D / Cmd+Shift+D: Toggle Review Diff
       if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === "d") {
         e.preventDefault();
         if (activeId) {
@@ -342,17 +356,15 @@ export default function App() {
         return;
       }
 
-      // Ctrl+L / Cmd+L: Focus Composer
       if (isCmdOrCtrl && e.key.toLowerCase() === "l") {
         e.preventDefault();
         const input = document.querySelector<HTMLTextAreaElement>(
-          'textarea[data-testid="composer-input"]'
+          'textarea[data-testid="composer-input"]',
         );
         input?.focus();
         return;
       }
 
-      // Ctrl+Escape: Stop current task if running
       if (isCmdOrCtrl && e.key === "Escape") {
         if (activeId) {
           e.preventDefault();
@@ -380,20 +392,15 @@ export default function App() {
     stop,
   ]);
 
-  if (!ready) return <div className="empty muted">Starting…</div>;
+  if (!ready) return <div className="empty muted p-8 text-sm text-muted-foreground">Starting…</div>;
   if (connection === "disconnected" || connection === "connecting") {
     return <ConnectScreen initialUrl={boot?.url} initialToken={boot?.token} />;
   }
   return (
-    <div className={`app ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
+    <div className={cn("app flex h-screen w-screen overflow-hidden bg-background text-foreground")}>
       {sidebarOpen && <Sidebar />}
       <SessionView />
-      {newSessionOpen && (
-        <NewSessionDialog
-          initialDir={newSessionInitialDir}
-          onClose={closeNewSession}
-        />
-      )}
+      {newSessionOpen && <NewSessionDialog initialDir={newSessionInitialDir} onClose={closeNewSession} />}
       {commandPaletteOpen && <CommandPalette />}
       {shortcutsOpen && <ShortcutModal />}
     </div>

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { baseName } from "../state/format";
+import { cn } from "@/lib/utils";
+import { Badge } from "./ui/badge";
 import { useApp } from "../state/store";
 
 interface PaletteItem {
@@ -241,7 +243,7 @@ export function CommandPalette() {
 
   return (
     <div
-      className="palette-backdrop"
+      className="palette-backdrop fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-[12vh] backdrop-blur-sm"
       data-testid="palette-backdrop"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
@@ -250,21 +252,21 @@ export function CommandPalette() {
       }}
     >
       <div
-        className="palette-dialog"
+        className="palette-dialog flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl"
         data-testid="command-palette"
         role="dialog"
         aria-modal="true"
         aria-label="Command Palette"
       >
-        <div className="palette-header">
-          <span className="palette-search-icon" aria-hidden>
+        <div className="palette-header flex items-center gap-2 border-b border-border px-3">
+          <span className="palette-search-icon text-muted-foreground" aria-hidden>
             🔍
           </span>
           <input
             ref={inputRef}
             autoFocus
             data-testid="palette-input"
-            className="palette-input"
+            className="palette-input h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             placeholder="Type a command or search sessions…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -272,7 +274,7 @@ export function CommandPalette() {
           />
         </div>
 
-        <div className="palette-list" data-testid="palette-list" ref={listRef}>
+        <div className="palette-list max-h-80 overflow-y-auto p-1 scrollbar-thin" data-testid="palette-list" ref={listRef}>
           {filtered.map((item, index) => {
             const isSelected = index === selectedIndex;
             return (
@@ -280,22 +282,29 @@ export function CommandPalette() {
                 key={item.id}
                 type="button"
                 data-testid="palette-item"
-                className={`palette-item ${isSelected ? "active" : ""}`}
+                className={cn(
+                  "palette-item flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left",
+                  isSelected ? "active bg-accent text-accent-foreground" : "hover:bg-accent/60",
+                )}
                 onClick={item.run}
                 onMouseEnter={() => setSelectedIndex(index)}
               >
-                <div className="palette-item-left">
-                  <span className="palette-item-title">{item.title}</span>
+                <div className="palette-item-left flex min-w-0 flex-col">
+                  <span className="palette-item-title truncate text-sm">{item.title}</span>
                   {item.description && (
-                    <span className="palette-item-desc">{item.description}</span>
+                    <span className="palette-item-desc truncate text-xs text-muted-foreground">{item.description}</span>
                   )}
                 </div>
-                <div className="palette-item-right">
+                <div className="palette-item-right flex shrink-0 items-center gap-2">
                   {item.badge && (
-                    <span className="badge warn palette-badge">{item.badge}</span>
+                    <Badge variant="warning" className="badge warn palette-badge">
+                      {item.badge}
+                    </Badge>
                   )}
                   {item.shortcut && (
-                    <kbd className="palette-shortcut">{item.shortcut}</kbd>
+                    <kbd className="palette-shortcut rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                      {item.shortcut}
+                    </kbd>
                   )}
                 </div>
               </button>
@@ -303,21 +312,22 @@ export function CommandPalette() {
           })}
 
           {filtered.length === 0 && (
-            <div className="palette-empty" data-testid="palette-empty">
+            <div className="palette-empty px-3 py-6 text-center text-sm text-muted-foreground" data-testid="palette-empty">
               No matching commands or sessions.
             </div>
           )}
         </div>
 
-        <div className="palette-footer">
+        <div className="palette-footer flex items-center gap-4 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
           <span>
-            <kbd>↑</kbd> <kbd>↓</kbd> to navigate
+            <kbd className="rounded border border-border bg-secondary px-1">↑</kbd>{" "}
+            <kbd className="rounded border border-border bg-secondary px-1">↓</kbd> to navigate
           </span>
           <span>
-            <kbd>Enter</kbd> to select
+            <kbd className="rounded border border-border bg-secondary px-1">Enter</kbd> to select
           </span>
           <span>
-            <kbd>Esc</kbd> to close
+            <kbd className="rounded border border-border bg-secondary px-1">Esc</kbd> to close
           </span>
         </div>
       </div>
