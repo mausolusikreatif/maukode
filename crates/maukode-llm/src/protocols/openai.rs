@@ -509,12 +509,20 @@ mod tests {
 
         let client = OpenAIClient::new("test-key").with_base_url(format!("http://{address}"));
         let request = LLMRequest::new("test-model", vec![maukode_protocol::Message::user("hello")]);
-        let events = client.stream(request).await.unwrap().collect::<Vec<_>>().await;
+        let events = client
+            .stream(request)
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
 
         assert!(events.iter().all(Result::is_ok), "{events:?}");
-        assert!(events.iter().any(
-            |event| matches!(event, Ok(LLMEvent::Finish { reason: FinishReason::EndTurn }))
-        ));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Ok(LLMEvent::Finish {
+                reason: FinishReason::EndTurn
+            })
+        )));
     }
 
     /// Some OpenAI-compatible gateways report `finish_reason: "stop"` even when tool calls were
