@@ -117,10 +117,10 @@ function SessionView() {
   const isArchived = archivedSessionIds.includes(activeId);
 
   return (
-    <div className="session-layout flex min-h-0 flex-1">
-      <main className="session-view flex min-w-0 flex-1 flex-col bg-background">
-        <header className="session-head flex min-h-[68px] flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-5 py-3 backdrop-blur">
-          <div className="flex min-w-0 items-center gap-3">
+    <div className="session-layout flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <main className="session-view flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+        <header className="session-head flex min-h-[68px] min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-5 py-3 backdrop-blur">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             {!sidebarOpen && (
               <button
                 type="button"
@@ -146,7 +146,7 @@ function SessionView() {
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
             <Badge data-testid="run-state" variant={thread.running ? "primary" : "outline"} className={cn("badge font-mono", thread.running && "run")}>
               {thread.running ? "running" : "idle"}
             </Badge>

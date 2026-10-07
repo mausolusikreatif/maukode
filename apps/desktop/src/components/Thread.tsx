@@ -352,7 +352,7 @@ export function Thread({ thread }: { thread: ThreadState }) {
   return (
     <div
       ref={scroller}
-      className="thread scrollbar-thin flex flex-1 flex-col gap-3 overflow-y-auto px-6 py-4"
+      className="thread scrollbar-thin flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-4"
       data-testid="thread"
       onScroll={(e) => {
         const el = e.currentTarget;
