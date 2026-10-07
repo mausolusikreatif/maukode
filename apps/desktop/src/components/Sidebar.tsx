@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   ChevronDown,
   CircleHelp,
   House,
+  Pin,
   Plus,
   Search,
   Settings2,
