@@ -255,6 +255,11 @@ async fn truncated_response_is_continued_automatically() {
 async fn provider_failure_is_reported_and_session_stays_usable() {
     let work = tempfile::tempdir().unwrap();
     let gw = start_gateway(vec![
+        // Transient failures are retried inside one step (up to 4 attempts),
+        // so the gateway must fail persistently to exercise the error path.
+        Step::Status(500),
+        Step::Status(500),
+        Step::Status(500),
         Step::Status(500),
         Step::Sse(vec![text_chunk("recovered"), finish_chunk("stop")]),
     ])

@@ -34,6 +34,17 @@ impl Default for RunnerConfig {
 /// How many times a response cut off by the output limit is resumed automatically.
 const MAX_AUTO_CONTINUATIONS: usize = 2;
 
+/// Total provider attempts per step (1 initial + retries). Transient transport
+/// failures (gateway EOF/reset, 429, 5xx) are retried inside the step so one
+/// blip doesn't fail the whole turn.
+const MAX_STREAM_ATTEMPTS: usize = 4;
+
+/// Nudge used when resuming a text-only turn that died mid-stream. The partial
+/// text was already forwarded to the UI, so the model continues from it
+/// instead of regenerating (which would duplicate the visible output).
+const STREAM_RESUME_PROMPT: &str = "Your previous response was cut off by a connection error. \
+    Continue exactly where you left off, without repeating what you already wrote.";
+
 /// Every tool call stored in history must have a matching result, or the next provider request
 /// is rejected. Build "cancelled" results for the calls (`(id, name)`) that never got one.
 fn cancelled_results(calls: &[(String, String)], answered: &[ContentPart]) -> Vec<ContentPart> {
@@ -57,6 +68,27 @@ fn cancelled_results(calls: &[(String, String)], answered: &[ContentPart]) -> Ve
 
 fn stopped(reason: StopReason, message: Option<String>) -> LLMEvent {
     LLMEvent::TurnStopped { reason, message }
+}
+
+/// Backoff between transient-failure retries. Returns true when cancellation
+/// was requested while waiting.
+async fn sleep_or_cancelled(
+    cancellation_token: &Option<tokio_util::sync::CancellationToken>,
+    stream_attempt: usize,
+) -> bool {
+    // Short backoff: exhaustion must surface within seconds so the UI (and
+    // the e2e suite) sees the failure promptly instead of hanging the turn.
+    let backoff = std::time::Duration::from_millis((200u64 << stream_attempt.min(3)).min(1500));
+    if let Some(ref token) = cancellation_token {
+        tokio::select! {
+            biased;
+            _ = token.cancelled() => true,
+            _ = tokio::time::sleep(backoff) => false,
+        }
+    } else {
+        tokio::time::sleep(backoff).await;
+        false
+    }
 }
 
 pub struct SessionRunner {
@@ -288,59 +320,120 @@ impl SessionRunner {
             }
 
             let tool_defs = self.tools.definitions();
-            let mut req = LLMRequest::new(&self.config.model, pruned_messages)
-                .with_system_prompt(&system_prompt)
-                .with_tools(tool_defs);
-
-            req.max_tokens = self.config.max_tokens;
-            req.temperature = self.config.temperature;
 
             debug!("Starting provider turn #{step}");
-            let mut stream = self.llm.stream(req).await?;
 
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
             let mut provider_items = Vec::new();
             let mut finish_reason = FinishReason::EndTurn;
 
+            // Retry state for transient stream failures within this step.
+            let mut stream_attempt: usize = 0;
+            let mut resume_suffix: Vec<Message> = Vec::new();
+            let mut saw_tool_activity = false;
             let mut is_cancelled = false;
-            while let Some(event_res) = tokio::select! {
-                biased;
-                _ = async {
-                    if let Some(ref token) = cancellation_token {
-                        token.cancelled().await;
-                    } else {
-                        futures::future::pending::<()>().await;
-                    }
-                } => {
-                    is_cancelled = true;
-                    None
+
+            'attempts: loop {
+                let mut req = LLMRequest::new(&self.config.model, pruned_messages.clone())
+                    .with_system_prompt(&system_prompt)
+                    .with_tools(tool_defs.clone());
+                req.max_tokens = self.config.max_tokens;
+                req.temperature = self.config.temperature;
+                if !resume_suffix.is_empty() {
+                    req.messages.extend(resume_suffix.clone());
                 }
-                item = stream.next() => item,
-            } {
-                match event_res {
-                    Ok(event) => {
-                        match &event {
-                            LLMEvent::TextDelta { text } => {
-                                assistant_text.push_str(text);
-                            }
-                            LLMEvent::ToolCallFinish { tool_call } => {
-                                tool_calls.push(tool_call.clone());
-                            }
-                            LLMEvent::ProviderItem { item } => {
-                                provider_items.push(ContentPart::ProviderItem {
-                                    value: item.clone(),
-                                });
-                            }
-                            LLMEvent::Finish { reason } => {
-                                finish_reason = reason.clone();
-                            }
-                            _ => {}
+
+                let mut stream = match self.llm.stream(req).await {
+                    Ok(s) => s,
+                    Err(e) if e.is_transient() && stream_attempt + 1 < MAX_STREAM_ATTEMPTS => {
+                        stream_attempt += 1;
+                        debug!("Provider stream setup failed transiently ({e}); retrying...");
+                        if sleep_or_cancelled(&cancellation_token, stream_attempt).await {
+                            is_cancelled = true;
+                            break 'attempts;
                         }
-                        let _ = event_tx.send(event);
+                        continue 'attempts;
                     }
                     // The caller reports the failure (Error + TurnStopped) and marks the session.
                     Err(e) => return Err(e.into()),
+                };
+
+                let mut attempt_broken = false;
+                while let Some(event_res) = tokio::select! {
+                    biased;
+                    _ = async {
+                        if let Some(ref token) = cancellation_token {
+                            token.cancelled().await;
+                        } else {
+                            futures::future::pending::<()>().await;
+                        }
+                    } => {
+                        is_cancelled = true;
+                        None
+                    }
+                    item = stream.next() => item,
+                } {
+                    match event_res {
+                        Ok(event) => {
+                            match &event {
+                                LLMEvent::TextDelta { text } => {
+                                    assistant_text.push_str(text);
+                                }
+                                LLMEvent::ToolCallFinish { tool_call } => {
+                                    saw_tool_activity = true;
+                                    tool_calls.push(tool_call.clone());
+                                }
+                                LLMEvent::ToolCallStart { .. } | LLMEvent::ToolCallDelta { .. } => {
+                                    saw_tool_activity = true;
+                                }
+                                LLMEvent::ProviderItem { item } => {
+                                    provider_items.push(ContentPart::ProviderItem {
+                                        value: item.clone(),
+                                    });
+                                }
+                                LLMEvent::Finish { reason } => {
+                                    finish_reason = reason.clone();
+                                }
+                                _ => {}
+                            }
+                            let _ = event_tx.send(event);
+                        }
+                        Err(e) if e.is_transient() && stream_attempt + 1 < MAX_STREAM_ATTEMPTS => {
+                            stream_attempt += 1;
+                            debug!("Provider stream failed transiently ({e}); retrying...");
+                            attempt_broken = true;
+                            break;
+                        }
+                        // The caller reports the failure (Error + TurnStopped) and marks the session.
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                if !attempt_broken {
+                    break 'attempts;
+                }
+
+                if !saw_tool_activity && !assistant_text.is_empty() {
+                    // Resume a text-only turn from the partial text instead of
+                    // regenerating it (which would duplicate visible output).
+                    resume_suffix = vec![
+                        Message::assistant(vec![ContentPart::Text {
+                            text: assistant_text.clone(),
+                        }]),
+                        Message::user(STREAM_RESUME_PROMPT),
+                    ];
+                } else {
+                    // Nothing resumable (setup failure, or tool calls in flight
+                    // whose results don't exist yet): restart the step cleanly.
+                    assistant_text.clear();
+                    tool_calls.clear();
+                    provider_items.clear();
+                    resume_suffix.clear();
+                    saw_tool_activity = false;
+                }
+                if sleep_or_cancelled(&cancellation_token, stream_attempt).await {
+                    is_cancelled = true;
+                    break 'attempts;
                 }
             }
 
@@ -878,5 +971,61 @@ mod turn_tests {
             .position(|e| matches!(e, LLMEvent::TurnStopped { .. }))
             .unwrap();
         assert!(first_finish < stop);
+    }
+
+    #[tokio::test]
+    async fn transient_setup_failure_is_retried() {
+        let (events, result, _, _) = run(
+            vec![
+                Err(LLMError::Stream("EOF while streaming".into())),
+                text("done", FinishReason::EndTurn),
+            ],
+            5,
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(stops(&events), vec![(StopReason::Completed, None)]);
+    }
+
+    #[tokio::test]
+    async fn mid_stream_eof_resumes_text_without_duplication() {
+        let broken: Step = Ok(vec![
+            Ok(LLMEvent::TextDelta {
+                text: "part ".into(),
+            }),
+            Err(LLMError::Stream("connection reset by peer".into())),
+        ]);
+        let (events, result, messages, _) =
+            run(vec![broken, text("two", FinishReason::EndTurn)], 5).await;
+        assert!(result.is_ok());
+        assert_eq!(stops(&events), vec![(StopReason::Completed, None)]);
+        // The stored assistant message joins text from both sides of the resume.
+        let assistant = messages
+            .iter()
+            .find(|m| m.role == Role::Assistant)
+            .expect("assistant message stored");
+        assert_eq!(assistant.text_content(), "part two");
+        // Already-forwarded text is continued, never regenerated.
+        let deltas: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                LLMEvent::TextDelta { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas, vec!["part ".to_string(), "two".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn persistent_transient_failure_closes_with_error() {
+        let script: Vec<Step> = (0..MAX_STREAM_ATTEMPTS)
+            .map(|_| Err(LLMError::Stream("EOF".into())))
+            .collect();
+        let (events, result, _, state) = run(script, 5).await;
+        assert!(result.is_err());
+        assert!(events.iter().any(|e| matches!(e, LLMEvent::Error { .. })));
+        assert_eq!(stops(&events).len(), 1);
+        assert_eq!(stops(&events)[0].0, StopReason::Error);
+        assert!(matches!(state, SessionState::Failed(_)));
     }
 }
