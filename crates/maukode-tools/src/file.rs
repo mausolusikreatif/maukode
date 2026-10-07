@@ -90,6 +90,15 @@ impl Tool for ReadFileTool {
             ));
         }
 
+        if start > end {
+            return Ok(format!(
+                "File has {} lines. start_line ({}) is after end_line ({}); nothing to read.",
+                total_lines,
+                start + 1,
+                end,
+            ));
+        }
+
         let mut output = String::new();
         for (idx, line) in lines[start..end].iter().enumerate() {
             let line_no = start + idx + 1;
