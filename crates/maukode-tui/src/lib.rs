@@ -117,6 +117,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                 ActiveModal::CodebaseMapViewer { scroll, .. } => {
                     *scroll = scroll.saturating_sub(3);
                 }
+                ActiveModal::SubagentViewer { scroll, .. } => {
+                    *scroll = scroll.saturating_sub(3);
+                }
                 ActiveModal::PermissionConfirmation { scroll, .. } => {
                     *scroll = scroll.saturating_sub(3);
                 }
@@ -162,6 +165,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
                     scroll, max_scroll, ..
                 } => {
                     *scroll = (*scroll + 3).min(*max_scroll);
+                }
+                ActiveModal::SubagentViewer { scroll, .. } => {
+                    *scroll = scroll.saturating_add(3);
                 }
                 ActiveModal::PermissionConfirmation { scroll, .. } => {
                     *scroll = scroll.saturating_add(3);
@@ -756,6 +762,55 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.active_modal = ActiveModal::None;
             }
         }
+        ActiveModal::SubagentViewer {
+            selected_idx,
+            scroll,
+        } => {
+            let total = app.subagents.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    app.active_modal = ActiveModal::None;
+                }
+                KeyCode::Tab | KeyCode::Char('l') | KeyCode::Right => {
+                    if total > 0 {
+                        *selected_idx = (*selected_idx + 1) % total;
+                        *scroll = 0;
+                    }
+                }
+                KeyCode::BackTab | KeyCode::Char('h') | KeyCode::Left => {
+                    if total > 0 {
+                        *selected_idx = (*selected_idx + total - 1) % total;
+                        *scroll = 0;
+                    }
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                    let idx = (c as usize) - ('1' as usize);
+                    if idx < total {
+                        *selected_idx = idx;
+                        *scroll = 0;
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    *scroll = scroll.saturating_sub(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    *scroll = scroll.saturating_add(1);
+                }
+                KeyCode::PageUp => {
+                    *scroll = scroll.saturating_sub(10);
+                }
+                KeyCode::PageDown => {
+                    *scroll = scroll.saturating_add(10);
+                }
+                KeyCode::Home => {
+                    *scroll = 0;
+                }
+                KeyCode::End => {
+                    *scroll = usize::MAX;
+                }
+                _ => {}
+            }
+        }
         ActiveModal::PrivateResult { scroll, .. } => match key.code {
             KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 app.active_modal = ActiveModal::None;
@@ -885,6 +940,12 @@ fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
             let index = input_byte_index(&app.input, app.cursor_pos);
             app.input.insert(index, c);
             app.cursor_pos += 1;
+        }
+        KeyCode::F(2) => {
+            app.toggle_plan_widget();
+        }
+        KeyCode::F(3) => {
+            app.open_subagents_modal();
         }
         KeyCode::Esc => {
             if app.is_running {
