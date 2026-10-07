@@ -25,30 +25,40 @@ MauKode TUI is a first-class client in the MauKode workspace, built for develope
 
 The current TUI implementation in `crates/maukode-tui` provides:
 
-- **1-Line Telemetry Status Bar**: Displays daemon connection mode (`● daemon:4096` / `● remote:vps`), session ID, active provider/model, and context token ratio.
-- **High-Performance Chat Viewport**: Per-message render cache (`render_cache.rs`) preventing $O(N)$ full-history re-parses during streaming bursts.
-- **Markdown & Code Highlighting**: Syntax-highlighted code fences, inline code styles, and list formatting (`markdown.rs`).
-- **Interactive Modals**:
-  - `/model`: Fuzzy-filterable model selector.
-  - `/provider`: Provider manager & switcher (Anthropic, OpenAI, OpenRouter, Ollama, ChatGPT subscription).
-  - `/sessions`: Basic session switching modal.
-  - `/diff`: Interactive color-coded unified git diff viewer.
-  - `/map`: Tree-Sitter AST symbol centrality skeleton map viewer.
-  - `/mcp`: Model Context Protocol server status viewer.
-  - `/audit`: Full session SQLite audit log viewer.
-  - Permission modals for high-risk actions (`[a]` allow once, `[s]` allow session, `[p]` run privately, `[d]` deny).
+- **1-Line Telemetry Status Bar**: Displays daemon connection mode, session ID, active provider/model,
+  and context token ratio.
+- **High-Performance Chat Viewport**: Per-message render cache (`render_cache.rs`) prevents $O(N)$
+  full-history re-parses during streaming bursts.
+- **Markdown & Code Highlighting**: Syntax-highlighted code fences, inline code styles, and list
+  formatting (`markdown.rs`).
+- **Interactive Modals**: `/model`, `/provider`, `/sessions`, `/diff`, `/map`, `/mcp`, `/audit`,
+  `/plan`, `/subagents`, and permission decisions for high-risk actions (`[a]` allow once, `[s]` allow
+  session, `[p]` run privately, `[d]` deny) are implemented.
+- **Structured plans and subagents**: plan steps, in-stream subagent cards, and the child trace
+  inspector are shipped; concurrent switching and split-pane layout remain planned.
+- **Daemon integration**: resumable session events, checkpoints/undo, worktree review, provider/model
+  selection, MCP status, and session audit are available.
+
+The TUI does not yet provide desktop parity for steering/queueing, pin/archive session organization,
+or `@file`/`#symbol` context autocomplete. Phase 2 and Phase 3 status is tracked below rather than
+calling all daemon capabilities "integrated".
 
 ---
 
 ## 3. Phase 2: Daemon Feature Parity
 
-Recent updates to `maukode-protocol` and `maukode-server` introduced powerful capabilities that are now being integrated into the TUI:
+Recent updates to `maukode-protocol` and `maukode-server` introduced powerful capabilities that are
+integrated at different levels. Status below distinguishes the daemon, the desktop client, and the
+TUI, because a backend endpoint is not yet a terminal feature. See
+[ROADMAP_AUDIT.md](./ROADMAP_AUDIT.md) for the evidence behind each label.
 
-### Track 2.1: Live Plan Timeline Widget
+### Track 2.1: Live Plan Timeline Widget — **done in TUI**
 
-- **Protocol Event**: Reactive handling of `LLMEvent::PlanUpdate { steps }`.
-- **Layout & Rendering**:
-  - A collapsible side-panel on wider viewports or a floating header widget toggled with `F2` or `/plan`:
+- **Protocol Event**: the implementation consumes `LLMEvent::PlanCreated` and
+  `LLMEvent::PlanStepUpdated`. The original `LLMEvent::PlanUpdate { steps }` name in the initial
+  plan is not the current API and must not be used as a contract.
+- **Layout & Rendering**: implemented as a collapsible floating header widget toggled with `F2` or
+  `/plan`:
   ```text
   ┌─ Active Plan [3/5] ────────────────────────────────────────────────────────┐
   │ [✓] 1. Inspect AST repository map for authentication routes                 │
@@ -58,44 +68,40 @@ Recent updates to `maukode-protocol` and `maukode-server` introduced powerful ca
   │ [○] 5. Verify GitHub CI                                                     │
   └────────────────────────────────────────────────────────────────────────────┘
   ```
-- **Live State Updates**: Real-time step status transitions (`Pending` ○, `InProgress` ◉, `Completed` ✓, `Failed` ✗).
+- **Live State Updates**: real-time step status transitions (`Pending` ○, `InProgress` ◉,
+  `Completed` ✓, `Failed` ✗) are rendered by `draw_plan_widget`.
+- **Remaining work**: a dedicated side-panel layout on wide viewports and additional headless
+  `TestBackend` coverage for failed-step and multi-plan transitions.
 
-### Track 2.2: Mid-Turn Steering & Prompt Queuing
+### Track 2.2: Mid-Turn Steering & Prompt Queuing — **desktop done, TUI planned**
 
-Currently, input is locked while a turn is executing. Phase 2 unlocks full in-flight steering and prompt queuing:
+The daemon exposes `/api/v1/sessions/{id}/steer` and queueing routes, and the desktop composer already
+uses them. The TUI, however, still rejects submission while `App::is_running` is true, so this track
+is unfinished terminal work, not a shipped feature. Planned TUI affordances:
 
-- **Steering Affordance (`Ctrl+S` / `Enter` on active turn)**:
-  - Sends user input as immediate mid-turn steering via `POST /api/sessions/{id}/steer`.
-  - Injects guidance into the agent's next tool boundary without restarting the turn.
-- **Prompt Queuing (`Ctrl+Q` / `Tab` to queue)**:
-  - Saves the entered prompt into the session queue via `POST /api/sessions/{id}/queue`.
-  - Visual badge in prompt bar: `[Queued: 2 prompts waiting]`.
-  - Queued prompts automatically execute in sequence as turns complete.
-- **Interruption (`Ctrl+C`)**:
-  - Preserves typed prompt text while cleanly halting the running agent loop.
+- **Steering**: send mid-turn guidance through the existing daemon route without restarting the turn.
+- **Prompt queuing**: queue follow-ups and show a badge such as `[Queued: 2 prompts waiting]`.
+- **Interruption**: preserve the typed prompt while halting the running agent loop.
+- Add terminal-event tests for all three behaviours.
 
-### Track 2.3: Session Explorer Modal Overhaul (`/sessions`)
+### Track 2.3: Session Explorer Modal Overhaul (`/sessions`) — **basic TUI, planned expansion**
 
-Upgrades `ActiveModal::SessionSelector` to support the full server session query API:
+`ActiveModal::SessionSelector` currently provides a filtered session list for switching. It does not
+yet implement the proposed `p`/`a` hotkeys, status filter chip cycling, or pinned/archived badges.
+Desktop clients have related organization behavior, but its pin/archive state is currently persisted
+in client `localStorage`; the TUI must not treat that as shared daemon state.
 
-- **Keyboard Toggles**:
-  - `p`: Toggle pin / unpin on the selected session (`PATCH /api/sessions/{id}`).
-  - `a`: Toggle archive / restore on the selected session.
-  - `Tab`: Cycle status filter chips (`[All]`, `[Active]`, `[Pinned]`, `[Archived]`).
-- **Real-Time Fuzzy Filter**: Instant substring filtering on session titles and project paths.
-- **Visual Badges**: Clear visual markers (`📌 Pinned`, `📦 Archived`, `● Running`, `⚠️ Needs Approval`).
+### Track 2.4: Inline Context Autocomplete (`@file`, `#symbol`) — **desktop done, TUI planned**
 
-### Track 2.4: Inline Context Autocomplete (`@file`, `#symbol`)
-
-- Typing `@` opens an in-viewport fuzzy file picker overlay (searching workspace files via cached git tree).
-- Typing `#` opens a symbol search overlay (leveraging AST symbols parsed by `maukode-core::repo_map`).
-- Selected references are cleanly injected into the prompt buffer.
+The desktop composer has file, folder, and symbol suggestions with context chips. There is no
+equivalent `@`/`#` popup picker or prompt-buffer injection in `crates/maukode-tui`.
 
 ---
 
-## 4. Phase 3: The Subagent Terminal Phase
+## 4. Phase 3: The Subagent Terminal Phase — **mostly implemented**
 
-When specialized subagents (such as read-only Codebase Researchers or Security Auditors) are deployed by the parent agent, the TUI must provide crystal-clear visibility without overwhelming the terminal screen.
+Subagent cards, status/token display, and the trace inspector are implemented in the TUI. The
+remaining work is concurrent child switching and the wide-terminal split-pane layout described below.
 
 ### 4.1 In-Stream Subagent Cards
 
@@ -131,18 +137,15 @@ Pressing `Enter` on any subagent card (or executing `/subagents`) opens a dedica
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 Concurrent Subagent Switcher
+### 4.3 Concurrent Subagent Switcher — **planned**
 
-When multiple subagents are spawned concurrently:
-- Number keys `1`–`9` or `Tab` immediately switch the trace inspector to that subagent.
-- The parent chat displays a grouped progress bar: `Subagents: [1: ✓] [2: ◉] [3: ○]`.
+The trace model can retain multiple child sessions, but number-key/`Tab` switching between concurrent
+children is not implemented. Add that navigation and grouped parent-chat progress indicators.
 
-### 4.4 Split-Pane Layout for Wide Terminals
+### 4.4 Split-Pane Layout for Wide Terminals — **planned**
 
-On terminals with width $\ge 140$ columns:
-- Automatic or manual (`Ctrl+B`) split mode:
-  - **Left Pane (60%)**: Parent conversation, plan checklist, and user prompt.
-  - **Right Pane (40%)**: Live subagent activity stream and tool traces.
+The current TUI does not automatically split terminals wider than 140 columns into parent and
+subagent panes. Preserve the proposed 60/40 layout as a future interaction design.
 
 ---
 
@@ -150,9 +153,9 @@ On terminals with width $\ge 140$ columns:
 
 | Milestone | Deliverables | Verification |
 | :--- | :--- | :--- |
-| **M1: Plan Widget & Events** | `PlanTimeline` Ratatui component, `LLMEvent::PlanUpdate` consumer | Headless Ratatui unit tests (`TestBackend`) |
-| **M2: Steering & Queueing** | `Ctrl+S` / `Ctrl+Q` key handlers, prompt queue badge, server API calls | Terminal event integration tests |
-| **M3: Session Explorer Modal** | Pin/archive hotkeys, filter chip tabs, fuzzy query input | Modal keyboard interaction tests |
-| **M4: Subagent Stream Widgets** | In-stream subagent cards, `LLMEvent::Subagent*` events | SSE event simulation tests |
-| **M5: Subagent Trace Modal** | Interactive child transcript inspector, subagent switching | Full virtual terminal snapshot tests |
-| **M6: Context Autocomplete** | `@file` and `#symbol` popup pickers in input textarea | Fuzzy completion snapshot tests |
+| **M1: Plan Widget & Events** | **Done** — `PlanCreated`/`PlanStepUpdated` consumer, `/plan`, F2, and widget rendering | Add more `TestBackend` coverage for failed and repeated plans |
+| **M2: Steering & Queueing** | **Backend/desktop only** — no TUI handlers or badge | Terminal key/event integration tests |
+| **M3: Session Explorer Modal** | **Basic only** — filtered TUI selector; no pin/archive/filter chips | Modal hotkey and state integration tests |
+| **M4: Subagent Stream Widgets** | **Done** — cards and `Subagent*` event reduction/rendering | Expand SSE simulation coverage and cancellation UX |
+| **M5: Subagent Trace Modal** | **Done** — `ActiveModal::SubagentViewer`, scrolling, and virtual-terminal coverage | Add concurrent-child switching |
+| **M6: Context Autocomplete** | **Desktop only** — TUI picker/insertion flow is absent | Fuzzy completion snapshot tests |
