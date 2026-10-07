@@ -655,8 +655,10 @@ impl SqliteSessionStore {
         let mut conn = self.conn.lock().await;
         let tx = conn.transaction()?;
         // A subquery keeps this independent of any bind-variable limit (SQLite caps
-        // SQLITE_MAX_VARIABLE_NUMBER, and 999 empty sessions would otherwise overflow it).
-        let empty = "NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)";
+        // SQLITE_MAX_VARIABLE_NUMBER, and 999 empty sessions would otherwise overflow it). The
+        // `sessions` table gets no alias because SQLite forbids aliases in DELETE statements.
+        let empty_sub = "NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = sessions.id)";
+        let empty_in = "NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)";
         for table in [
             "messages",
             "messages_audit",
@@ -668,12 +670,12 @@ impl SqliteSessionStore {
             tx.execute(
                 &format!(
                     "DELETE FROM {table} WHERE session_id IN \
-                     (SELECT id FROM sessions s WHERE {empty})"
+                     (SELECT id FROM sessions s WHERE {empty_in})"
                 ),
                 [],
             )?;
         }
-        let removed = tx.execute(&format!("DELETE FROM sessions WHERE {empty}"), [])?;
+        let removed = tx.execute(&format!("DELETE FROM sessions WHERE {empty_sub}"), [])?;
         tx.commit()?;
         Ok(removed)
     }
