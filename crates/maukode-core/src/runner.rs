@@ -76,7 +76,9 @@ async fn sleep_or_cancelled(
     cancellation_token: &Option<tokio_util::sync::CancellationToken>,
     stream_attempt: usize,
 ) -> bool {
-    let backoff = std::time::Duration::from_millis((400u64 << stream_attempt.min(3)).min(3000));
+    // Short backoff: exhaustion must surface within seconds so the UI (and
+    // the e2e suite) sees the failure promptly instead of hanging the turn.
+    let backoff = std::time::Duration::from_millis((200u64 << stream_attempt.min(3)).min(1500));
     if let Some(ref token) = cancellation_token {
         tokio::select! {
             biased;

@@ -62,7 +62,15 @@ test("a cut-off task shows a Continue button that resumes it", async ({ page }) 
 
 test("a provider failure is shown and the session stays usable", async ({ page }) => {
   const repo = gitRepo();
-  await script([{ status: 500 }, { sse: [text("back again"), finish("stop")] }]);
+  // Transient failures are retried inside one step (up to 4 attempts), so the
+  // script must fail persistently to exercise the visible-error path.
+  await script([
+    { status: 500 },
+    { status: 500 },
+    { status: 500 },
+    { status: 500 },
+    { sse: [text("back again"), finish("stop")] },
+  ]);
   await connectAndCreate(page, repo);
 
   await send(page, "first");
