@@ -17,10 +17,10 @@ on:
 
 jobs:
   linux:
-    runs-on: ubuntu-22.04
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:

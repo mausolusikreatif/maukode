@@ -6,9 +6,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -30,9 +30,9 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   desktop:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
@@ -57,9 +57,9 @@ jobs:
     timeout-minutes: 30
     # Compiles the desktop shell and runs it under a virtual display: the UI must reach the Rust
     # side over Tauri IPC and make it start an authenticated daemon.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
