@@ -4,6 +4,7 @@ pub mod health;
 pub mod providers;
 pub mod sessions;
 pub mod settings;
+pub mod skills;
 
 use crate::middleware::auth::auth_middleware;
 use crate::state::ServerState;
@@ -126,6 +127,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/subagents/profiles",
             get(sessions::list_subagent_profiles),
         )
+        // Skills
+        .route("/api/v1/skills", get(skills::list_skills))
+        .route("/api/v1/skills/{name}", get(skills::get_skill))
         // Sessions
         .route(
             "/api/v1/sessions",

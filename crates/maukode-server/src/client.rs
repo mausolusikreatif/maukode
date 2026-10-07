@@ -2,7 +2,9 @@ use anyhow::{anyhow, Result};
 use eventsource_stream::Eventsource;
 use futures::{Stream, StreamExt};
 use maukode_core::SessionSummary;
-use maukode_protocol::{LLMEvent, Message, SessionId, SessionMetadata, SessionState};
+use maukode_protocol::{
+    LLMEvent, Message, SessionId, SessionMetadata, SessionState, SkillDefinition,
+};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -457,6 +459,34 @@ impl ServerClient {
         if !resp.status().is_success() {
             let err = resp.text().await.unwrap_or_default();
             return Err(anyhow!("Failed to list subagent profiles: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn list_skills(&self, directory: Option<&str>) -> Result<Vec<SkillDefinition>> {
+        let mut req = self.http.get(format!("{}/api/v1/skills", self.base_url));
+        if let Some(dir) = directory {
+            req = req.query(&[("directory", dir)]);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to list skills: {err}"));
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn get_skill(&self, name: &str, directory: Option<&str>) -> Result<SkillDefinition> {
+        let mut req = self
+            .http
+            .get(format!("{}/api/v1/skills/{name}", self.base_url));
+        if let Some(dir) = directory {
+            req = req.query(&[("directory", dir)]);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to get skill '{name}': {err}"));
         }
         Ok(resp.json().await?)
     }
