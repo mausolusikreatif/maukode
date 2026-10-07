@@ -79,6 +79,32 @@ impl SubagentTool {
     }
 }
 
+/// Choose the model a child subagent runner should use.
+///
+/// Never hardcode a provider model: a stale literal breaks any gateway that does not expose that
+/// exact name (for example `llm-kita` rejects `claude-3-5-haiku-20241022`). Instead, resolve the
+/// tier against the caller's active provider configuration:
+///
+/// - `Inherit` uses the session's active model verbatim.
+/// - `Strong` and `Fast` prefer the active provider's `default_model`, then the active model.
+///   Because [`ProviderConfig`](crate::ProviderConfig) does not advertise a per-tier model, the
+///   fast tier intentionally degrades rather than reaching for a stale literal.
+///
+/// The caller always supplies a resolved [`AppConfig`](crate::AppConfig), so no path through this
+/// function can resurrect a hardcoded provider model.
+fn resolve_child_model(tier: &ModelTier, config: &crate::AppConfig) -> String {
+    let active_model = config.active_model.clone();
+    let provider_default = config
+        .get_provider(&config.active_provider)
+        .and_then(|p| p.default_model.clone());
+
+    match tier {
+        ModelTier::Inherit => active_model,
+        ModelTier::Strong => provider_default.unwrap_or(active_model),
+        ModelTier::Fast => provider_default.unwrap_or(active_model),
+    }
+}
+
 #[async_trait]
 impl Tool for SubagentTool {
     fn name(&self) -> &str {
@@ -151,13 +177,14 @@ impl Tool for SubagentTool {
             child_context.repo_map(),
         ))));
 
+        let config = if let Some(ref cfg_lock) = self.app_config {
+            cfg_lock.read().await.clone()
+        } else {
+            crate::AppConfig::load()
+        };
+
         // Discover and register scoped MCP tools if MCP manager is configured
         if let Some(ref mcp) = self.mcp_manager {
-            let config = if let Some(ref cfg_lock) = self.app_config {
-                cfg_lock.read().await.clone()
-            } else {
-                crate::AppConfig::load()
-            };
             mcp.register_scoped_tools_into_registry(
                 &mut child_tools,
                 &self.directory,
@@ -189,11 +216,7 @@ impl Tool for SubagentTool {
         }
 
         let child_runner_config = RunnerConfig {
-            model: match profile.model_tier {
-                ModelTier::Inherit => "claude-3-7-sonnet-20250219".to_string(),
-                ModelTier::Fast => "claude-3-5-haiku-20241022".to_string(),
-                ModelTier::Strong => "claude-3-7-sonnet-20250219".to_string(),
-            },
+            model: resolve_child_model(&profile.model_tier, &config),
             max_steps: profile.max_turns,
             max_tokens: profile.max_tokens.map(|t| t as u32).or(Some(8192)),
             temperature: None,

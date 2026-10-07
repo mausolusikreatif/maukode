@@ -23,7 +23,11 @@ pub struct RunnerConfig {
 impl Default for RunnerConfig {
     fn default() -> Self {
         Self {
-            model: "claude-3-7-sonnet-20250219".to_string(),
+            // Resolve the model from the active provider configuration instead of pinning a
+            // provider-specific literal. A stale literal breaks gateways that do not expose that
+            // exact model name, so callers that do not pick a model explicitly inherit the
+            // configured default.
+            model: crate::AppConfig::load().active_model,
             max_steps: 50,
             max_tokens: Some(8192),
             temperature: None,

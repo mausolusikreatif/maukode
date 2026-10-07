@@ -29,21 +29,29 @@ similarity is less important than making long-running work understandable, steer
 
 The desktop application already supports:
 
-- Multiple concurrent agent sessions grouped by project.
+- Multiple concurrent agent sessions grouped by project, with sidebar search, status filters, rename,
+  pin, archive/restore, and persisted organization.
 - A dashboard organized by approvals, interrupted tasks, running tasks, and recent tasks.
-- Git worktree isolation and branch merge/discard flows.
+- Git worktree isolation with commit, merge, and discard flows.
 - Streaming messages, reasoning, tool calls, and tool results over resumable SSE.
 - Permission decisions to allow once, allow for a session, run privately, or deny.
-- Per-file change review with unified diffs.
+- Per-file change review with unified diffs, plus editor and file-manager reveal actions.
 - Turn checkpoints and undo.
 - Provider and model selection.
 - MCP and security status views.
 - Session audit history.
+- Structured plan timelines, subagent cards, and a subagent trace drawer.
+- Composer `@file`/`@folder`/`#symbol` context chips with a token estimate, plus mid-turn steering and
+  prompt queuing.
+- Command palette and keyboard shortcut reference.
 - Light and dark themes.
-- A local Tauri shell that starts or discovers the MauKode daemon.
+- A local Tauri shell that starts or discovers the MauKode daemon, a native folder picker, recent
+  repositories, and browser-level completion/approval/error notifications.
 
-This is a strong agent and review foundation. The largest gaps are product-level interactions around
-context, progress, steering, organization, native integration, and execution isolation.
+This is a strong agent and review foundation. Remaining gaps are the unfinished portions of the
+sections below, the Priority 1 surfaces (skills/plugin management, richer execution details, IDE and
+source-control integration), and all Priority 2 capabilities. See
+[ROADMAP_AUDIT.md](./ROADMAP_AUDIT.md) for feature-by-feature code evidence.
 
 ## Target desktop layout
 
@@ -74,28 +82,21 @@ affordances, empty states, and native window integration instead of doing a whol
 
 ## Priority 0: credible coding desktop experience
 
-### Native project selection
+### Native project selection — **done / partial**
 
-The new-session dialog currently requires a manually entered directory path. Add:
+The new-session dialog now has a native Tauri folder picker, recent repositories, and repository
+remembering (`NewSessionDialog.tsx`, `platform.ts`, and `state/repositories.ts`). Remaining work is:
 
-- A native Tauri folder picker.
-- Recent repositories with repository validation.
 - Drag-and-drop folders onto the window.
 - Clone from Git URL.
 - An operating-system "Open in MauKode" integration.
 - Recent folders and useful onboarding on the empty home screen.
 
-### Composer context and attachments
+### Composer context and attachments — **partial**
 
-Turn the text-only composer into an explicit context surface:
-
-- `@file`, `@folder`, `@symbol`, and `@git-diff` mentions.
-- File and image attachments.
-- Clipboard image paste and drag-and-drop.
-- Context chips above the input.
-- Context/token estimate.
-- Model, permission mode, and execution environment in the composer footer.
-- A visible directory and worktree capability indicator.
+The composer now supports `@file`, `@folder`, and `#symbol` suggestions, context chips, a context
+token estimate, attachment-menu affordances, and model, permission, and worktree controls. Remaining
+work includes image/file upload, clipboard image paste, drag-and-drop, and `@git-diff` support.
 
 Example:
 
@@ -109,72 +110,43 @@ Example:
 └───────────────────────────────────────────────────────────────┘
 ```
 
-### Plans, progress, and activity
+### Plans, progress, and activity — **partial**
 
-Raw tool calls are useful for inspection, but they should not be the primary progress model. Add
-first-class protocol events for:
+Structured plan creation/update events, live step state, usage, and subagent status are implemented
+in the protocol and desktop (`PlanTimeline.tsx`, `Thread.tsx`). Progress summaries, verification
+lifecycle events, explicit waiting-for-input state, and a richer activity disclosure model remain
+planned.
 
-- Plan creation and updates.
-- Step started, completed, or failed.
-- Progress summaries.
-- Verification started and completed.
-- Subtask or subagent status.
-- Waiting for user input.
-- Final outcome.
+### Steering and queued prompts — **done (desktop) / partial (TUI)**
 
-Render a compact timeline while keeping raw activity under disclosure controls:
+The server exposes steering and follow-up queueing, and the desktop composer provides both controls
+(`store.ts`, `Composer.tsx`). The TUI still rejects input while a turn is running and has no queue
+badge or steering key handlers; track those separately in `TUI_ROADMAP.md`. Editable/reorderable
+queue semantics and clearer interrupt-and-redirect recovery remain planned.
 
-```text
-● Inspect authentication flow
-● Reproduce refresh-token race
-◉ Implement synchronization             Working
-○ Add regression tests
-○ Run test suite
-```
+### Session search and organization — **partial**
 
-### Steering and queued prompts
+The desktop has project grouping, status filters, title rename, pin, archive/restore, and persisted
+local session organization (`Sidebar.tsx`, `state/sessionFilters.ts`, `state/store.ts`). Full-text
+search, repository/branch/date filters, project instructions/memory, and stronger unread/changed/
+needs-review indicators remain planned.
 
-The composer currently replaces Send with Stop while a turn is running. Long-running work needs:
+### Native notifications — **partial**
 
-- **Steer now**, injecting guidance at the next safe boundary.
-- **Queue next**, starting a saved follow-up after the current turn.
-- Editable and reorderable queued prompts.
-- Clear interrupt, interrupt-and-redirect, and cancel-queue actions.
-- Preservation of text typed while an agent is working.
+The client emits browser completion/approval/error notifications when the window is hidden or
+unfocused and respects notification permission (`state/notify.ts`, `platform.ts`). Native Tauri
+notifications, click-through session routing, badges, sounds, preferences, and action buttons remain
+planned.
 
-### Session search and organization
+### Review workflow — **partial**
 
-Extend project grouping with:
+The current panel provides a per-file unified diff, file selection, refresh, editor and file-manager
+open actions, checkpoint undo, and worktree commit, merge, and discard (`ReviewPanel.tsx`,
+`state/store.ts`).
 
-- Full-text session search.
-- Filters by repository, branch, state, and date.
-- Rename, pin, archive, and restore.
-- Saved project instructions and project-level notes or memory.
-- Stronger unread, changed, and needs-review indicators.
-
-### Native notifications
-
-Replace the browser notification fallback with a native platform abstraction:
-
-- Wire `tauri-plugin-notification`.
-- Open the correct session when a notification is clicked.
-- Add dock/taskbar badges and optional sound.
-- Provide per-event preferences.
-- Notify for approvals, clarification, completion, failure, and merge conflicts.
-- Add Approve, Deny, or Open Review actions where the operating system supports them.
-
-### Review workflow
-
-Build on the existing diff panel:
-
-- Unified and side-by-side modes with syntax highlighting.
-- Expandable hidden context.
-- Inline comments and "Ask agent to fix this" for selected lines or files.
-- Accept or revert individual files and hunks.
-- Open in an editor and reveal in the file manager.
-- Test results adjacent to changed files.
-- Commit-message editing and pull-request creation.
-- Explicit unreviewed, accepted, and needs-changes states.
+Side-by-side rendering and syntax highlighting, expandable hidden context, line comments and "Ask
+agent to fix this", per-file or per-hunk accept/revert, adjacent test results, pull-request
+creation, and explicit review states remain planned.
 
 The desired loop is:
 
@@ -187,57 +159,41 @@ agent completes
     → user merges or opens a pull request
 ```
 
-### Keyboard-first navigation
+### Keyboard-first navigation — **done (web/desktop client) / partial (native shell)**
 
-Add a command palette and shortcuts for:
+`CommandPalette.tsx` and `ShortcutModal.tsx` cover task/session navigation, needs-you, review,
+sidebar/inspector, composer, stop, search, and shortcut help. Application-level native menus remain
+planned.
 
-- New task.
-- Next or previous session.
-- Jump to Needs You.
-- Open review.
-- Toggle sidebar or inspector.
-- Focus composer.
-- Stop task.
-- Search sessions.
-- Display the shortcut reference.
+### Native application polish — **partial**
 
-Expose appropriate application menus on macOS, Windows, and Linux.
-
-### Native application polish
-
-The current shell starts the daemon but otherwise has minimal native integration. Add:
-
-- Native menus and a system tray.
-- Dock/taskbar badges.
-- Session deep links.
-- Single-instance behavior.
-- Automatic updates and release channels.
-- Crash reporting and recoverable startup errors.
-- Remembered window size and panel layout.
-- Open/reveal actions for editors, terminals, and file managers.
-- Platform-appropriate title-bar behavior and production icon assets.
-- Clear daemon lifecycle and connection status.
+The Tauri shell starts and supervises the daemon and provides folder selection, editor, and file
+manager integration. Menus, a system tray, taskbar badges, deep links, single-instance behavior,
+auto-updates/release channels, crash recovery, remembered window layout, and polished lifecycle/status
+surfaces remain planned.
 
 ## Priority 1: approach the Codex workflow
 
-### Skills and reusable workflows
+### Skills and reusable workflows — **backend only**
 
-Introduce a first-class skills system:
+Repository and user-level skills are discovered and expanded by the daemon (`/api/v1/skills`,
+`SkillManager`), but the desktop has no skills browser, no enable/disable or inspection UI, no
+reusable-session authoring flow, and no composer slash-command integration. The full proposal is:
 
-- Repository skills stored in version control.
-- User-level skills shared across projects.
-- Browse, enable, disable, and inspect skills.
-- Slash-command and composer autocomplete.
+- Browse, enable, disable, and inspect repository and user-level skills.
 - Defined inputs and outputs.
+- Slash-command and composer autocomplete.
 - Create a reusable skill from a successful session.
-- Present MCP tools and skills in one capability browser.
+- Present MCP tools, plugins, and skills in one capability browser.
 
 Potential built-ins include `/review-pr`, `/fix-ci`, `/prepare-release`,
 `/update-dependencies`, and `/investigate-bug`.
 
-### Automations and scheduled tasks
+### Automations and scheduled tasks — **planned**
 
-Add daemon-managed one-shot and recurring work:
+There are currently no daemon schedule entities, run history, retry policy, desktop automation
+controls, or related protocol types in this repository. This section remains design direction until
+the backend model exists.
 
 - Select repository, branch, environment, and permission policy.
 - Show run history and artifacts.
@@ -248,35 +204,24 @@ Add daemon-managed one-shot and recurring work:
 Examples include reviewing dependency updates, checking failing CI, producing a weekly repository
 health report, and triaging new issues.
 
-### Rich execution details
+### Rich execution details — **partial**
 
-Provide an inspector with:
+`Thread.tsx` already exposes usage, reasoning, tool calls, tool results, subagent status, plan state,
+and permission activity. A dedicated right-hand inspector for shell stream, test/diagnostics summary,
+context/cost, elapsed time, files read, network requests, and redacted environment details is not
+implemented.
 
-- Shell or terminal stream.
-- Test and diagnostics summary.
-- Token usage, context utilization, and estimated cost where available.
-- Elapsed time.
-- Files read and changed.
-- Network requests.
-- MCP calls.
-- Agent environment with secrets redacted.
+### IDE and source-control integration — **partial**
 
-`LLMEvent::Usage` already exists, so usage can be exposed before inventing a new protocol event.
+The desktop can open a file in VS Code or Cursor and reveal it in the file manager; local worktree
+commit/merge/discard is implemented (`platform.ts`, `App.tsx`, `ReviewPanel.tsx`). Terminal launch,
+a local IDE bridge, GitHub/GitLab issue/PR context, CI status, rebase assistance, push, and PR
+creation remain planned.
 
-### IDE and source-control integration
+## Priority 2: Cowork-inspired capabilities — **planned**
 
-Add:
-
-- Open in VS Code, Zed, JetBrains IDEs, or a terminal.
-- A local IDE bridge or extension.
-- GitHub and GitLab issue and pull-request context.
-- CI status and pull-request review comments.
-- Branch switching and rebase assistance.
-- Commit, push, and pull-request controls.
-
-## Priority 2: Cowork-inspired capabilities
-
-These should follow the core coding workflow rather than delaying it.
+These should follow the core coding workflow rather than delaying it. None of the capabilities below
+has desktop, daemon, or protocol implementation evidence.
 
 ### Artifacts and output viewer
 
@@ -429,61 +374,66 @@ A Cowork-grade MauKode harness should eventually provide:
 
 ## Delivery milestones
 
-### Milestone 1: desktop usability
+Current status of each milestone is labelled from the code audit; details in
+[ROADMAP_AUDIT.md](./ROADMAP_AUDIT.md).
 
-1. Native folder picker and recent repositories.
-2. Session rename, search, archive, and pin.
-3. Native notifications.
-4. Composer model, mode, and worktree controls.
-5. Keyboard shortcuts and command palette.
-6. Open or reveal in editor and file manager.
+### Milestone 1: desktop usability — **substantially complete**
 
-### Milestone 2: agent steering
+1. Native folder picker and recent repositories — **done**; drag-and-drop, Git URL clone, and OS
+   "open in MauKode" integration remain.
+2. Session rename, search, archive, and pin — **done** in the desktop client (title search, status
+   filters, rename, pin, archive/restore); server-portable full-text search remains.
+3. Native notifications — **partial**; alerts currently use the browser Notification API, with no
+   click-through routing yet.
+4. Composer model, mode, and worktree controls — **done**.
+5. Keyboard shortcuts and command palette — **done** in the app; native application menus remain.
+6. Open or reveal in editor and file manager — **done** (VS Code/Cursor and file-manager reveal);
+   terminal launch and more IDE targets remain.
 
-1. Structured plan and progress protocol events.
-2. Queued and steering messages.
-3. Explicit clarification requests.
-4. Better dashboard states and unread indicators.
-5. Usage, duration, and context display.
+### Milestone 2: agent steering — **partial**
 
-### Milestone 3: review product
+1. Structured plan and progress protocol events — **done** for plans, steps, subagent status, and
+   usage; progress summaries and verification lifecycle events remain.
+2. Queued and steering messages — **done** in the server and desktop composer; **planned** in the TUI.
+3. Explicit clarification requests — **partial**; approvals/interrupts are surfaced, a dedicated
+   clarification event is not.
+4. Better dashboard states and unread indicators — **partial**; needs-you/running/interrupted/recent
+   exist, unread and changed markers do not.
+5. Usage, duration, and context display — **partial**; usage and context estimate exist, a richer
+   activity inspector remains.
 
-1. Syntax-highlighted split diff.
-2. Per-file and per-hunk revert.
-3. Inline feedback to the agent.
-4. Test-result panel.
-5. Commit, push, and pull-request flow.
+### Milestone 3: review product — **partial**
 
-### Milestone 4: reusable autonomous work
+1. Syntax-highlighted split diff — planned (unified per-file diff is shipped).
+2. Per-file and per-hunk revert — planned; whole-turn checkpoint undo is shipped.
+3. Inline feedback to the agent — planned.
+4. Test-result panel — planned.
+5. Commit, push, and pull-request flow — **partial**; worktree commit/merge/discard is shipped, push
+   and PR creation are not.
 
-1. Persistent project entity and instructions.
-2. Skills.
-3. Automations and scheduling.
-4. Automation history and notifications.
-5. Remote pairing.
+### Milestone 4: reusable autonomous work — **planned**
 
-### Milestone 5: hardened agent harness
+Persistent project entity, skills UI, automations/scheduling, automation history, and remote pairing
+have no desktop implementation; skills/plugin endpoints exist backend-side only.
 
-1. OS-level sandbox runner.
-2. Network capability controls.
-3. Secret broker.
-4. Isolated browser.
-5. Artifact and preview viewer.
-6. Optional remote execution.
+### Milestone 5: hardened agent harness — **planned**
+
+OS-level sandbox runner, network capability controls, secret broker, isolated browser, artifact and
+preview viewer, and optional remote execution remain design work.
 
 ## Issue structure
 
 Keep this document as the product reference. Track delivery with one roadmap issue and focused,
-independently implementable issues. Initial issue candidates are:
+independently implementable issues. Replace stale "add" wording with current gaps:
 
-1. Add a native folder picker and recent repositories.
-2. Add session search, rename, pin, and archive.
-3. Wire native desktop notifications and session deep links.
-4. Add composer attachments and `@file` context.
-5. Add structured plans and task-progress events.
-6. Allow steering and queued prompts while an agent runs.
-7. Improve diff review with inline feedback and per-file revert.
-8. Design an OS-isolated execution harness.
+1. Add drag/drop, Git URL clone, and OS open-in-MauKode integration.
+2. Wire native notifications, click-through session deep links, menus/tray, and lifecycle recovery.
+3. Add attachment upload, clipboard/drag-drop context, and `@git-diff`.
+4. Add rich progress lifecycle events and an execution inspector.
+5. Add TUI steering/queueing, session organization, and context autocomplete parity.
+6. Add desktop skills/plugin management and unified capability browsing.
+7. Improve diff review with inline feedback, syntax-highlighted split view, and per-file/hunk revert.
+8. Design persistent projects, scheduled automations, and an OS-isolated execution harness.
 
 Each implementation issue should include:
 
