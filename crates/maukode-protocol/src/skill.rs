@@ -7,9 +7,9 @@ pub struct SkillDefinition {
     pub name: String,
     pub description: String,
     pub prompt: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub allowed_tools: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
     pub is_built_in: bool,

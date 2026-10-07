@@ -22,6 +22,7 @@ jobs:
             --features maukode-protocol/ts,maukode-core/ts,maukode-server/ts export_bindings
           test -z "$(git status --porcelain -- apps/desktop/src/api/generated)" || {
             git status --porcelain -- apps/desktop/src/api/generated
+            git diff -- apps/desktop/src/api/generated
             echo "Generated bindings are stale: regenerate and commit apps/desktop/src/api/generated"
             exit 1
           }
