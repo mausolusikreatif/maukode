@@ -1,0 +1,148 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * MauKode desktop theme.
+ *
+ * The palette mirrors the TUI (crates/maukode-tui/src/theme.rs) so the desktop shell and the
+ * terminal share one visual identity: deep slate surfaces with a mint accent, and colour reserved
+ * for status (green/amber/red/blue/tool-purple).
+ */
+:root {
+  --radius: 0.75rem;
+
+  /* TUI palette, verbatim. */
+  --tui-mint: #00f5a0;
+  --tui-teal-dim: #00b482;
+  --tui-fg: #e2e8f0;
+  --tui-muted: #64748b;
+  --tui-dim: #475569;
+  --tui-border: #334155;
+  --tui-surface: #0f172a;
+  --tui-surface-hover: #1e293b;
+  --tui-tool: #a78bfa;
+  --tui-amber: #f59e0b;
+  --tui-green: #10b981;
+  --tui-red: #ef4444;
+  --tui-blue: #60a5fa;
+  --tui-cyan: #22d3ee;
+
+  /* Tokens consumed by shadcn/ui components. */
+  --background: #0b1220;
+  --foreground: var(--tui-fg);
+  --card: var(--tui-surface);
+  --card-foreground: var(--tui-fg);
+  --popover: #131c2e;
+  --popover-foreground: var(--tui-fg);
+  --primary: var(--tui-mint);
+  --primary-foreground: #04140d;
+  --secondary: var(--tui-surface-hover);
+  --secondary-foreground: var(--tui-fg);
+  --muted: var(--tui-surface-hover);
+  --muted-foreground: var(--tui-muted);
+  --accent: #23324b;
+  --accent-foreground: var(--tui-fg);
+  --destructive: var(--tui-red);
+  --destructive-foreground: #fee2e2;
+  --success: var(--tui-green);
+  --warning: var(--tui-amber);
+  --info: var(--tui-blue);
+  --tool: var(--tui-tool);
+  --border: var(--tui-border);
+  --input: var(--tui-border);
+  --ring: var(--tui-teal-dim);
+  --sidebar: #0d1524;
+  --sidebar-foreground: var(--tui-fg);
+  --sidebar-accent: var(--tui-surface-hover);
+  --sidebar-accent-foreground: var(--tui-mint);
+  --sidebar-border: var(--tui-border);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-tool: var(--tool);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--tui-mint) 30%, transparent);
+  }
+}
+
+@layer utilities {
+  /* Thin, slate scrollbars that match the terminal aesthetic. */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Archive, ArchiveRestore, Pin, Plus, Search } from "lucide-react";
 import { baseName, shortAgo } from "../state/format";
 import {
   filterSessions,
@@ -7,84 +8,11 @@ import {
   type SessionStatusFilter,
 } from "../state/sessionFilters";
 import { useApp } from "../state/store";
+import { cn } from "@/lib/utils";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import { DeleteDialog } from "./DeleteDialog";
-
-function PinIcon({ pinned }: { pinned: boolean }) {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill={pinned ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <line x1="12" y1="17" x2="12" y2="22" />
-      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.77V5a1 1 0 0 1 1-1h1V2H7v2h1a1 1 0 0 1 1 1v5.77a2 2 0 0 1-1.11 1.79l-1.78.89A2 2 0 0 0 5 15.24Z" />
-    </svg>
-  );
-}
-
-function ArchiveIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="21 8 21 21 3 21 3 8" />
-      <rect x="1" y="3" width="22" height="5" />
-      <line x1="10" y1="12" x2="14" y2="12" />
-    </svg>
-  );
-}
-
-function RestoreIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="1 4 1 10 7 10" />
-      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-  );
-}
 
 const STATUS_FILTERS: { id: SessionStatusFilter; label: string }[] = [
   { id: "all", label: "All" },
@@ -134,10 +62,7 @@ export function Sidebar() {
   const pinnedSet = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds]);
   const archivedSet = useMemo(() => new Set(archivedSessionIds), [archivedSessionIds]);
 
-  const counts = useMemo(
-    () => getStatusCounts(sessions, archivedSet),
-    [sessions, archivedSet],
-  );
+  const counts = useMemo(() => getStatusCounts(sessions, archivedSet), [sessions, archivedSet]);
 
   const filteredSessions = useMemo(
     () =>
@@ -178,63 +103,75 @@ export function Sidebar() {
   const running = counts.running;
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-head">
-        <strong>MauKode</strong>
-        <div className="row">
+    <aside className="sidebar flex w-72 shrink-0 flex-col gap-2 border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground">
+      <div className="sidebar-head flex items-center justify-between px-1">
+        <strong className="text-sm font-semibold tracking-tight text-primary">MauKode</strong>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            className="link icon-btn"
+            className="btn-shortcuts rounded-md px-1.5 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
             title="Keyboard shortcuts (?)"
             data-testid="btn-shortcuts"
             onClick={toggleShortcuts}
           >
             ?
           </button>
-          <span data-testid="connection" className={`dot ${connection}`} title={connection} />
+          <span
+            data-testid="connection"
+            className={cn(
+              "dot size-2 rounded-full",
+              connection === "online" && "bg-success",
+              connection === "connecting" && "bg-warning",
+              connection === "reconnecting" && "bg-warning",
+              connection === "disconnected" && "bg-destructive",
+            )}
+            title={connection}
+          />
         </div>
       </div>
-      <button data-testid="new-session" className="primary" onClick={() => openNewSession(null)}>
-        New session
-      </button>
 
-      <div className="summary muted" data-testid="summary">
+      <Button data-testid="new-session" size="sm" className="w-full" onClick={() => openNewSession(null)}>
+        New session
+      </Button>
+
+      <div className="summary px-1 text-xs text-muted-foreground" data-testid="summary">
         {running} running · {needsYou} need you
       </div>
 
-      <div className="row nav">
-        <button
+      <div className="row nav grid grid-cols-2 gap-1">
+        <Button
           data-testid="nav-overview"
-          className={!activeId && view === "home" ? "active" : ""}
+          variant={!activeId && view === "home" ? "secondary" : "ghost"}
+          size="sm"
           onClick={goHome}
         >
           Overview
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="nav-settings"
-          className={!activeId && view === "settings" ? "active" : ""}
+          variant={!activeId && view === "settings" ? "secondary" : "ghost"}
+          size="sm"
           onClick={openSettings}
         >
           Settings
-        </button>
+        </Button>
       </div>
 
       {/* Session search input */}
-      <div className="sidebar-search">
-        <span className="search-icon" aria-hidden="true">
-          <SearchIcon />
-        </span>
-        <input
+      <div className="sidebar-search relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
           data-testid="session-search"
           type="search"
           placeholder="Search sessions…"
+          className="h-8 pl-8 text-xs"
           value={sessionSearchQuery}
           onChange={(e) => setSessionSearchQuery(e.target.value)}
         />
         {sessionSearchQuery && (
           <button
             type="button"
-            className="search-clear link"
+            className="search-clear absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             title="Clear search"
             aria-label="Clear search"
             onClick={() => setSessionSearchQuery("")}
@@ -245,7 +182,7 @@ export function Sidebar() {
       </div>
 
       {/* Status filter chips */}
-      <div className="filter-chips" role="tablist" aria-label="Session filter">
+      <div className="filter-chips flex flex-wrap gap-1" role="tablist" aria-label="Session filter">
         {STATUS_FILTERS.map((f) => {
           const count = counts[f.id];
           const isSelected = sessionStatusFilter === f.id;
@@ -255,15 +192,22 @@ export function Sidebar() {
               role="tab"
               data-testid={f.id === "needs_you" ? "filter-needs-you" : `filter-${f.id}`}
               aria-selected={isSelected}
-              className={`filter-chip ${isSelected ? "active" : ""}`}
+              className={cn(
+                "filter-chip inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                isSelected
+                  ? "active border-primary/40 bg-primary/15 text-primary"
+                  : "border-border text-muted-foreground hover:bg-sidebar-accent",
+              )}
               onClick={() => setSessionStatusFilter(f.id)}
             >
               <span>{f.label}</span>
               {count > 0 && (
                 <span
-                  className={`chip-count ${
-                    f.id === "needs_you" ? "warn" : f.id === "running" ? "run" : ""
-                  }`}
+                  className={cn(
+                    "chip-count rounded-full px-1 font-mono",
+                    f.id === "needs_you" && "warn bg-warning/20 text-warning",
+                    f.id === "running" && "run bg-primary/20 text-primary",
+                  )}
                 >
                   {count}
                 </span>
@@ -273,33 +217,33 @@ export function Sidebar() {
         })}
       </div>
 
-      <nav className="list">
+      <nav className="list scrollbar-thin flex-1 space-y-2 overflow-y-auto pr-0.5">
         {groups.map(([project, items]) => {
           const closed = collapsed.has(project) && !items.some((s) => s.id === activeId);
           const attention = items.some((s) => s.pending_permission_count > 0);
           return (
             <section key={project} className="project">
-              <div className="project-head" title={project}>
+              <div className="project-head group flex items-center gap-1 px-1" title={project}>
                 <button
-                  className="project-toggle"
+                  className="project-toggle flex flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs hover:bg-sidebar-accent"
                   onClick={() => toggle(project)}
                   aria-expanded={!closed}
                 >
-                  <span className={`chev ${closed ? "closed" : ""}`}>▾</span>
-                  <span className="folder" aria-hidden="true">
+                  <span className={cn("chev transition-transform", closed && "closed -rotate-90")}>▾</span>
+                  <span className="folder text-muted-foreground" aria-hidden="true">
                     ▤
                   </span>
-                  <span className="project-name">{baseName(project)}</span>
-                  {closed && attention && <span className="dot warn" />}
-                  <span className="count">{items.length}</span>
+                  <span className="project-name truncate font-medium">{baseName(project)}</span>
+                  {closed && attention && <span className="dot warn size-1.5 rounded-full bg-warning" />}
+                  <span className="count ml-auto font-mono text-muted-foreground">{items.length}</span>
                 </button>
                 <button
-                  className="project-add"
+                  className="project-add rounded-md px-1.5 py-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover:opacity-100"
                   title={`New session in ${baseName(project)}`}
                   aria-label={`New session in ${baseName(project)}`}
                   onClick={() => openNewSession(project)}
                 >
-                  +
+                  <Plus className="size-3.5" />
                 </button>
               </div>
 
@@ -310,7 +254,10 @@ export function Sidebar() {
                   return (
                     <div
                       key={s.id}
-                      className={`session-row ${s.id === activeId ? "active" : ""}`}
+                      className={cn(
+                        "session-row group/row relative flex items-center rounded-md",
+                        s.id === activeId ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
+                      )}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setContextMenu({
@@ -322,42 +269,48 @@ export function Sidebar() {
                     >
                       <button
                         data-testid="session-item"
-                        className={`session ${s.id === activeId ? "active" : ""}`}
+                        className={cn(
+                          "session flex min-w-0 flex-1 flex-col gap-0.5 px-2 py-1.5 text-left text-sm",
+                          s.id === activeId && "active text-sidebar-accent-foreground",
+                        )}
                         onClick={() => void openSession(s.id)}
                       >
-                        <span className="title">
+                        <span className="title flex items-center gap-1 truncate">
                           {isPinned && (
-                            <span className="session-pin-indicator" title="Pinned" aria-label="Pinned">
+                            <span className="session-pin-indicator text-primary" title="Pinned" aria-label="Pinned">
                               📌
                             </span>
                           )}
                           {s.title || "New session"}
                         </span>
-                        <span className="session-meta">
+                        <span className="session-meta flex items-center gap-2 text-[11px] text-muted-foreground">
                           {s.pending_permission_count > 0 ? (
-                            <span data-testid="needs-approval" className="badge warn">
+                            <Badge variant="warning" data-testid="needs-approval" className="badge warn">
                               {s.pending_permission_count} approval
-                            </span>
+                            </Badge>
                           ) : s.running ? (
-                            <span data-testid="running-badge" className="badge run">
+                            <Badge variant="primary" data-testid="running-badge" className="badge run">
                               running
-                            </span>
+                            </Badge>
                           ) : (
                             <span>{shortAgo(s.updated_at)}</span>
                           )}
                           {s.worktree_branch && (
-                            <span className="branch" title={s.worktree_branch}>
+                            <span className="branch truncate font-mono" title={s.worktree_branch}>
                               ⎇ {s.worktree_branch.replace(/^maukode\//, "")}
                             </span>
                           )}
                         </span>
                       </button>
 
-                      <div className="session-actions">
+                      <div className="session-actions flex items-center gap-0.5 pr-1 opacity-0 transition-opacity group-hover/row:opacity-100">
                         <button
                           type="button"
                           data-testid="pin-session"
-                          className={`session-action-btn ${isPinned ? "pinned" : ""}`}
+                          className={cn(
+                            "session-action-btn rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground",
+                            isPinned && "pinned text-primary",
+                          )}
                           title={isPinned ? "Unpin session" : "Pin session"}
                           aria-label={isPinned ? "Unpin session" : "Pin session"}
                           onClick={(e) => {
@@ -365,12 +318,12 @@ export function Sidebar() {
                             togglePinSession(s.id);
                           }}
                         >
-                          <PinIcon pinned={isPinned} />
+                          <Pin className="size-3.5" fill={isPinned ? "currentColor" : "none"} />
                         </button>
                         <button
                           type="button"
                           data-testid="archive-session"
-                          className="session-action-btn"
+                          className="session-action-btn rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
                           title={isArchived ? "Restore session" : "Archive session"}
                           aria-label={isArchived ? "Restore session" : "Archive session"}
                           onClick={(e) => {
@@ -378,7 +331,7 @@ export function Sidebar() {
                             toggleArchiveSession(s.id);
                           }}
                         >
-                          {isArchived ? <RestoreIcon /> : <ArchiveIcon />}
+                          {isArchived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
                         </button>
                       </div>
                     </div>
@@ -388,9 +341,9 @@ export function Sidebar() {
           );
         })}
 
-        {sessions.length === 0 && <p className="muted pad">No sessions yet.</p>}
+        {sessions.length === 0 && <p className="px-2 py-4 text-xs text-muted-foreground">No sessions yet.</p>}
         {sessions.length > 0 && filteredSessions.length === 0 && (
-          <div className="empty-filter muted pad">
+          <div className="empty-filter px-2 py-4 text-xs text-muted-foreground">
             <p>
               No{" "}
               {sessionStatusFilter === "all"
@@ -403,7 +356,7 @@ export function Sidebar() {
             {(sessionSearchQuery || sessionStatusFilter !== "all") && (
               <button
                 type="button"
-                className="link small"
+                className="mt-1 text-xs text-primary hover:underline"
                 onClick={() => {
                   setSessionSearchQuery("");
                   setSessionStatusFilter("all");
@@ -415,49 +368,52 @@ export function Sidebar() {
           </div>
         )}
       </nav>
+
       {/* Floating context menu */}
       {contextMenu && (
         <div
           ref={menuRef}
-          className="session-context-menu"
+          className="session-context-menu fixed z-50 min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-xl"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           role="menu"
         >
           <button
             role="menuitem"
             data-testid="context-menu-pin"
-            className="context-menu-item"
+            className="context-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent"
             onClick={() => {
               togglePinSession(contextMenu.sessionId);
               setContextMenu(null);
             }}
           >
-            <span className="context-icon">
-              <PinIcon pinned={pinnedSet.has(contextMenu.sessionId)} />
+            <span className="context-icon text-muted-foreground">
+              <Pin className="size-3.5" fill={pinnedSet.has(contextMenu.sessionId) ? "currentColor" : "none"} />
             </span>
             <span>{pinnedSet.has(contextMenu.sessionId) ? "Unpin session" : "Pin to top"}</span>
           </button>
           <button
             role="menuitem"
             data-testid="context-menu-archive"
-            className="context-menu-item"
+            className="context-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent"
             onClick={() => {
               toggleArchiveSession(contextMenu.sessionId);
               setContextMenu(null);
             }}
           >
-            <span className="context-icon">
-              {archivedSet.has(contextMenu.sessionId) ? <RestoreIcon /> : <ArchiveIcon />}
+            <span className="context-icon text-muted-foreground">
+              {archivedSet.has(contextMenu.sessionId) ? (
+                <ArchiveRestore className="size-3.5" />
+              ) : (
+                <Archive className="size-3.5" />
+              )}
             </span>
-            <span>
-              {archivedSet.has(contextMenu.sessionId) ? "Restore session" : "Archive session"}
-            </span>
+            <span>{archivedSet.has(contextMenu.sessionId) ? "Restore session" : "Archive session"}</span>
           </button>
-          <hr className="context-divider" />
+          <hr className="context-divider my-1 h-px border-border" />
           <button
             role="menuitem"
             data-testid="context-menu-delete"
-            className="context-menu-item danger"
+            className="context-menu-item danger flex w-full items-center gap-2 px-3 py-1.5 text-left text-destructive hover:bg-destructive/10"
             onClick={() => {
               const id = contextMenu.sessionId;
               setContextMenu(null);
@@ -470,9 +426,7 @@ export function Sidebar() {
         </div>
       )}
 
-      {deletingId && (
-        <DeleteDialog sessionId={deletingId} onClose={() => setDeletingId(null)} />
-      )}
+      {deletingId && <DeleteDialog sessionId={deletingId} onClose={() => setDeletingId(null)} />}
     </aside>
   );
 }

@@ -7,6 +7,11 @@ import {
   repositoryName,
 } from "../state/repositories";
 import { useApp } from "../state/store";
+import { cn } from "@/lib/utils";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Modal } from "./ui/modal";
 
 export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void; initialDir?: string | null }) {
   const { client, providers, sessions, createSession } = useApp();
@@ -71,40 +76,47 @@ export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void;
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <Modal onClose={onClose} testId="new-session-dialog">
       <form
-        className="modal"
-        onClick={(e) => e.stopPropagation()}
+        className="modal space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
-        <h2>New session</h2>
-        <label>
-          Project directory
-          <span className="directory-picker">
-            <input
+        <h2 className="text-base font-semibold">New session</h2>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="dir-input">Project directory</Label>
+          <div className="directory-picker flex gap-2">
+            <Input
+              id="dir-input"
               data-testid="dir-input"
               value={directory}
               onChange={(e) => setDirectory(e.target.value)}
               placeholder="/path/to/repo (blank = server default)"
             />
             {isDesktop() && (
-              <button type="button" data-testid="browse-directory" onClick={() => void browse()}>
+              <Button type="button" variant="outline" data-testid="browse-directory" onClick={() => void browse()}>
                 Browse…
-              </button>
+              </Button>
             )}
-          </span>
-        </label>
+          </div>
+        </div>
+
         {repositories.length > 0 && (
-          <div className="recent-repositories" aria-label="Recent repositories">
-            <span className="muted">Recent</span>
-            <div className="repository-list">
+          <div className="recent-repositories flex flex-col gap-1.5" aria-label="Recent repositories">
+            <span className="text-xs text-muted-foreground">Recent</span>
+            <div className="repository-list flex flex-wrap gap-1.5">
               {repositories.map((path) => (
                 <button
                   type="button"
-                  className={directory === path ? "selected" : ""}
+                  className={cn(
+                    "rounded-md border px-2 py-0.5 text-xs",
+                    directory === path
+                      ? "selected border-primary/40 bg-primary/15 text-primary"
+                      : "border-border hover:bg-accent",
+                  )}
                   key={path}
                   title={path}
                   onClick={() => setDirectory(path)}
@@ -115,19 +127,33 @@ export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void;
             </div>
           </div>
         )}
-        <label className="check">
+
+        <label className="check flex items-start gap-2 text-sm">
           <input
             data-testid="isolation-checkbox"
             type="checkbox"
+            className="mt-0.5 size-4 accent-[var(--primary)]"
             checked={isolate}
             onChange={(e) => setIsolate(e.target.checked)}
           />
-          Run in an isolated git worktree
-          <span className="muted"> — parallel agents can't overwrite each other. Requires a git repo with a commit.</span>
+          <span>
+            Run in an isolated git worktree
+            <span className="text-muted-foreground">
+              {" "}
+              — parallel agents can't overwrite each other. Requires a git repo with a commit.
+            </span>
+          </span>
         </label>
-        <label>
-          Provider
-          <select data-testid="provider-select" value={provider} onChange={(e) => setProvider(e.target.value)}>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="provider-select">Provider</Label>
+          <select
+            id="provider-select"
+            data-testid="provider-select"
+            className="h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+          >
             {providers?.providers.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -135,10 +161,14 @@ export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void;
               </option>
             ))}
           </select>
-        </label>
-        <label>
-          Model <span className="muted">(blank = provider default)</span>
-          <input
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="model-input">
+            Model <span className="text-muted-foreground">(blank = provider default)</span>
+          </Label>
+          <Input
+            id="model-input"
             data-testid="model-input"
             list="dialog-model-options"
             value={model}
@@ -152,17 +182,23 @@ export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void;
               ))}
             </datalist>
           )}
-        </label>
-        {error && <div className="notice error">{error}</div>}
-        <div className="row end">
-          <button type="button" onClick={onClose}>
+        </div>
+
+        {error && (
+          <div className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+
+        <div className="row end flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onClose}>
             Cancel
-          </button>
-          <button data-testid="create-session" className="primary" disabled={busy}>
+          </Button>
+          <Button data-testid="create-session" disabled={busy}>
             {busy ? "Creating…" : "Create"}
-          </button>
+          </Button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

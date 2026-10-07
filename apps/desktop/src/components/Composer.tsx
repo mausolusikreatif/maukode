@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PermissionMode } from "../api/types";
 import { useApp } from "../state/store";
+import { cn } from "@/lib/utils";
 import { ModelSelect } from "./ModelSelect";
 import {
   buildAutocompleteItems,
@@ -278,24 +279,33 @@ export function Composer({ running }: { running: boolean }) {
   }`;
 
   return (
-    <div ref={composerRef} className={`composer ${running ? "running" : ""}`}>
+    <div
+      ref={composerRef}
+      className={cn(
+        "composer relative border-t border-border/70 bg-card/40 px-4 py-3",
+        running && "running",
+      )}
+    >
       {/* Attached Context Chips */}
       {chips.length > 0 && (
-        <div className="composer-chips" data-testid="composer-chips">
+        <div className="composer-chips mb-2 flex flex-wrap items-center gap-1.5" data-testid="composer-chips">
           {chips.map((chip) => (
             <span
               key={chip.id}
-              className={`context-chip context-chip-${chip.kind}`}
+              className={cn(
+                "context-chip inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-xs",
+                `context-chip-${chip.kind}`,
+              )}
               data-testid="context-chip"
             >
-              <span className="chip-icon">{chipIcon(chip.kind)}</span>
-              <span className="chip-label" title={chip.value}>
+              <span className="chip-icon text-tool">{chipIcon(chip.kind)}</span>
+              <span className="chip-label max-w-[16rem] truncate" title={chip.value}>
                 {chip.label}
               </span>
-              {chip.detail && <span className="chip-detail">{chip.detail}</span>}
+              {chip.detail && <span className="chip-detail text-muted-foreground">{chip.detail}</span>}
               <button
                 type="button"
-                className="chip-dismiss"
+                className="chip-dismiss ml-0.5 rounded-full px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
                 data-testid="chip-dismiss"
                 aria-label={`Remove ${chip.label}`}
                 onClick={(e) => {
@@ -311,7 +321,7 @@ export function Composer({ running }: { running: boolean }) {
           {chips.length > 1 && (
             <button
               type="button"
-              className="link chip-clear"
+              className="chip-clear text-xs text-primary hover:underline"
               onClick={() => setChips([])}
               title="Clear all attachments"
             >
@@ -325,11 +335,11 @@ export function Composer({ running }: { running: boolean }) {
       {autocompleteOpen && (
         <div
           ref={autocompleteListRef}
-          className="composer-autocomplete"
+          className="composer-autocomplete absolute bottom-full left-4 z-40 mb-2 w-[min(36rem,80vw)] overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
           data-testid="composer-autocomplete"
         >
-          <div className="autocomplete-header">
-            <span>
+          <div className="autocomplete-header flex items-center justify-between border-b border-border px-3 py-1.5 text-xs">
+            <span className="font-medium">
               {autocompleteMode === "all"
                 ? "Context Suggestions"
                 : autocompleteMode === "file"
@@ -338,24 +348,29 @@ export function Composer({ running }: { running: boolean }) {
                     ? "Select Folder"
                     : "Select Symbol"}
             </span>
-            <span className="small muted">↑↓ navigate · ↵ select · esc dismiss</span>
+            <span className="text-muted-foreground">↑↓ navigate · ↵ select · esc dismiss</span>
           </div>
           {filteredItems.length === 0 ? (
-            <div className="autocomplete-empty">No matching context references found</div>
+            <div className="autocomplete-empty px-3 py-3 text-sm text-muted-foreground">
+              No matching context references found
+            </div>
           ) : (
             filteredItems.map((item, idx) => (
               <button
                 key={item.id}
                 type="button"
                 data-index={idx}
-                className={`autocomplete-item ${idx === highlightedIndex ? "highlighted" : ""}`}
-                onClick={() => selectItem(item)}
+                className={cn(
+                  "autocomplete-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent",
+                  idx === highlightedIndex && "bg-accent",
+                )}
                 onMouseEnter={() => setHighlightedIndex(idx)}
+                onClick={() => selectItem(item)}
               >
-                <span className="item-icon">{item.icon}</span>
-                <div className="item-main">
-                  <span className="item-label">{item.label}</span>
-                  <span className="item-desc">{item.description}</span>
+                <span className="item-icon w-5 text-center text-tool">{item.icon}</span>
+                <div className="item-main flex min-w-0 flex-col">
+                  <span className="item-label truncate font-mono text-xs">{item.label}</span>
+                  <span className="item-desc truncate text-xs text-muted-foreground">{item.description}</span>
                 </div>
               </button>
             ))
@@ -417,25 +432,22 @@ export function Composer({ running }: { running: boolean }) {
               }
             } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              if (running) {
-                if (text.trim() || chips.length > 0) handleSteer();
-              } else {
-                submit();
-              }
+              handleSteer();
             }
           }}
-          rows={1}
+          rows={3}
+          className="w-full resize-none rounded-md border border-input bg-background/60 px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring scrollbar-thin"
         />
       </div>
 
       {/* Composer Footer Toolbar */}
-      <div className="composer-footer">
-        <div className="composer-footer-left">
+      <div className="composer-footer mt-2 flex items-center justify-between gap-3">
+        <div className="composer-footer-left flex items-center gap-2">
           {/* Attach Button & Dropdown */}
-          <div className="attach-menu-wrap">
+          <div className="attach-menu-wrap relative">
             <button
               type="button"
-              className="attach-btn"
+              className="attach-btn rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
               data-testid="attach-button"
               onClick={() => setAttachMenuOpen((o) => !o)}
               title="Add context reference (@file, @folder, @git-diff, @symbol)"
@@ -443,10 +455,13 @@ export function Composer({ running }: { running: boolean }) {
               ＋ Attach
             </button>
             {attachMenuOpen && (
-              <div className="attach-dropdown" data-testid="attach-dropdown">
+              <div
+                className="attach-dropdown absolute bottom-full left-0 z-40 mb-1 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-xl"
+                data-testid="attach-dropdown"
+              >
                 <button
                   type="button"
-                  className="attach-dropdown-item"
+                  className="attach-dropdown-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
                   onClick={() => openPickerMode("file")}
                 >
                   <span className="item-icon">📄</span>
@@ -454,7 +469,7 @@ export function Composer({ running }: { running: boolean }) {
                 </button>
                 <button
                   type="button"
-                  className="attach-dropdown-item"
+                  className="attach-dropdown-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
                   onClick={() => openPickerMode("folder")}
                 >
                   <span className="item-icon">📁</span>
@@ -462,7 +477,7 @@ export function Composer({ running }: { running: boolean }) {
                 </button>
                 <button
                   type="button"
-                  className="attach-dropdown-item"
+                  className="attach-dropdown-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
                   onClick={() => {
                     addChip({
                       id: `diff-${Date.now()}`,
@@ -479,7 +494,7 @@ export function Composer({ running }: { running: boolean }) {
                 </button>
                 <button
                   type="button"
-                  className="attach-dropdown-item"
+                  className="attach-dropdown-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
                   onClick={() => openPickerMode("symbol")}
                 >
                   <span className="item-icon">◈</span>
@@ -491,13 +506,13 @@ export function Composer({ running }: { running: boolean }) {
 
           {/* Environment / Branch Capability Indicator */}
           <span
-            className="env-indicator"
+            className="env-indicator inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground"
             title={`Workspace: ${meta?.projectDir ?? meta?.directory ?? "Local"}${
               meta?.branch ? ` (branch: ${meta.branch})` : ""
             }`}
           >
-            <span className="env-dot" />
-            <span className="env-label">{meta?.branch ? `⎇ ${meta.branch}` : "Local"}</span>
+            <span className="env-dot size-1.5 rounded-full bg-success" />
+            <span className="env-label font-mono">{meta?.branch ? `⎇ ${meta.branch}` : "Local"}</span>
           </span>
 
           {/* Model Selector in Composer Footer */}
@@ -512,20 +527,24 @@ export function Composer({ running }: { running: boolean }) {
           <ModeSelect sessionId={activeId ?? ""} />
         </div>
 
-        <div className="composer-footer-right">
+        <div className="composer-footer-right flex items-center gap-2">
           {/* Token / Context Gauge */}
-          <div className="composer-gauge" data-testid="token-gauge" title={gaugeTooltip}>
+          <div
+            className="composer-gauge inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground"
+            data-testid="token-gauge"
+            title={gaugeTooltip}
+          >
             <span className="gauge-icon">⚡</span>
-            <span className="gauge-tokens">~{gauge.tokens} tok</span>
+            <span className="gauge-tokens font-mono">~{gauge.tokens} tok</span>
           </div>
 
           {/* Send / Stop / Steer / Queue Buttons */}
           {running ? (
-            <div className="composer-actions">
+            <div className="composer-actions flex items-center gap-2">
               <button
                 type="button"
                 data-testid="steer-button"
-                className="primary steer-btn"
+                className="steer-btn rounded-md border border-tool/50 px-3 py-1.5 text-xs font-medium text-tool hover:bg-tool/10"
                 disabled={!text.trim() && chips.length === 0}
                 onClick={handleSteer}
                 title="Steer agent immediately with new guidance (Cmd+Enter)"
@@ -535,7 +554,7 @@ export function Composer({ running }: { running: boolean }) {
               <button
                 type="button"
                 data-testid="queue-button"
-                className="queue-btn"
+                className="queue-btn rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent"
                 disabled={!text.trim() && chips.length === 0}
                 onClick={handleQueue}
                 title="Queue message for next turn (Enter)"
@@ -545,7 +564,7 @@ export function Composer({ running }: { running: boolean }) {
               <button
                 type="button"
                 data-testid="stop-button"
-                className="danger"
+                className="danger rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
                 onClick={() => void stop()}
                 title="Interrupt the agent turn"
               >
@@ -555,7 +574,7 @@ export function Composer({ running }: { running: boolean }) {
           ) : (
             <button
               data-testid="send-button"
-              className="primary"
+              className="primary rounded-md bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               disabled={!text.trim() && chips.length === 0}
               onClick={submit}
             >
