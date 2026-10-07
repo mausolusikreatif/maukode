@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Folder, GitBranch, MoreHorizontal, PanelLeft, Pin, Archive, ShieldCheck, Trash2 } from "lucide-react";
 import { AuditDialog } from "./components/AuditDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { Composer } from "./components/Composer";
@@ -117,124 +118,56 @@ function SessionView() {
 
   return (
     <div className="session-layout flex min-h-0 flex-1">
-      <main className="session-view flex min-w-0 flex-1 flex-col">
-        <header className="session-head flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-6 py-3">
-          <div className="flex min-w-0 flex-col gap-1">
-            <div className="crumbs-row flex items-center gap-2 text-xs text-muted-foreground">
-              <div
-                className="crumbs flex min-w-0 items-center gap-2"
-                title={meta?.projectDir ?? meta?.directory}
+      <main className="session-view flex min-w-0 flex-1 flex-col bg-background">
+        <header className="session-head flex min-h-[68px] flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-5 py-3 backdrop-blur">
+          <div className="flex min-w-0 items-center gap-3">
+            {!sidebarOpen && (
+              <button
+                type="button"
+                className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                data-testid="toggle-sidebar-btn"
+                title="Open Sidebar (Ctrl+B)"
+                onClick={toggleSidebar}
               >
-                {!sidebarOpen && (
-                  <button
-                    type="button"
-                    className="toggle-sidebar-btn rounded-md px-1.5 py-0.5 hover:bg-accent"
-                    data-testid="toggle-sidebar-btn"
-                    title="Open Sidebar (Ctrl+B)"
-                    onClick={toggleSidebar}
-                  >
-                    ☰
-                  </button>
-                )}
-                <span className="project-chip truncate rounded-md bg-secondary px-2 py-0.5 font-mono text-[11px]">
-                  ▤ {baseName(meta?.projectDir ?? meta?.directory ?? "")}
+                <PanelLeft className="size-4" />
+              </button>
+            )}
+            <div className="flex min-w-0 flex-col gap-1">
+              <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                <Folder className="size-3.5 shrink-0" />
+                <span className="truncate font-medium text-foreground" title={meta?.projectDir ?? meta?.directory}>
+                  {baseName(meta?.projectDir ?? meta?.directory ?? "")}
                 </span>
-                {meta?.branch && (
-                  <span className="branch-chip rounded-md bg-secondary px-2 py-0.5 font-mono text-[11px]">
-                    ⎇ {meta.branch}
-                  </span>
-                )}
-                {isArchived && (
-                  <span className="rounded-md bg-secondary px-2 py-0.5 font-mono text-[11px]">archived</span>
-                )}
+                {meta?.branch && <><span className="text-border">/</span><span className="flex items-center gap-1 truncate"><GitBranch className="size-3" />{meta.branch}</span></>}
               </div>
-              {currentDir && (
-                <div className="repo-actions flex items-center gap-1" data-testid="repo-actions">
-                  <button
-                    type="button"
-                    data-testid="open-vscode"
-                    className="rounded-md border border-border px-2 py-0.5 text-[11px] hover:bg-accent"
-                    title={`Open repository in VS Code (${currentDir})`}
-                    onClick={() => void handleOpenEditor("code")}
-                  >
-                    VS Code
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="open-cursor"
-                    className="rounded-md border border-border px-2 py-0.5 text-[11px] hover:bg-accent"
-                    title={`Open repository in Cursor (${currentDir})`}
-                    onClick={() => void handleOpenEditor("cursor")}
-                  >
-                    Cursor
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="reveal-file-manager"
-                    className="rounded-md border border-border px-2 py-0.5 text-[11px] hover:bg-accent"
-                    title={`Reveal repository in File Manager (${currentDir})`}
-                    onClick={() => void handleReveal()}
-                  >
-                    Reveal
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <SessionTitle sessionId={activeId} title={meta?.title ?? null} />
-              <ModelSelect
-                sessionId={activeId}
-                currentProvider={meta?.provider ?? null}
-                currentModel={meta?.model ?? null}
-              />
+              <div className="flex items-center gap-3">
+                <SessionTitle sessionId={activeId} title={meta?.title ?? null} />
+                <ModelSelect sessionId={activeId} currentProvider={meta?.provider ?? null} currentModel={meta?.model ?? null} />
+              </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            <Button
-              data-testid="toggle-review"
-              variant={review.open ? "default" : "outline"}
-              size="sm"
-              onClick={() => void toggleReview()}
-            >
-              Changes{review.files.length > 0 ? ` (${review.files.length})` : ""}
-            </Button>
-            <Badge
-              data-testid="run-state"
-              variant={thread.running ? "primary" : "outline"}
-              className={cn("badge font-mono", thread.running && "run")}
-            >
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge data-testid="run-state" variant={thread.running ? "primary" : "outline"} className={cn("badge font-mono", thread.running && "run")}>
               {thread.running ? "running" : "idle"}
             </Badge>
-            <button
-              data-testid="pin-active-session"
-              className="text-muted-foreground hover:text-foreground"
-              title={isPinned ? "Unpin session" : "Pin session"}
-              onClick={() => togglePinSession(activeId)}
-            >
-              {isPinned ? "Unpin" : "Pin"}
-            </button>
-            <button
-              data-testid="archive-active-session"
-              className="text-muted-foreground hover:text-foreground"
-              title={isArchived ? "Restore session from archive" : "Archive session"}
-              onClick={() => toggleArchiveSession(activeId)}
-            >
-              {isArchived ? "Restore" : "Archive"}
-            </button>
-            <button
-              data-testid="audit-button"
-              className="text-muted-foreground hover:text-foreground"
-              onClick={() => setAuditing(true)}
-            >
-              Audit
-            </button>
-            <button
-              data-testid="delete-session"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={() => setDeleting(true)}
-            >
-              Delete
-            </button>
+            <Button data-testid="toggle-review" variant={review.open ? "default" : "outline"} size="sm" className="h-8" onClick={() => void toggleReview()}>
+              Changes{review.files.length > 0 ? ` (${review.files.length})` : ""}
+            </Button>
+            <div className="group relative">
+              <button type="button" aria-label="Session actions" title="Session actions" className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground">
+                <MoreHorizontal className="size-4" />
+              </button>
+              <div className="pointer-events-none absolute right-0 top-9 z-20 w-40 rounded-lg border border-border bg-popover p-1 opacity-0 shadow-xl transition group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100">
+                <button type="button" data-testid="open-vscode" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => void handleOpenEditor("code")}><Folder className="size-3.5" />Open in VS Code</button>
+                <button type="button" data-testid="open-cursor" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => void handleOpenEditor("cursor")}><Folder className="size-3.5" />Open in Cursor</button>
+                <button type="button" data-testid="reveal-file-manager" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => void handleReveal()}><Folder className="size-3.5" />Reveal folder</button>
+
+                <button type="button" data-testid="pin-active-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => togglePinSession(activeId)}><Pin className="size-3.5" fill={isPinned ? "currentColor" : "none"} />{isPinned ? "Unpin session" : "Pin session"}</button>
+                <button type="button" data-testid="archive-active-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => toggleArchiveSession(activeId)}><Archive className="size-3.5" />{isArchived ? "Restore" : "Archive"}</button>
+              </div>
+            </div>
+            <button data-testid="audit-button" className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground" title="Audit session" onClick={() => setAuditing(true)}><ShieldCheck className="size-4" /></button>
+            <button data-testid="delete-session" className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Delete session" onClick={() => setDeleting(true)}><Trash2 className="size-4" /></button>
           </div>
         </header>
         <Thread thread={thread} />

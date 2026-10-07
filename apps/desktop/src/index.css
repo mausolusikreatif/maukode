@@ -146,3 +146,38 @@
     background: transparent;
   }
 }
+
+@layer components {
+  .dashboard-shell {
+    position: relative;
+    background: radial-gradient(circle at 70% -10%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 36rem), var(--background);
+  }
+  .dashboard-glow {
+    position: absolute;
+    top: 2rem;
+    right: 8%;
+    width: 18rem;
+    height: 18rem;
+    pointer-events: none;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 5%, transparent);
+    filter: blur(80px);
+  }
+  .stat-card {
+    background: color-mix(in srgb, var(--card) 78%, transparent);
+    border-color: color-mix(in srgb, var(--border) 75%, transparent);
+  }
+  .stat-card-accent { border-color: color-mix(in srgb, var(--primary) 24%, var(--border)); }
+  .stat-card-warning { border-color: color-mix(in srgb, var(--warning) 24%, var(--border)); }
+  .dash-card-warn { border-color: color-mix(in srgb, var(--warning) 34%, var(--border)); background: color-mix(in srgb, var(--warning) 5%, var(--card)); }
+  .dash-card-error { border-color: color-mix(in srgb, var(--destructive) 34%, var(--border)); background: color-mix(in srgb, var(--destructive) 5%, var(--card)); }
+  .dash-card-run { border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); background: color-mix(in srgb, var(--primary) 4%, var(--card)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
