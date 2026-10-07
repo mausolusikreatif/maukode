@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApp } from "../state/store";
-import type { ThreadItem, ThreadState } from "../state/thread";
+import type { SubagentDetail, ThreadItem, ThreadState } from "../state/thread";
 import { PlanTimeline } from "./PlanTimeline";
 
 function prettyArgs(args: string): string {
@@ -106,7 +106,166 @@ function ToolCard({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
   );
 }
 
-function Item({ item, isStreaming }: { item: ThreadItem; isStreaming: boolean }) {
+function SubagentCard({
+  item,
+  onInspectTrace,
+}: {
+  item: Extract<ThreadItem, { kind: "subagent" }>;
+  onInspectTrace?: (id: string) => void;
+}) {
+  const isRunning = item.status === "running";
+  const badgeLabel = {
+    running: "◉ Running",
+    completed: "✓ Completed",
+    failed: "✗ Failed",
+    budget_exceeded: "⚠ Budget Exceeded",
+    cancelled: "⊘ Cancelled",
+  }[item.status] ?? item.status;
+
+  return (
+    <div
+      data-testid="subagent-card"
+      className={`subagent-card subagent-${item.status}`}
+    >
+      <div className="subagent-header">
+        <div className="subagent-title-area">
+          <span className="subagent-icon">🤖</span>
+          <span className="subagent-role">{item.profileName}</span>
+          <span className={`subagent-badge badge-${item.status}`}>
+            {badgeLabel}
+          </span>
+        </div>
+        <div className="subagent-actions">
+          <span className="subagent-tokens">{item.tokensUsed} tokens</span>
+          {onInspectTrace && (
+            <button
+              type="button"
+              data-testid="inspect-subagent-trace"
+              className="subagent-inspect-btn"
+              onClick={() => onInspectTrace(item.subagentId)}
+              title="Inspect Subagent Trace"
+            >
+              Inspect trace →
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="subagent-goal">
+        <span className="subagent-label">Goal:</span>
+        <span className="subagent-goal-text">{item.goal}</span>
+      </div>
+      {isRunning ? (
+        <div className="subagent-live">
+          <span className="subagent-live-pulse" />
+          <span className="subagent-live-text">
+            Step {item.step} • {item.lastAction}
+          </span>
+        </div>
+      ) : item.summary ? (
+        <div className="subagent-summary">
+          <div className="subagent-summary-label">Summary</div>
+          <div className="subagent-summary-content">{item.summary}</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SubagentTraceDrawer({
+  subagent,
+  onClose,
+}: {
+  subagent: SubagentDetail;
+  onClose: () => void;
+}) {
+  const badgeLabel = {
+    running: "◉ Running",
+    completed: "✓ Completed",
+    failed: "✗ Failed",
+    budget_exceeded: "⚠ Budget Exceeded",
+    cancelled: "⊘ Cancelled",
+  }[subagent.status] ?? subagent.status;
+
+  return (
+    <div
+      className="subagent-drawer-backdrop"
+      data-testid="subagent-drawer-backdrop"
+      onClick={onClose}
+    >
+      <div
+        className="subagent-drawer"
+        data-testid="subagent-drawer"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="subagent-drawer-head">
+          <div className="subagent-drawer-title-area">
+            <span className="subagent-icon">🤖</span>
+            <h3>{subagent.profileName}</h3>
+            <span className={`subagent-badge badge-${subagent.status}`}>
+              {badgeLabel}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="subagent-drawer-close"
+            data-testid="close-subagent-drawer"
+            onClick={onClose}
+            title="Close inspector"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="subagent-drawer-meta">
+          <div className="subagent-drawer-meta-item">
+            <span className="meta-label">Goal</span>
+            <div className="meta-val">{subagent.goal}</div>
+          </div>
+          <div className="subagent-drawer-meta-item">
+            <span className="meta-label">Tokens</span>
+            <div className="meta-val">{subagent.tokensUsed} tokens consumed</div>
+          </div>
+        </div>
+
+        {subagent.summary && (
+          <div className="subagent-drawer-summary">
+            <div className="summary-title">Final Result / Synthesis</div>
+            <div className="summary-body">{subagent.summary}</div>
+          </div>
+        )}
+
+        <div className="subagent-drawer-timeline-head">
+          <h4>Execution Trace ({subagent.trace.length} steps)</h4>
+        </div>
+
+        <div className="subagent-drawer-timeline">
+          {subagent.trace.map((entry, idx) => (
+            <div key={idx} className="subagent-trace-step">
+              <div className="step-marker">{entry.step}</div>
+              <div className="step-content">
+                <div className="step-header">
+                  <span className="step-action">{entry.action}</span>
+                  <span className="step-time">{entry.timestamp}</span>
+                </div>
+                <div className="step-tokens">{entry.tokensUsed} tokens</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Item({
+  item,
+  isStreaming,
+  onInspectTrace,
+}: {
+  item: ThreadItem;
+  isStreaming: boolean;
+  onInspectTrace?: (id: string) => void;
+}) {
   switch (item.kind) {
     case "user":
       return <div data-testid="user-msg" className="msg user">{item.text}</div>;
@@ -137,6 +296,8 @@ function Item({ item, isStreaming }: { item: ThreadItem; isStreaming: boolean })
       return <PlanTimeline plan={item.plan} />;
     case "tool":
       return <ToolCard item={item} />;
+    case "subagent":
+      return <SubagentCard item={item} onInspectTrace={onInspectTrace} />;
   }
 }
 
@@ -144,6 +305,13 @@ export function Thread({ thread }: { thread: ThreadState }) {
   const { meta, loadOlder, loadingOlder } = useApp();
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  const [activeSubagentId, setActiveSubagentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (thread.selectedSubagentId) {
+      setActiveSubagentId(thread.selectedSubagentId);
+    }
+  }, [thread.selectedSubagentId]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -181,6 +349,7 @@ export function Thread({ thread }: { thread: ThreadState }) {
           key={item.id}
           item={item}
           isStreaming={thread.running && idx === thread.items.length - 1}
+          onInspectTrace={(id) => setActiveSubagentId(id)}
         />
       ))}
       {thread.queue && thread.queue.length > 0 && (
@@ -199,6 +368,12 @@ export function Thread({ thread }: { thread: ThreadState }) {
         </div>
       )}
       {thread.running && thread.pending.length === 0 && <div className="working muted" data-testid="working">Working…</div>}
+      {activeSubagentId && thread.subagents[activeSubagentId] && (
+        <SubagentTraceDrawer
+          subagent={thread.subagents[activeSubagentId]}
+          onClose={() => setActiveSubagentId(null)}
+        />
+      )}
     </div>
   );
 }
