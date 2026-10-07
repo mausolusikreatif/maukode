@@ -286,9 +286,7 @@ impl LLMClient for OpenAIClient {
                     if let Some(event) = pending.pop_front() {
                         return Some((event, (source, state, pending)));
                     }
-                    let Some(event) = source.next().await else {
-                        return None;
-                    };
+                    let event = source.next().await?;
                     let event = match event {
                         Ok(event) => event,
                         // Some OpenAI-compatible gateways close immediately after a valid finish
