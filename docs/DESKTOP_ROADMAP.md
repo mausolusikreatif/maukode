@@ -1,5 +1,9 @@
 # Desktop Product Roadmap
 
+> Implementation status was last audited on October 7, 2026 in
+> [ROADMAP_AUDIT.md](./ROADMAP_AUDIT.md). This document contains product direction; unmarked
+> proposals below are not necessarily unimplemented.
+
 This document records the product direction for the MauKode desktop application. It compares the
 current application with agent-oriented desktop products such as the Codex app and Claude Cowork,
 then turns the gaps into an implementation sequence.

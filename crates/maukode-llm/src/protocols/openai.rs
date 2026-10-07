@@ -18,6 +18,13 @@ struct ToolAccumulator {
 #[derive(Default)]
 struct StreamState {
     tools: BTreeMap<usize, ToolAccumulator>,
+    /// A chunk with an OpenAI `finish_reason` has already been received.
+    ///
+    /// Some compatible gateways close the HTTP body immediately after this chunk instead of
+    /// sending the optional `[DONE]` SSE sentinel. Their HTTP stacks can surface that close as an
+    /// EOF error, even though the model response is complete. We still keep reading after the
+    /// finish chunk because a usage-only chunk may follow it.
+    terminal_received: bool,
 }
 
 impl StreamState {
@@ -106,6 +113,7 @@ impl StreamState {
                     "length" => FinishReason::MaxTokens,
                     _ => FinishReason::EndTurn,
                 };
+                self.terminal_received = true;
                 events.push(Ok(LLMEvent::Finish { reason }));
             }
         }
@@ -281,6 +289,10 @@ impl LLMClient for OpenAIClient {
                     let event = source.next().await?;
                     let event = match event {
                         Ok(event) => event,
+                        // Some OpenAI-compatible gateways close immediately after a valid finish
+                        // chunk instead of sending `[DONE]`. If their chunked response has no
+                        // terminator, reqwest reports that successful close as an EOF error.
+                        Err(_) if state.terminal_received => return None,
                         Err(err) => {
                             return Some((
                                 Err(LLMError::Stream(err.to_string())),
@@ -460,6 +472,55 @@ mod tests {
         server.abort();
         let events = result.expect("[DONE] should end the stream before the server closes");
         assert!(events.iter().any(|event| matches!(event, Ok(LLMEvent::ToolCallFinish { tool_call }) if tool_call.name == "grep")));
+    }
+
+    #[tokio::test]
+    async fn eof_after_finish_chunk_is_successful_termination() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let _server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0; 1024];
+                let count = socket.read(&mut chunk).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+                if request.windows(4).any(|part| part == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let payload = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
+                "data: {\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n{:X}\r\n{}\r\n",
+                payload.len(),
+                payload
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            // Deliberately omit the final zero-length HTTP chunk. This reproduces gateways that
+            // expose `unexpected EOF during chunk size line` after a complete SSE finish event.
+        });
+
+        let client = OpenAIClient::new("test-key").with_base_url(format!("http://{address}"));
+        let request = LLMRequest::new("test-model", vec![maukode_protocol::Message::user("hello")]);
+        let events = client
+            .stream(request)
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(events.iter().all(Result::is_ok), "{events:?}");
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Ok(LLMEvent::Finish {
+                reason: FinishReason::EndTurn
+            })
+        )));
     }
 
     /// Some OpenAI-compatible gateways report `finish_reason: "stop"` even when tool calls were
