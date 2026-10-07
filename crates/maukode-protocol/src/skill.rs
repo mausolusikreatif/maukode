@@ -82,7 +82,7 @@ impl SkillDefinition {
             .collect::<Vec<_>>()
             .join(" ");
 
-        let is_read_only = self.allowed_tools.as_ref().map_or(false, |tools| {
+        let is_read_only = self.allowed_tools.as_ref().is_some_and(|tools| {
             !tools
                 .iter()
                 .any(|t| t == "write_file" || t == "edit_file" || t == "bash")
