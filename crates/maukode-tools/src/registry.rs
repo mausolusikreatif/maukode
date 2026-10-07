@@ -29,6 +29,22 @@ impl ToolRegistry {
         self.aliases.retain(|k, v| k != name && v != name);
     }
 
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&str) -> bool,
+    {
+        self.tools.retain(|k, _| f(k));
+        self.aliases.retain(|k, v| f(k) && f(v));
+    }
+
+    pub fn filter_by_allowed(&mut self, allowed_tools: &[String]) {
+        self.retain(|name| {
+            allowed_tools
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(name))
+        });
+    }
+
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         if let Some(tool) = self.tools.get(name) {
             return Some(Arc::clone(tool));
@@ -109,5 +125,35 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, ToolError::NotFound(message)
             if message.contains("test_too") && message.contains("test_tool")));
+    }
+
+    #[tokio::test]
+    async fn test_tool_registry_filter_by_allowed() {
+        struct SecondTool;
+        #[async_trait::async_trait]
+        impl Tool for SecondTool {
+            fn name(&self) -> &str {
+                "second_tool"
+            }
+            fn description(&self) -> &str {
+                "Second description"
+            }
+            fn parameters(&self) -> serde_json::Value {
+                serde_json::json!({})
+            }
+            async fn execute(&self, _args: serde_json::Value) -> Result<String, ToolError> {
+                Ok("second output".to_string())
+            }
+        }
+
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(MockTool));
+        reg.register(Arc::new(SecondTool));
+        assert_eq!(reg.definitions().len(), 2);
+
+        reg.filter_by_allowed(&["second_tool".to_string()]);
+        assert_eq!(reg.definitions().len(), 1);
+        assert!(reg.get("test_tool").is_none());
+        assert!(reg.get("second_tool").is_some());
     }
 }

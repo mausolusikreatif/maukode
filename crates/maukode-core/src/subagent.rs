@@ -28,6 +28,8 @@ pub struct SubagentTool {
     llm: Arc<dyn LLMClient>,
     event_tx: Arc<RwLock<Option<mpsc::UnboundedSender<LLMEvent>>>>,
     profiles: Arc<RwLock<HashMap<String, SubagentProfile>>>,
+    mcp_manager: Option<Arc<crate::McpManager>>,
+    app_config: Option<Arc<RwLock<crate::AppConfig>>>,
 }
 
 impl SubagentTool {
@@ -51,7 +53,19 @@ impl SubagentTool {
             llm,
             event_tx: Arc::new(RwLock::new(event_tx)),
             profiles: Arc::new(RwLock::new(initial_profiles)),
+            mcp_manager: None,
+            app_config: None,
         }
+    }
+
+    pub fn with_mcp_manager(mut self, mcp: Arc<crate::McpManager>) -> Self {
+        self.mcp_manager = Some(mcp);
+        self
+    }
+
+    pub fn with_app_config(mut self, config: Arc<RwLock<crate::AppConfig>>) -> Self {
+        self.app_config = Some(config);
+        self
     }
 
     pub async fn register_profile(&self, profile: SubagentProfile) {
@@ -136,6 +150,28 @@ impl Tool for SubagentTool {
         child_tools.register(Arc::new(crate::repo_map::CodebaseMapTool::new(Arc::clone(
             child_context.repo_map(),
         ))));
+
+        // Discover and register scoped MCP tools if MCP manager is configured
+        if let Some(ref mcp) = self.mcp_manager {
+            let config = if let Some(ref cfg_lock) = self.app_config {
+                cfg_lock.read().await.clone()
+            } else {
+                crate::AppConfig::load()
+            };
+            mcp.register_scoped_tools_into_registry(
+                &mut child_tools,
+                &self.directory,
+                &config,
+                profile.allowed_mcp_servers.as_deref(),
+                profile.allowed_tools.as_deref(),
+            )
+            .await;
+        }
+
+        // Apply profile allowed_tools filter if specified
+        if let Some(ref allowed) = profile.allowed_tools {
+            child_tools.filter_by_allowed(allowed);
+        }
 
         let child_session = Arc::new(RwLock::new(Session::new(&self.directory)));
 
@@ -300,5 +336,45 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, LLMEvent::SubagentFinished { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_subagent_custom_profile_scoping() {
+        let script = vec![Ok(vec![
+            Ok(LLMEvent::TextDelta {
+                text: "Scoped analysis completed.".to_string(),
+            }),
+            Ok(LLMEvent::Finish {
+                reason: FinishReason::EndTurn,
+            }),
+        ])];
+
+        let llm = Arc::new(ScriptedLlm(Mutex::new(script.into())));
+        let dir = std::env::temp_dir();
+        let jail = PathJail::new(&dir);
+        let parent_id = SessionId::new();
+
+        let tool = SubagentTool::new(parent_id, dir, jail, llm, None);
+        let custom_profile = SubagentProfile {
+            name: "custom-scoped".to_string(),
+            display_name: "Custom Scoped".to_string(),
+            description: "Custom profile with specific tool scope".to_string(),
+            role_prompt: "You are a scoped agent.".to_string(),
+            tool_mode: SubagentToolMode::ReadOnly,
+            max_turns: 5,
+            max_tokens: Some(4000),
+            model_tier: ModelTier::Fast,
+            allowed_mcp_servers: Some(vec!["non_existent_server".to_string()]),
+            allowed_tools: Some(vec!["read_file".to_string()]),
+        };
+        tool.register_profile(custom_profile).await;
+
+        let args = json!({
+            "profile": "custom-scoped",
+            "goal": "Inspect scoped behavior",
+        });
+
+        let res = tool.execute(args).await.unwrap();
+        assert!(res.contains("Scoped analysis completed."));
     }
 }

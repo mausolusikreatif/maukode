@@ -101,6 +101,8 @@ impl SkillDefinition {
             max_turns: 15,
             max_tokens: Some(32_000),
             model_tier: ModelTier::Inherit,
+            allowed_mcp_servers: None,
+            allowed_tools: self.allowed_tools.clone(),
         }
     }
 }
