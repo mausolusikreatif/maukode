@@ -164,6 +164,17 @@ impl ServerState {
         let skill_manager = Arc::new(maukode_core::SkillManager::new());
         let plugin_manager = Arc::new(RwLock::new(maukode_core::PluginManager::new()));
 
+        // Reap sessions that were created but never received a message: a client opening a
+        // session persists an empty row immediately, and if it never talks those rows accumulate
+        // forever. Running this on startup keeps the database tidy across restarts.
+        match store.delete_empty_sessions().await {
+            Ok(removed) if removed > 0 => {
+                tracing::info!(removed, "Cleaned up empty sessions on startup");
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "Failed to clean up empty sessions on startup"),
+        }
+
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
             store: Arc::new(store),

@@ -645,6 +645,39 @@ impl SqliteSessionStore {
         Ok(deleted > 0)
     }
 
+    /// Remove every session that has no messages left in the `messages` table.
+    ///
+    /// Sessions are created (and persisted) eagerly when a client opens one, but a session the
+    /// user never actually talked to leaves an empty row behind forever. This sweeps those orphan
+    /// rows — including their audit/turn rows — and returns how many were removed. A `worktree`
+    /// is only dropped from metadata here; the on-disk checkout is torn down by the caller.
+    pub async fn delete_empty_sessions(&self) -> Result<usize> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        // A subquery keeps this independent of any bind-variable limit (SQLite caps
+        // SQLITE_MAX_VARIABLE_NUMBER, and 999 empty sessions would otherwise overflow it).
+        let empty = "NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)";
+        for table in [
+            "messages",
+            "messages_audit",
+            "session_turns",
+            "permission_audit",
+            "permission_mode_audit",
+            "compaction_audit",
+        ] {
+            tx.execute(
+                &format!(
+                    "DELETE FROM {table} WHERE session_id IN \
+                     (SELECT id FROM sessions s WHERE {empty})"
+                ),
+                [],
+            )?;
+        }
+        let removed = tx.execute(&format!("DELETE FROM sessions WHERE {empty}"), [])?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
     pub async fn audit_summary(&self, session_id: SessionId) -> Result<String> {
         let conn = self.conn.lock().await;
         let id = session_id.to_string();
@@ -1046,6 +1079,47 @@ mod tests {
             audit_after[1].text_content(),
             "Turn 1 assistant response with 500 lines of build output"
         );
+    }
+
+    #[tokio::test]
+    async fn delete_empty_sessions_removes_only_messageless_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(dir.path().join("db.sqlite")).unwrap();
+
+        // Two empty sessions (never talked to) and one with a message.
+        let empty_a = Session::new("/tmp/a");
+        let empty_b = Session::new("/tmp/b");
+        let mut talked = Session::new("/tmp/c");
+        talked.add_message(Message::user("hello"));
+
+        store.save_session(&empty_a, "p", "m").await.unwrap();
+        store.save_session(&empty_b, "p", "m").await.unwrap();
+        store.save_session(&talked, "p", "m").await.unwrap();
+        assert_eq!(store.list_all_sessions().await.unwrap().len(), 3);
+
+        let removed = store.delete_empty_sessions().await.unwrap();
+        assert_eq!(removed, 2);
+
+        let remaining = store.list_all_sessions().await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, talked.id);
+        // The talked session must still load with its message intact.
+        let loaded = store.load_session(talked.id).await.unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn delete_empty_sessions_is_a_noop_when_all_sessions_have_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(dir.path().join("db.sqlite")).unwrap();
+
+        let mut s = Session::new("/tmp");
+        s.add_message(Message::user("hi"));
+        store.save_session(&s, "p", "m").await.unwrap();
+
+        let removed = store.delete_empty_sessions().await.unwrap();
+        assert_eq!(removed, 0);
+        assert_eq!(store.list_all_sessions().await.unwrap().len(), 1);
     }
 }
 
