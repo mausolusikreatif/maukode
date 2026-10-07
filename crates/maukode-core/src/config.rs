@@ -161,7 +161,7 @@ impl Default for AppConfig {
                     id: "llmkita".to_string(),
                     name: "llm-kita".to_string(),
                     kind: ProviderKind::OpenAiCompatible,
-                    base_url: "http://127.0.0.1:9999/api/v1".to_string(),
+                    base_url: "https://api.llm-kita.com/api/v1".to_string(),
                     api_key: Some("sk-kita-a4547088ed6f55f0175227cb41964d34".to_string()),
                     default_model: Some("auto".to_string()),
                 },
