@@ -1,6 +1,6 @@
 use crate::config::McpServerConfig;
 use crate::skills::SkillManager;
-use maukode_protocol::{PluginManifest, PluginMcpServerConfig, SkillDefinition};
+use maukode_protocol::{PluginManifest, SkillDefinition};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
