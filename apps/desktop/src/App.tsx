@@ -164,8 +164,12 @@ function SessionView() {
 
                 <button type="button" data-testid="pin-active-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => togglePinSession(activeId)}><Pin className="size-3.5" fill={isPinned ? "currentColor" : "none"} />{isPinned ? "Unpin session" : "Pin session"}</button>
                 <button type="button" data-testid="archive-active-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => toggleArchiveSession(activeId)}><Archive className="size-3.5" />{isArchived ? "Restore" : "Archive"}</button>
-                <button data-testid="audit-button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => setAuditing(true)}><ShieldCheck className="size-3.5" />Audit</button>
-                <button data-testid="delete-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-destructive hover:bg-destructive/10" onClick={() => setDeleting(true)}><Trash2 className="size-3.5" />Delete</button>
+                <button type="button" data-testid="pin-active-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => togglePinSession(activeId)}><Pin className="size-3.5" fill={isPinned ? "currentColor" : "none"} />{isPinned ? "Unpin session" : "Pin session"}</button>
+                <button type="button" data-testid="archive-active-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => toggleArchiveSession(activeId)}><Archive className="size-3.5" />{isArchived ? "Restore" : "Archive"}</button>
+              </div>
+            </div>
+            <button data-testid="audit-button" className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground" title="Audit session" onClick={() => setAuditing(true)}><ShieldCheck className="size-4" /></button>
+            <button data-testid="delete-session" className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Delete session" onClick={() => setDeleting(true)}><Trash2 className="size-4" /></button>
               </div>
             </div>
           </div>
