@@ -9,6 +9,7 @@ pub mod mcp;
 pub mod memory;
 pub mod paths;
 pub mod permission;
+pub mod plugin;
 pub mod repo_map;
 pub mod runner;
 pub mod session;
@@ -34,6 +35,7 @@ pub use memory::{
     RuleSource,
 };
 pub use permission::{PermissionManager, PermissionMode};
+pub use plugin::PluginManager;
 pub use repo_map::{CodebaseMapTool, RepoMapGenerator};
 pub use runner::{RunnerConfig, SessionRunner};
 pub use session::Session;

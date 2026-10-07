@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod events;
 pub mod health;
+pub mod plugins;
 pub mod providers;
 pub mod sessions;
 pub mod settings;
@@ -130,6 +131,17 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         // Skills
         .route("/api/v1/skills", get(skills::list_skills))
         .route("/api/v1/skills/{name}", get(skills::get_skill))
+        // Plugins
+        .route("/api/v1/plugins", get(plugins::list_plugins))
+        .route("/api/v1/plugins/{name}", get(plugins::get_plugin))
+        .route(
+            "/api/v1/plugins/{name}/enable",
+            post(plugins::enable_plugin),
+        )
+        .route(
+            "/api/v1/plugins/{name}/disable",
+            post(plugins::disable_plugin),
+        )
         // Sessions
         .route(
             "/api/v1/sessions",
