@@ -1,14 +1,56 @@
 import { needsContinue } from "../api/types";
-import type { ContentPart, LLMEvent, Message, PermissionRequest, Plan, StopReason, TokenUsage } from "../api/types";
+import type {
+  ContentPart,
+  LLMEvent,
+  Message,
+  PermissionRequest,
+  Plan,
+  StopReason,
+  SubagentStatus,
+  TokenUsage,
+} from "../api/types";
 
 export type ToolStatus = "running" | "done" | "error" | "private";
+
+export type SubagentRunStatus = "running" | SubagentStatus;
+
+export interface SubagentTraceEntry {
+  timestamp: string;
+  step: number;
+  action: string;
+  tokensUsed: number;
+}
+
+export interface SubagentDetail {
+  id: string;
+  parentSessionId: string;
+  profileName: string;
+  goal: string;
+  status: SubagentRunStatus;
+  currentStep: number;
+  tokensUsed: number;
+  summary?: string;
+  trace: SubagentTraceEntry[];
+}
 
 export type ThreadItem =
   | { kind: "user"; id: string; text: string }
   | { kind: "assistant"; id: string; text: string }
   | { kind: "reasoning"; id: string; text: string }
   | { kind: "plan"; id: string; plan: Plan }
-  | { kind: "tool"; id: string; name: string; args: string; status: ToolStatus; result?: string };
+  | { kind: "tool"; id: string; name: string; args: string; status: ToolStatus; result?: string }
+  | {
+      kind: "subagent";
+      id: string;
+      subagentId: string;
+      profileName: string;
+      goal: string;
+      status: SubagentRunStatus;
+      step: number;
+      lastAction: string;
+      tokensUsed: number;
+      summary?: string;
+    };
 
 /** Transient status lines for the current turn (errors, limits). Cleared when a new turn starts. */
 export interface Notice {
@@ -29,13 +71,30 @@ export interface ThreadState {
   plan: Plan | null;
   /** Queued prompts waiting for subsequent turns. */
   queue: string[];
+  /** Subagent state map keyed by subagent ID */
+  subagents: Record<string, SubagentDetail>;
+  /** Selected subagent ID whose trace drawer is currently open, if any */
+  selectedSubagentId: string | null;
   /** Newest event sequence applied; resume the SSE stream from here. */
   lastSeq: number;
   nextId: number;
 }
 
 export function emptyThread(): ThreadState {
-  return { items: [], notices: [], running: false, pending: [], stop: null, usage: null, plan: null, queue: [], lastSeq: 0, nextId: 1 };
+  return {
+    items: [],
+    notices: [],
+    running: false,
+    pending: [],
+    stop: null,
+    usage: null,
+    plan: null,
+    queue: [],
+    subagents: {},
+    selectedSubagentId: null,
+    lastSeq: 0,
+    nextId: 1,
+  };
 }
 
 function pushItem(state: ThreadState, make: (id: string) => ThreadItem): ThreadState {
@@ -138,11 +197,141 @@ export function applyEvent(state: ThreadState, event: LLMEvent, seq?: number): T
     }
     case "finish":
     case "provider_item":
-    case "subagent_spawned":
-    case "subagent_progress":
-    case "subagent_finished":
       return next; // per-step bookkeeping; the turn is only over at `turn_stopped`
+    case "subagent_spawned": {
+      const now = nowTimestamp();
+      const detail: SubagentDetail = {
+        id: event.subagent_id,
+        parentSessionId: event.parent_session_id,
+        profileName: event.profile_name,
+        goal: event.goal,
+        status: "running",
+        currentStep: 0,
+        tokensUsed: 0,
+        trace: [
+          {
+            timestamp: now,
+            step: 0,
+            action: `Spawned subagent (${event.profile_name})`,
+            tokensUsed: 0,
+          },
+        ],
+      };
+      const subagentItem: ThreadItem = {
+        kind: "subagent",
+        id: `sa_${event.subagent_id}`,
+        subagentId: event.subagent_id,
+        profileName: event.profile_name,
+        goal: event.goal,
+        status: "running",
+        step: 0,
+        lastAction: "Initializing…",
+        tokensUsed: 0,
+      };
+      return {
+        ...next,
+        subagents: { ...next.subagents, [event.subagent_id]: detail },
+        items: [...next.items, subagentItem],
+        running: true,
+      };
+    }
+    case "subagent_progress": {
+      const existing = next.subagents[event.subagent_id];
+      const now = nowTimestamp();
+      const traceEntry: SubagentTraceEntry = {
+        timestamp: now,
+        step: event.step,
+        action: event.action,
+        tokensUsed: event.tokens_used,
+      };
+      const updatedDetail: SubagentDetail = existing
+        ? {
+            ...existing,
+            currentStep: event.step,
+            tokensUsed: event.tokens_used,
+            trace: [...existing.trace, traceEntry],
+          }
+        : {
+            id: event.subagent_id,
+            parentSessionId: "",
+            profileName: "Subagent",
+            goal: "",
+            status: "running",
+            currentStep: event.step,
+            tokensUsed: event.tokens_used,
+            trace: [traceEntry],
+          };
+      const items = next.items.map((i) =>
+        i.kind === "subagent" && i.subagentId === event.subagent_id
+          ? {
+              ...i,
+              step: event.step,
+              lastAction: event.action,
+              tokensUsed: event.tokens_used,
+            }
+          : i
+      );
+      return {
+        ...next,
+        subagents: { ...next.subagents, [event.subagent_id]: updatedDetail },
+        items,
+        running: true,
+      };
+    }
+    case "subagent_finished": {
+      const existing = next.subagents[event.subagent_id];
+      const now = nowTimestamp();
+      const traceEntry: SubagentTraceEntry = {
+        timestamp: now,
+        step: (existing?.currentStep ?? 0) + 1,
+        action: `Finished (${event.status}): ${event.summary}`,
+        tokensUsed: event.tokens_used,
+      };
+      const updatedDetail: SubagentDetail = existing
+        ? {
+            ...existing,
+            status: event.status,
+            tokensUsed: event.tokens_used,
+            summary: event.summary,
+            trace: [...existing.trace, traceEntry],
+          }
+        : {
+            id: event.subagent_id,
+            parentSessionId: "",
+            profileName: "Subagent",
+            goal: "",
+            status: event.status,
+            currentStep: 1,
+            tokensUsed: event.tokens_used,
+            summary: event.summary,
+            trace: [traceEntry],
+          };
+      const items = next.items.map((i) =>
+        i.kind === "subagent" && i.subagentId === event.subagent_id
+          ? {
+              ...i,
+              status: event.status,
+              summary: event.summary,
+              tokensUsed: event.tokens_used,
+            }
+          : i
+      );
+      return {
+        ...next,
+        subagents: { ...next.subagents, [event.subagent_id]: updatedDetail },
+        items,
+      };
+    }
   }
+}
+
+function nowTimestamp(): string {
+  const d = new Date();
+  return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`;
+}
+
+export function selectSubagent(state: ThreadState, subagentId: string | null): ThreadState {
+  return { ...state, selectedSubagentId: subagentId };
 }
 
 export function resolvePermission(state: ThreadState, requestId: string): ThreadState {
@@ -197,6 +386,8 @@ export function threadFromSnapshot(
     lastSeq: number;
     plan?: Plan | null;
     queue?: string[];
+    subagents?: Record<string, SubagentDetail>;
+    selectedSubagentId?: string | null;
   },
 ): ThreadState {
   return {
@@ -207,5 +398,7 @@ export function threadFromSnapshot(
     lastSeq: opts.lastSeq,
     plan: opts.plan ?? null,
     queue: opts.queue ?? [],
+    subagents: opts.subagents ?? {},
+    selectedSubagentId: opts.selectedSubagentId ?? null,
   };
 }

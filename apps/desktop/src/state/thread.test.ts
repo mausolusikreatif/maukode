@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { LLMEvent } from "../api/types";
-import { applyEvent, emptyThread, itemsFromMessages, resolvePermission, startTurn, type ThreadState } from "./thread";
+import {
+  applyEvent,
+  emptyThread,
+  itemsFromMessages,
+  resolvePermission,
+  selectSubagent,
+  startTurn,
+  type ThreadState,
+} from "./thread";
 
 const run = (events: LLMEvent[], from: ThreadState = emptyThread()) =>
   events.reduce((s, e, i) => applyEvent(s, e, i + 1), from);
@@ -101,5 +109,82 @@ describe("thread reducer", () => {
     s = applyEvent(s, { type: "plan_step_updated", plan_id: "p1", step_id: "s1", status: "completed" }, 3);
     expect(s.plan?.steps[0].status).toBe("completed");
     expect(s.plan?.steps[1].status).toBe("pending");
+  });
+
+  it("handles subagent lifecycle events: spawned, progress, and finished", () => {
+    let s = applyEvent(
+      emptyThread(),
+      {
+        type: "subagent_spawned",
+        subagent_id: "sub-1",
+        parent_session_id: "sess-parent",
+        profile_name: "Codebase Researcher",
+        goal: "Investigate mutex contention in store",
+      },
+      1,
+    );
+    expect(s.running).toBe(true);
+    expect(s.subagents["sub-1"]).toBeDefined();
+    expect(s.subagents["sub-1"].profileName).toBe("Codebase Researcher");
+    expect(s.subagents["sub-1"].status).toBe("running");
+    expect(s.subagents["sub-1"].trace).toHaveLength(1);
+
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0]).toMatchObject({
+      kind: "subagent",
+      subagentId: "sub-1",
+      profileName: "Codebase Researcher",
+      status: "running",
+      step: 0,
+      tokensUsed: 0,
+    });
+
+    s = applyEvent(
+      s,
+      {
+        type: "subagent_progress",
+        subagent_id: "sub-1",
+        step: 1,
+        action: "grep 'RwLock' across crates/",
+        tokens_used: 150,
+      },
+      2,
+    );
+    expect(s.subagents["sub-1"].currentStep).toBe(1);
+    expect(s.subagents["sub-1"].tokensUsed).toBe(150);
+    expect(s.subagents["sub-1"].trace).toHaveLength(2);
+    expect(s.items[0]).toMatchObject({
+      kind: "subagent",
+      step: 1,
+      lastAction: "grep 'RwLock' across crates/",
+      tokensUsed: 150,
+    });
+
+    s = applyEvent(
+      s,
+      {
+        type: "subagent_finished",
+        subagent_id: "sub-1",
+        status: "completed",
+        summary: "Found 3 contention hot spots in session runner.",
+        tokens_used: 480,
+      },
+      3,
+    );
+    expect(s.subagents["sub-1"].status).toBe("completed");
+    expect(s.subagents["sub-1"].summary).toBe("Found 3 contention hot spots in session runner.");
+    expect(s.subagents["sub-1"].tokensUsed).toBe(480);
+    expect(s.subagents["sub-1"].trace).toHaveLength(3);
+    expect(s.items[0]).toMatchObject({
+      kind: "subagent",
+      status: "completed",
+      summary: "Found 3 contention hot spots in session runner.",
+      tokensUsed: 480,
+    });
+
+    s = selectSubagent(s, "sub-1");
+    expect(s.selectedSubagentId).toBe("sub-1");
+    s = selectSubagent(s, null);
+    expect(s.selectedSubagentId).toBeNull();
   });
 });
