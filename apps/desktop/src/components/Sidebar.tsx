@@ -120,8 +120,9 @@ export function Sidebar() {
             data-testid="connection"
             className={cn(
               "dot size-2 rounded-full",
-              connection === "connected" && "bg-success",
+              connection === "online" && "bg-success",
               connection === "connecting" && "bg-warning",
+              connection === "reconnecting" && "bg-warning",
               connection === "disconnected" && "bg-destructive",
             )}
             title={connection}
