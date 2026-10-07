@@ -145,6 +145,40 @@ pub struct OpenAIClient {
     http: reqwest::Client,
 }
 
+/// How many times the initial chat-completions request is retried on
+/// transient failures (EOF/reset, 429, 5xx) before giving up.
+const MAX_SETUP_ATTEMPTS: usize = 4;
+
+/// Gateways sometimes deliver a terminal API error as a 200 SSE payload
+/// (`data: {"error": {...}}`). Surface it as a real error instead of
+/// silently stalling until the connection closes with a bare EOF.
+fn gateway_error_message(value: &serde_json::Value) -> Option<String> {
+    let err = value.get("error")?;
+    if let Some(msg) = err.as_str() {
+        if msg.is_empty() {
+            return None;
+        }
+        return Some(format!("Gateway error: {msg}"));
+    }
+    let message = err.get("message").and_then(|m| m.as_str()).unwrap_or("");
+    if message.is_empty() {
+        return None;
+    }
+    match err.get("code").and_then(|c| c.as_str()).unwrap_or("") {
+        "" => Some(format!("Gateway error: {message}")),
+        code => Some(format!("Gateway error ({code}): {message}")),
+    }
+}
+
+fn is_stream_terminator(data: &str) -> bool {
+    data.trim() == "[DONE]"
+}
+
+async fn setup_backoff(attempt: usize) {
+    let ms = (250u64 << attempt.min(4)).min(2000);
+    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+}
+
 impl OpenAIClient {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -157,6 +191,35 @@ impl OpenAIClient {
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
         self
+    }
+
+    fn chat_url(&self) -> String {
+        let base = self.base_url.trim_end_matches('/');
+        if base.ends_with("/chat/completions") {
+            base.to_string()
+        } else if base.ends_with("/v1") {
+            format!("{base}/chat/completions")
+        } else {
+            format!("{base}/v1/chat/completions")
+        }
+    }
+
+    async fn post_once(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<reqwest::Response, LLMError> {
+        let mut req_builder = self
+            .http
+            .post(url)
+            .header("content-type", "application/json")
+            .json(body);
+
+        if !self.api_key.is_empty() {
+            req_builder = req_builder.header("authorization", format!("Bearer {}", self.api_key));
+        }
+
+        Ok(req_builder.send().await?)
     }
 }
 
@@ -234,48 +297,68 @@ impl LLMClient for OpenAIClient {
             })
             .collect();
 
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "stream": true,
-            "stream_options": { "include_usage": true }
-        });
-
-        if !tools.is_empty() {
-            body["tools"] = json!(tools);
-        }
-        if let Some(temp) = request.temperature {
-            body["temperature"] = json!(temp);
-        }
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-
-        let base = self.base_url.trim_end_matches('/');
-        let url = if base.ends_with("/chat/completions") {
-            base.to_string()
-        } else if base.ends_with("/v1") {
-            format!("{base}/chat/completions")
-        } else {
-            format!("{base}/v1/chat/completions")
+        // Clones keep this callable once per setup attempt; `json!` takes
+        // ownership of interpolated values.
+        let build_body = |include_usage: bool| {
+            let mut body = json!({
+                "model": request.model.clone(),
+                "messages": messages.clone(),
+                "stream": true,
+            });
+            if include_usage {
+                body["stream_options"] = json!({ "include_usage": true });
+            }
+            if !tools.is_empty() {
+                body["tools"] = json!(tools.clone());
+            }
+            if let Some(temp) = request.temperature {
+                body["temperature"] = json!(temp);
+            }
+            if let Some(max_tokens) = request.max_tokens {
+                body["max_tokens"] = json!(max_tokens);
+            }
+            body
         };
-        let mut req_builder = self
-            .http
-            .post(&url)
-            .header("content-type", "application/json")
-            .json(&body);
 
-        if !self.api_key.is_empty() {
-            req_builder = req_builder.header("authorization", format!("Bearer {}", self.api_key));
-        }
-
-        let resp = req_builder.send().await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(LLMError::Api { status, body: text });
-        }
+        let url = self.chat_url();
+        // `stream_options.include_usage` is best-effort: gateways that reject it
+        // get one retry without it instead of a hard 400 failure.
+        let mut include_usage = true;
+        let mut setup_attempt = 0usize;
+        let resp = loop {
+            let body = build_body(include_usage);
+            match self.post_once(&url, &body).await {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        break resp;
+                    }
+                    let status = resp.status().as_u16();
+                    let text = resp.text().await.unwrap_or_default();
+                    let lower = text.to_lowercase();
+                    let mentions_stream_options =
+                        lower.contains("stream_options") || lower.contains("include_usage");
+                    if include_usage && status == 400 && mentions_stream_options {
+                        include_usage = false;
+                        continue;
+                    }
+                    let err = LLMError::Api { status, body: text };
+                    if err.is_transient() && setup_attempt + 1 < MAX_SETUP_ATTEMPTS {
+                        setup_attempt += 1;
+                        setup_backoff(setup_attempt).await;
+                        continue;
+                    }
+                    return Err(err);
+                }
+                Err(err) => {
+                    if err.is_transient() && setup_attempt + 1 < MAX_SETUP_ATTEMPTS {
+                        setup_attempt += 1;
+                        setup_backoff(setup_attempt).await;
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        };
 
         let event_source = resp.bytes_stream().eventsource();
 
@@ -286,32 +369,46 @@ impl LLMClient for OpenAIClient {
                     if let Some(event) = pending.pop_front() {
                         return Some((event, (source, state, pending)));
                     }
-                    let event = source.next().await?;
-                    let event = match event {
-                        Ok(event) => event,
-                        // Some OpenAI-compatible gateways close immediately after a valid finish
-                        // chunk instead of sending `[DONE]`. If their chunked response has no
-                        // terminator, reqwest reports that successful close as an EOF error.
-                        Err(_) if state.terminal_received => return None,
-                        Err(err) => {
+                    let event = match source.next().await {
+                        // Clean close, with or without a trailing [DONE]: end the
+                        // stream instead of reporting EOF. Several gateways just
+                        // close the connection after the final chunk.
+                        None => return None,
+                        Some(Ok(event)) => event,
+                        Some(Err(err)) => {
+                            // Trailing transport noise after a finished turn is
+                            // not a failure: some gateways close immediately
+                            // after a valid finish chunk instead of sending
+                            // `[DONE]`, and reqwest can surface that close as
+                            // an EOF error.
+                            if state.terminal_received {
+                                return None;
+                            }
                             return Some((
                                 Err(LLMError::Stream(err.to_string())),
                                 (source, state, pending),
                             ));
                         }
                     };
-                    if event.data == "[DONE]" {
+                    let data = event.data.trim();
+                    if data.is_empty() {
+                        continue;
+                    }
+                    if is_stream_terminator(data) {
                         return None;
                     }
-                    let value: serde_json::Value = match serde_json::from_str(&event.data) {
+                    let value: serde_json::Value = match serde_json::from_str(data) {
                         Ok(value) => value,
-                        Err(err) => {
-                            return Some((
-                                Err(LLMError::Stream(format!("Invalid SSE JSON: {err}"))),
-                                (source, state, pending),
-                            ));
-                        }
+                        // Lenient: gateways interleave pings and other non-JSON
+                        // payloads. Skipping keeps the turn alive instead of
+                        // failing it with "Invalid SSE JSON".
+                        Err(_) => continue,
                     };
+                    if let Some(message) = gateway_error_message(&value) {
+                        return Some((Err(LLMError::Stream(message)), (source, state, pending)));
+                    }
+                    // `consume` records `terminal_received` when a finish chunk
+                    // arrives, so EOF right after it ends the stream cleanly.
                     pending.extend(state.consume(&value));
                 }
             },
@@ -537,5 +634,191 @@ mod tests {
             [Ok(LLMEvent::ToolCallFinish { tool_call }), Ok(LLMEvent::Finish { reason: FinishReason::EndTurn })]
             if tool_call.name == "grep"
         ));
+    }
+
+    #[test]
+    fn stream_helpers_are_lenient_but_surface_gateway_errors() {
+        assert!(is_stream_terminator("[DONE]"));
+        assert!(is_stream_terminator("[DONE]  "));
+        assert!(is_stream_terminator("  [DONE]\r"));
+        assert!(!is_stream_terminator("[DONE]!"));
+        assert!(!is_stream_terminator(""));
+
+        assert!(gateway_error_message(&json!({"choices": []})).is_none());
+        assert_eq!(
+            gateway_error_message(&json!({"error": {"message": "bad model", "code": "400"}})),
+            Some("Gateway error (400): bad model".to_string())
+        );
+        assert_eq!(
+            gateway_error_message(&json!({"error": "overloaded"})),
+            Some("Gateway error: overloaded".to_string())
+        );
+
+        assert!(LLMError::Stream("EOF while streaming".into()).is_transient());
+        assert!(LLMError::Stream("connection reset by peer".into()).is_transient());
+        assert!(LLMError::Api {
+            status: 503,
+            body: String::new()
+        }
+        .is_transient());
+        assert!(LLMError::Api {
+            status: 429,
+            body: String::new()
+        }
+        .is_transient());
+        assert!(!LLMError::Api {
+            status: 400,
+            body: String::new()
+        }
+        .is_transient());
+        assert!(!LLMError::Stream("boom".into()).is_transient());
+        assert!(!LLMError::Stream("Tool call has no name".into()).is_transient());
+    }
+
+    async fn read_json_body(socket: &mut tokio::net::TcpStream) -> serde_json::Value {
+        let mut request = Vec::new();
+        let header_end = loop {
+            let mut chunk = [0; 1024];
+            let count = socket.read(&mut chunk).await.unwrap();
+            assert!(count > 0);
+            request.extend_from_slice(&chunk[..count]);
+            if let Some(offset) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+                break offset + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]).to_string();
+        let body_length: usize = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .and_then(|value| value.trim().parse().ok())
+            })
+            .unwrap();
+        while request.len() - header_end < body_length {
+            let mut chunk = [0; 1024];
+            let count = socket.read(&mut chunk).await.unwrap();
+            assert!(count > 0);
+            request.extend_from_slice(&chunk[..count]);
+        }
+        serde_json::from_slice(&request[header_end..header_end + body_length]).unwrap()
+    }
+
+    /// Gateways interleave empty / non-JSON SSE payloads and pad `[DONE]`.
+    /// None of that may fail the turn anymore.
+    #[tokio::test]
+    async fn lenient_gateway_stream_skips_garbage_and_trims_done() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = read_json_body(&mut socket).await;
+            assert_eq!(body["stream"], true);
+            let payload = "data: \n\n\
+                 data: not-json{{{\n\n\
+                 data: {\"choices\": [{\"delta\": {\"content\": \"hi\"}}]}\n\n\
+                 data: [DONE]   \n\n";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n{payload}"
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        });
+
+        let client = OpenAIClient::new("test-key").with_base_url(format!("http://{address}"));
+        let request = LLMRequest::new("test-model", vec![maukode_protocol::Message::user("hi")]);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.stream(request).await.unwrap().collect::<Vec<_>>(),
+        )
+        .await;
+        server.abort();
+        let events = result.expect("lenient stream should end cleanly");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Ok(LLMEvent::TextDelta { text }) if text == "hi")),
+            "text chunk must survive surrounding garbage, got: {events:?}"
+        );
+        assert!(
+            events.iter().all(|e| e.is_ok()),
+            "no chunk may surface as an error, got: {events:?}"
+        );
+    }
+
+    /// Gateways that reject `stream_options.include_usage` get one retry
+    /// without it instead of a hard 400 failure.
+    #[tokio::test]
+    async fn stream_options_rejection_is_retried_without_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let first = read_json_body(&mut socket).await;
+            assert!(first.get("stream_options").is_some());
+            let rejection =
+                r#"{"error":{"message":"stream_options is not supported","code":"400"}}"#;
+            let response = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{rejection}",
+                rejection.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+
+            let second = read_json_body(&mut socket).await;
+            assert!(second.get("stream_options").is_none());
+            let payload = "data: {\"choices\": [{\"delta\": {\"content\": \"ok\"}}]}\n\n\
+                 data: [DONE]\n\n";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n{payload}"
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        });
+
+        let client = OpenAIClient::new("test-key").with_base_url(format!("http://{address}"));
+        let request = LLMRequest::new("test-model", vec![maukode_protocol::Message::user("hi")]);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.stream(request).await.unwrap().collect::<Vec<_>>(),
+        )
+        .await;
+        server.abort();
+        let events = result.expect("fallback request should succeed");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Ok(LLMEvent::TextDelta { text }) if text == "ok"
+        )));
+    }
+
+    /// A gateway error delivered as a 200 SSE payload must surface as an
+    /// error (with its message) instead of stalling into a bare EOF.
+    #[tokio::test]
+    async fn sse_error_payload_surfaces_gateway_message() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = read_json_body(&mut socket).await;
+            let payload =
+                "data: {\"error\": {\"message\": \"model overloaded\", \"code\": \"529\"}}\n\n";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n{payload}"
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        });
+
+        let client = OpenAIClient::new("test-key").with_base_url(format!("http://{address}"));
+        let request = LLMRequest::new("test-model", vec![maukode_protocol::Message::user("hi")]);
+        let mut stream = client.stream(request).await.unwrap();
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+            .await
+            .expect("error payload should arrive promptly")
+            .expect("stream should yield the gateway error");
+        server.abort();
+        assert!(
+            matches!(first, Err(LLMError::Stream(msg)) if msg.contains("model overloaded")),
+            "gateway message must surface, got: {first:?}"
+        );
     }
 }
