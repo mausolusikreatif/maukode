@@ -145,10 +145,6 @@ pub struct OpenAIClient {
     http: reqwest::Client,
 }
 
-/// How many times the initial chat-completions request is retried on
-/// transient failures (EOF/reset, 429, 5xx) before giving up.
-const MAX_SETUP_ATTEMPTS: usize = 4;
-
 /// Gateways sometimes deliver a terminal API error as a 200 SSE payload
 /// (`data: {"error": {...}}`). Surface it as a real error instead of
 /// silently stalling until the connection closes with a bare EOF.
@@ -172,11 +168,6 @@ fn gateway_error_message(value: &serde_json::Value) -> Option<String> {
 
 fn is_stream_terminator(data: &str) -> bool {
     data.trim() == "[DONE]"
-}
-
-async fn setup_backoff(attempt: usize) {
-    let ms = (250u64 << attempt.min(4)).min(2000);
-    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
 }
 
 impl OpenAIClient {
@@ -322,42 +313,26 @@ impl LLMClient for OpenAIClient {
 
         let url = self.chat_url();
         // `stream_options.include_usage` is best-effort: gateways that reject it
-        // get one retry without it instead of a hard 400 failure.
+        // get one retry without it instead of a hard 400 failure. Other setup
+        // failures are NOT retried here: the agent runner owns retry policy so
+        // attempts stay bounded per step.
         let mut include_usage = true;
-        let mut setup_attempt = 0usize;
         let resp = loop {
             let body = build_body(include_usage);
-            match self.post_once(&url, &body).await {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        break resp;
-                    }
-                    let status = resp.status().as_u16();
-                    let text = resp.text().await.unwrap_or_default();
-                    let lower = text.to_lowercase();
-                    let mentions_stream_options =
-                        lower.contains("stream_options") || lower.contains("include_usage");
-                    if include_usage && status == 400 && mentions_stream_options {
-                        include_usage = false;
-                        continue;
-                    }
-                    let err = LLMError::Api { status, body: text };
-                    if err.is_transient() && setup_attempt + 1 < MAX_SETUP_ATTEMPTS {
-                        setup_attempt += 1;
-                        setup_backoff(setup_attempt).await;
-                        continue;
-                    }
-                    return Err(err);
-                }
-                Err(err) => {
-                    if err.is_transient() && setup_attempt + 1 < MAX_SETUP_ATTEMPTS {
-                        setup_attempt += 1;
-                        setup_backoff(setup_attempt).await;
-                        continue;
-                    }
-                    return Err(err);
-                }
+            let resp = self.post_once(&url, &body).await?;
+            if resp.status().is_success() {
+                break resp;
             }
+            let status = resp.status().as_u16();
+            let text = resp.text().await.unwrap_or_default();
+            let lower = text.to_lowercase();
+            let mentions_stream_options =
+                lower.contains("stream_options") || lower.contains("include_usage");
+            if include_usage && status == 400 && mentions_stream_options {
+                include_usage = false;
+                continue;
+            }
+            return Err(LLMError::Api { status, body: text });
         };
 
         let event_source = resp.bytes_stream().eventsource();
@@ -817,7 +792,7 @@ mod tests {
             .expect("stream should yield the gateway error");
         server.abort();
         assert!(
-            matches!(first, Err(LLMError::Stream(msg)) if msg.contains("model overloaded")),
+            matches!(&first, Err(LLMError::Stream(msg)) if msg.contains("model overloaded")),
             "gateway message must surface, got: {first:?}"
         );
     }
