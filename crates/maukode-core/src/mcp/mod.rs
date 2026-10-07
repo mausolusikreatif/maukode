@@ -106,17 +106,46 @@ impl McpManager {
         cwd: &Path,
         app_config: &AppConfig,
     ) {
+        self.register_scoped_tools_into_registry(registry, cwd, app_config, None, None)
+            .await;
+    }
+
+    /// Discover tools from allowed MCP servers and register matching tools dynamically
+    pub async fn register_scoped_tools_into_registry(
+        &self,
+        registry: &mut ToolRegistry,
+        cwd: &Path,
+        app_config: &AppConfig,
+        allowed_servers: Option<&[String]>,
+        allowed_tools: Option<&[String]>,
+    ) {
         let configs = Self::load_server_configs(cwd, app_config).await;
         if configs.is_empty() {
             return;
         }
 
         for (name, config) in configs {
+            if let Some(servers) = allowed_servers {
+                if !servers.iter().any(|s| s.eq_ignore_ascii_case(&name)) {
+                    continue;
+                }
+            }
+
             match self.get_or_connect(&name, &config, cwd).await {
                 Ok(client) => match client.list_tools().await {
                     Ok(tools) => {
-                        let count = tools.len();
+                        let mut registered_count = 0;
                         for t in tools {
+                            let full_tool_name = format!("mcp__{}__{}", name, t.name);
+                            if let Some(tool_filter) = allowed_tools {
+                                if !tool_filter.iter().any(|allowed| {
+                                    allowed.eq_ignore_ascii_case(&t.name)
+                                        || allowed.eq_ignore_ascii_case(&full_tool_name)
+                                }) {
+                                    continue;
+                                }
+                            }
+
                             let tool = McpTool::new(
                                 &name,
                                 t.name,
@@ -125,8 +154,11 @@ impl McpManager {
                                 Arc::clone(&client),
                             );
                             registry.register(Arc::new(tool));
+                            registered_count += 1;
                         }
-                        tracing::info!("Registered {count} tools from MCP server '{name}'");
+                        tracing::info!(
+                            "Registered {registered_count} tools from MCP server '{name}'"
+                        );
                     }
                     Err(e) => {
                         tracing::warn!("Failed to list tools from MCP server '{name}': {e}");

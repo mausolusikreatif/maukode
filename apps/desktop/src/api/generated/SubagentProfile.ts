@@ -2,4 +2,4 @@
 import type { ModelTier } from "./ModelTier";
 import type { SubagentToolMode } from "./SubagentToolMode";
 
-export type SubagentProfile = { name: string, display_name: string, description: string, role_prompt: string, tool_mode: SubagentToolMode, max_turns: number, max_tokens: number | null, model_tier: ModelTier, };
+export type SubagentProfile = { name: string, display_name: string, description: string, role_prompt: string, tool_mode: SubagentToolMode, max_turns: number, max_tokens: number | null, model_tier: ModelTier, allowed_mcp_servers: Array<string> | null, allowed_tools: Array<string> | null, };

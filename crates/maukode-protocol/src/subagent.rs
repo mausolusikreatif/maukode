@@ -38,6 +38,10 @@ pub struct SubagentProfile {
     pub max_turns: usize,
     pub max_tokens: Option<usize>,
     pub model_tier: ModelTier,
+    #[serde(default)]
+    pub allowed_mcp_servers: Option<Vec<String>>,
+    #[serde(default)]
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 impl SubagentProfile {
@@ -51,6 +55,15 @@ impl SubagentProfile {
             max_turns: 15,
             max_tokens: Some(32_000),
             model_tier: ModelTier::Fast,
+            allowed_mcp_servers: None,
+            allowed_tools: Some(vec![
+                "read_file".to_string(),
+                "glob".to_string(),
+                "grep".to_string(),
+                "fetch_url".to_string(),
+                "web_search".to_string(),
+                "codebase_map".to_string(),
+            ]),
         }
     }
 
@@ -64,6 +77,13 @@ impl SubagentProfile {
             max_turns: 10,
             max_tokens: Some(24_000),
             model_tier: ModelTier::Inherit,
+            allowed_mcp_servers: None,
+            allowed_tools: Some(vec![
+                "read_file".to_string(),
+                "glob".to_string(),
+                "grep".to_string(),
+                "codebase_map".to_string(),
+            ]),
         }
     }
 }

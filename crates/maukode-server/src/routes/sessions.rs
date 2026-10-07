@@ -489,13 +489,17 @@ fn start_turn(
         tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
             context.repo_map(),
         ))));
-        tool_registry.register(Arc::new(SubagentTool::new(
-            id,
-            session_dir.clone(),
-            jail,
-            Arc::clone(&llm_client),
-            Some(llm_tx.clone()),
-        )));
+        tool_registry.register(Arc::new(
+            SubagentTool::new(
+                id,
+                session_dir.clone(),
+                jail,
+                Arc::clone(&llm_client),
+                Some(llm_tx.clone()),
+            )
+            .with_mcp_manager(Arc::clone(&state.mcp_manager))
+            .with_app_config(Arc::clone(&state.config)),
+        ));
         let tools = Arc::new(tool_registry);
 
         let mut runner = SessionRunner::new(
