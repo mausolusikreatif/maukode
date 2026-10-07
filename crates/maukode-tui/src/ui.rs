@@ -24,9 +24,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .min(6)
         .min(size.height.saturating_sub(6))
         .max(1);
-    let plan_height = if app.show_plan && app.active_plan.is_some() {
-        let count = app.active_plan.as_ref().unwrap().steps.len();
-        (count as u16 + 2).min(7).max(3)
+    let plan_height = if let (true, Some(plan)) = (app.show_plan, app.active_plan.as_ref()) {
+        (plan.steps.len() as u16 + 2).clamp(3, 7)
     } else {
         0
     };
