@@ -150,6 +150,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         let anthropic_key = std::env::var("ANTHROPIC_API_KEY").ok();
         let openai_key = std::env::var("OPENAI_API_KEY").ok();
+        let llmkita_key = std::env::var("LLMKITA_API_KEY").ok();
 
         let mut cfg = Self {
             active_provider: "llmkita".to_string(),
@@ -162,7 +163,7 @@ impl Default for AppConfig {
                     name: "llm-kita".to_string(),
                     kind: ProviderKind::OpenAiCompatible,
                     base_url: "https://api.llm-kita.com/api/v1".to_string(),
-                    api_key: Some("sk-kita-a4547088ed6f55f0175227cb41964d34".to_string()),
+                    api_key: llmkita_key,
                     default_model: Some("auto".to_string()),
                 },
                 ProviderConfig {
@@ -248,10 +249,15 @@ impl AppConfig {
                     // Update keys from env if missing
                     for p in &mut cfg.providers {
                         if p.api_key.is_none() {
-                            if p.id == "anthropic" {
-                                p.api_key = std::env::var("ANTHROPIC_API_KEY").ok();
-                            } else if p.id == "openai" {
-                                p.api_key = std::env::var("OPENAI_API_KEY").ok();
+                            let variable = match p.id.as_str() {
+                                "anthropic" => Some("ANTHROPIC_API_KEY"),
+                                "openai" => Some("OPENAI_API_KEY"),
+                                "openrouter" => Some("OPENROUTER_API_KEY"),
+                                "llmkita" => Some("LLMKITA_API_KEY"),
+                                _ => None,
+                            };
+                            if let Some(variable) = variable {
+                                p.api_key = std::env::var(variable).ok();
                             }
                         }
                     }

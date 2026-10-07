@@ -111,9 +111,10 @@ The `"security"` block governs sandbox boundaries and human-in-the-loop approval
 
 MauKode does not load `.env` files automatically. Provider credentials are read from
 process environment variables only when the corresponding provider is configured;
-values in the explicit JSON configuration take precedence over environment fallbacks.
-Environment variables are inherited by local subprocesses, including Bash tools and
-configured MCP servers, but are never intentionally inserted into model messages.
+values in the explicit JSON configuration take precedence over environment fallbacks. The built-in
+providers use `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and
+`LLMKITA_API_KEY`. Environment variables are inherited by local subprocesses, including Bash tools
+and configured MCP servers, but are never intentionally inserted into model messages.
 
 In the default `ask` permission mode, commands that appear to inspect secret-bearing
 files or variables require approval. This includes `.env*`, credential/secret files,

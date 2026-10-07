@@ -1,5 +1,9 @@
 # Terminal UI (TUI) Roadmap & Subagent Experience 🖥️
 
+> Implementation status was last audited on October 7, 2026 in
+> [ROADMAP_AUDIT.md](./ROADMAP_AUDIT.md). In particular, M1, M4, and M5 are implemented even though
+> the milestone table below is retained as the original execution plan.
+
 This document details the roadmap and implementation phases for **MauKode TUI** (`crates/maukode-tui`), our terminal-native, keyboard-first developer interface built with [Ratatui](https://ratatui.rs) and [crossterm](https://github.com/crossterm-rs/crossterm).
 
 ---
