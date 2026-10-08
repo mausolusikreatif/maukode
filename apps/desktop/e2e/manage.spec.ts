@@ -76,8 +76,9 @@ test("desktop notifications fire for background agents, not for what you're watc
   await script(approvalTurn);
   await connectAndCreate(page, repo);
   await openSettings(page);
-  await page.getByTestId("notifications-toggle").check();
-  await expect(page.getByTestId("notifications-toggle")).toBeChecked();
+  await page.getByTestId("notifications-toggle").click();
+  // Radix Switch renders a button with aria-checked; wait for it to reflect the on state.
+  await expect(page.getByTestId("notifications-toggle")).toHaveAttribute("data-state", "checked");
 
   // A different agent, started behind the UI's back.
   const bg = await api("POST", "/api/v1/sessions", { directory: repo, provider: "mock", model: "m", title: "Background job" });
