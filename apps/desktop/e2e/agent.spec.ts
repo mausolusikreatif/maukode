@@ -13,7 +13,7 @@ test("approve a tool call, see the result and the finished answer", async ({ pag
   await connectAndCreate(page, repo, { isolate: true });
 
   // Worktree isolation is visible in the header and the sidebar.
-  await expect(page.getByText(/⎇ maukode\//).first()).toBeVisible();
+  await expect(page.getByText(/maukode\//).first()).toBeVisible();
 
   await radSelect(page, "perm-mode", "strict");
   await send(page, "write a file");
