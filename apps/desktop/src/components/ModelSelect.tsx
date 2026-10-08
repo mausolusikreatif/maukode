@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../state/store";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 export function ModelSelect({
   sessionId,
@@ -32,28 +33,34 @@ export function ModelSelect({
   }, [client, currentProvider]);
 
   if (models.length > 0) {
+    // Include the current model in the list even if the provider hasn't listed it.
+    const allModels =
+      currentModel && !models.includes(currentModel) ? [...models, currentModel] : models;
+
     return (
-      <select
-        className={`model-select ${className ?? ""}`.trim()}
+      <Select
         value={currentModel ?? ""}
-        title={`Provider: ${currentProvider ?? "default"} · Model`}
-        onChange={(e) => {
-          if (e.target.value) {
-            void setSessionModel(sessionId, e.target.value, currentProvider ?? undefined);
+        onValueChange={(value) => {
+          if (value) {
+            void setSessionModel(sessionId, value, currentProvider ?? undefined);
           }
         }}
       >
-        {models.map((m) => (
-          <option key={m} value={m}>
-            {currentProvider}/{m}
-          </option>
-        ))}
-        {currentModel && !models.includes(currentModel) && (
-          <option value={currentModel}>
-            {currentProvider}/{currentModel}
-          </option>
-        )}
-      </select>
+        <SelectTrigger
+          data-testid="model-select"
+          className={`model-select h-8 w-auto gap-1 rounded-md border border-border bg-card/60 px-2.5 py-1 text-xs ${className ?? ""}`.trim()}
+          title={`Provider: ${currentProvider ?? "default"} · Model`}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {allModels.map((m) => (
+            <SelectItem key={m} value={m}>
+              {currentProvider}/{m}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     );
   }
 

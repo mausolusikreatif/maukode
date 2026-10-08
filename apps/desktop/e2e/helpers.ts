@@ -71,7 +71,7 @@ export async function createSession(page: Page, dir: string, opts: { isolate?: b
   await page.getByTestId("dir-input").fill(dir);
   const iso = page.getByTestId("isolation-checkbox");
   if ((await iso.isChecked()) !== (opts.isolate ?? false)) await iso.click();
-  await page.getByTestId("provider-select").selectOption("mock");
+  await radSelect(page, "provider-select", "mock");
   await page.getByTestId("model-input").fill("m");
   await page.getByTestId("create-session").click();
   await expect(page.getByTestId("composer-input")).toBeVisible();
@@ -86,4 +86,40 @@ export async function send(page: Page, prompt: string) {
 export async function runTurn(page: Page, prompt: string) {
   await send(page, prompt);
   await expect(page.getByTestId("run-state")).toHaveText("idle");
+}
+
+/**
+ * Maps a permission-mode value to its visible label in the UI.
+ * The Composer and Settings page use slightly different labels, so we match by
+ * a substring that is unique to each mode across both label sets.
+ */
+const MODE_LABELS: Record<string, string> = {
+  ask: "Ask",
+  strict: "everything",
+  review: "Review",
+  trust: "Trust",
+};
+
+/**
+ * Selects an option from a Radix Select component identified by its trigger
+ * testid. Radix renders a portal with `[role="option"]` elements, so native
+ * `selectOption()` does not work — we click the trigger, then the option.
+ *
+ * For permission-mode selects the value ("strict", "ask"…) is mapped to the
+ * human-readable label; for other selects (e.g. provider) the value itself is
+ * used as a case-insensitive match.
+ */
+export async function radSelect(page: Page, triggerTestid: string, value: string) {
+  const label = MODE_LABELS[value] ?? value;
+  await page.getByTestId(triggerTestid).click();
+  await page.getByRole("option", { name: new RegExp(label, "i") }).click();
+}
+
+/**
+ * Asserts that a Radix Select trigger shows the expected value. Radix does not
+ * expose the underlying value on the trigger, so we check the visible text.
+ */
+export async function expectRadValue(page: Page, triggerTestid: string, value: string) {
+  const label = MODE_LABELS[value] ?? value;
+  await expect(page.getByTestId(triggerTestid)).toContainText(label, { ignoreCase: true });
 }
