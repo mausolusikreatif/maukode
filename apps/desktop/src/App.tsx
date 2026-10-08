@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Folder, GitBranch, MoreHorizontal, PanelLeft, Pin, Archive, ShieldCheck, Trash2 } from "lucide-react";
 import { AuditDialog } from "./components/AuditDialog";
 import { CommandPalette } from "./components/CommandPalette";
@@ -16,6 +17,13 @@ import { Sidebar } from "./components/Sidebar";
 import { Thread } from "./components/Thread";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu";
 import { getBootstrap, openInEditor, revealInFileManager, type Bootstrap } from "./platform";
 import { baseName } from "./state/format";
 import { useApp } from "./state/store";
@@ -89,7 +97,6 @@ function SessionView() {
   } = useApp();
   const [deleting, setDeleting] = useState(false);
   const [auditing, setAuditing] = useState(false);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const view = useApp((s) => s.view);
   if (!activeId) return view === "settings" ? <SettingsPage /> : <Dashboard />;
   const thread = threads[activeId] ?? emptyThread();
@@ -98,19 +105,13 @@ function SessionView() {
   const handleOpenEditor = async (editor: "code" | "cursor") => {
     if (!currentDir) return;
     const res = await openInEditor(currentDir, editor);
-    if (!res.success && res.error) {
-      setToastMsg(res.error);
-      setTimeout(() => setToastMsg(null), 4000);
-    }
+    if (!res.success && res.error) toast.error(res.error);
   };
 
   const handleReveal = async () => {
     if (!currentDir) return;
     const res = await revealInFileManager(currentDir);
-    if (!res.success && res.error) {
-      setToastMsg(res.error);
-      setTimeout(() => setToastMsg(null), 4000);
-    }
+    if (!res.success && res.error) toast.error(res.error);
   };
 
   const isPinned = pinnedSessionIds.includes(activeId);
@@ -153,19 +154,38 @@ function SessionView() {
             <Button data-testid="toggle-review" variant={review.open ? "default" : "outline"} size="sm" className="h-8" onClick={() => void toggleReview()}>
               Changes{review.files.length > 0 ? ` (${review.files.length})` : ""}
             </Button>
-            <div className="group relative">
-              <button type="button" aria-label="Session actions" title="Session actions" className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground">
-                <MoreHorizontal className="size-4" />
-              </button>
-              <div className="pointer-events-none absolute right-0 top-9 z-20 w-40 rounded-lg border border-border bg-popover p-1 opacity-0 shadow-xl transition group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100">
-                <button type="button" data-testid="open-vscode" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => void handleOpenEditor("code")}><Folder className="size-3.5" />Open in VS Code</button>
-                <button type="button" data-testid="open-cursor" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => void handleOpenEditor("cursor")}><Folder className="size-3.5" />Open in Cursor</button>
-                <button type="button" data-testid="reveal-file-manager" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => void handleReveal()}><Folder className="size-3.5" />Reveal folder</button>
-
-                <button type="button" data-testid="pin-active-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => togglePinSession(activeId)}><Pin className="size-3.5" fill={isPinned ? "currentColor" : "none"} />{isPinned ? "Unpin session" : "Pin session"}</button>
-                <button type="button" data-testid="archive-active-session" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => toggleArchiveSession(activeId)}><Archive className="size-3.5" />{isArchived ? "Restore" : "Archive"}</button>
-              </div>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Session actions"
+                  title="Session actions"
+                  data-testid="session-actions"
+                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem data-testid="open-vscode" onClick={() => void handleOpenEditor("code")}>
+                  <Folder className="size-3.5" /> Open in VS Code
+                </DropdownMenuItem>
+                <DropdownMenuItem data-testid="open-cursor" onClick={() => void handleOpenEditor("cursor")}>
+                  <Folder className="size-3.5" /> Open in Cursor
+                </DropdownMenuItem>
+                <DropdownMenuItem data-testid="reveal-file-manager" onClick={() => void handleReveal()}>
+                  <Folder className="size-3.5" /> Reveal folder
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem data-testid="pin-active-session" onClick={() => togglePinSession(activeId)}>
+                  <Pin className="size-3.5" fill={isPinned ? "currentColor" : "none"} />
+                  {isPinned ? "Unpin session" : "Pin session"}
+                </DropdownMenuItem>
+                <DropdownMenuItem data-testid="archive-active-session" onClick={() => toggleArchiveSession(activeId)}>
+                  <Archive className="size-3.5" /> {isArchived ? "Restore" : "Archive"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <button data-testid="audit-button" className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground" title="Audit session" onClick={() => setAuditing(true)}><ShieldCheck className="size-4" /></button>
             <button data-testid="delete-session" className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Delete session" onClick={() => setDeleting(true)}><Trash2 className="size-4" /></button>
           </div>
@@ -177,14 +197,6 @@ function SessionView() {
       {review.open && <ReviewPanel running={thread.running} />}
       {auditing && <AuditDialog sessionId={activeId} onClose={() => setAuditing(false)} />}
       {deleting && <DeleteDialog sessionId={activeId} onClose={() => setDeleting(false)} />}
-      {toastMsg && (
-        <div
-          className="fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-md border border-destructive/40 bg-popover px-4 py-2 text-sm text-destructive shadow-lg"
-          data-testid="toast-message"
-        >
-          {toastMsg}
-        </div>
-      )}
     </div>
   );
 }

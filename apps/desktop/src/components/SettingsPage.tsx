@@ -15,6 +15,7 @@ import { useApp } from "../state/store";
 import { cn } from "@/lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { useConfirm } from "./ui/confirm";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import {
@@ -40,6 +41,12 @@ const PROVIDER_KINDS: { value: ProviderKind; label: string }[] = [
 ];
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Narrow a possibly-null client with a friendly message instead of a bare non-null assertion. */
+function requireClient(client: ReturnType<typeof useApp.getState>["client"]) {
+  if (!client) throw new Error("Not connected to a MauKode daemon.");
+  return client;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Shared config fetchers                                             */
@@ -151,7 +158,7 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
   const saveMode = async (mode: PermissionMode) => {
     setMsg(null);
     try {
-      await client!.setDefaultPermissionMode(mode);
+      await requireClient(client).setDefaultPermissionMode(mode);
       await config.refreshSecurity();
       setMsg({ level: "ok", text: "Default approval mode saved." });
     } catch (e) {
@@ -163,7 +170,7 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
     setMsg(null);
     touched.current = true;
     try {
-      const updated = await client!.setAgentConfig({
+      const updated = await requireClient(client).setAgentConfig({
         max_steps: Number(steps),
         max_tokens: Number(tokens),
       });
@@ -289,7 +296,7 @@ function ProviderEditor({
 
   const save = async () => {
     try {
-      await client!.upsertProvider({
+      await requireClient(client).upsertProvider({
         id: f.id.trim(),
         name: f.name.trim() || f.id.trim(),
         kind: f.kind,
@@ -381,6 +388,7 @@ function ProviderEditor({
 
 function ProvidersSection() {
   const { providers, client, refreshProviders } = useApp();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -409,7 +417,7 @@ function ProvidersSection() {
           </div>
           <div className="flex gap-2">
             {p.id !== providers.active_provider && (
-              <Button data-testid="make-default" variant="outline" size="sm" onClick={() => void run(() => client!.setActiveProvider(p.id))}>Make default</Button>
+              <Button data-testid="make-default" variant="outline" size="sm" onClick={() => void run(() => requireClient(client).setActiveProvider(p.id))}>Make default</Button>
             )}
             {p.kind !== "chat_gpt" && (
               <Button data-testid="edit-provider" variant="outline" size="sm" onClick={() => setEditing(p.id)}>Edit</Button>
@@ -419,7 +427,15 @@ function ProvidersSection() {
                 data-testid="delete-provider"
                 className="text-xs text-destructive hover:underline"
                 onClick={() => {
-                  if (confirm(`Remove provider “${p.name}”?`)) void run(() => client!.deleteProvider(p.id));
+                  void (async () => {
+                    const ok = await confirm({
+                      title: `Remove provider "${p.name}"?`,
+                      description: "Its stored API key is deleted with it. This cannot be undone.",
+                      confirmLabel: "Remove",
+                      destructive: true,
+                    });
+                    if (ok) void run(() => requireClient(client).deleteProvider(p.id));
+                  })();
                 }}
               >
                 Remove
@@ -457,6 +473,7 @@ type Login =
 
 function ChatGptSection() {
   const { client, refreshProviders } = useApp();
+  const confirm = useConfirm();
   const [status, setStatus] = useState<ChatGptStatus | null>(null);
   const [login, setLogin] = useState<Login>({ phase: "idle" });
   const [msg, setMsg] = useState<string | null>(null);
@@ -464,7 +481,7 @@ function ChatGptSection() {
 
   const refresh = useCallback(async () => {
     try {
-      setStatus(await client!.chatgptStatus());
+      setStatus(await requireClient(client).chatgptStatus());
     } catch (e) {
       setMsg(errText(e));
     }
@@ -482,7 +499,7 @@ function ChatGptSection() {
     const { attemptId } = login;
     const timer = setInterval(async () => {
       try {
-        const s: ChatGptLoginStatus = await client!.chatgptLoginStatus(attemptId);
+        const s: ChatGptLoginStatus = await requireClient(client).chatgptLoginStatus(attemptId);
         if (s.state === "pending") return;
         attempt.current = null;
         if (s.state === "succeeded") {
@@ -505,7 +522,7 @@ function ChatGptSection() {
     setMsg(null);
     try {
       const inShell = !!window.__TAURI_INTERNALS__;
-      const started = await client!.chatgptLogin({ newAccount, openBrowser: inShell });
+      const started = await requireClient(client).chatgptLogin({ newAccount, openBrowser: inShell });
       attempt.current = started.attempt_id;
       if (!inShell) window.open(started.url, "_blank", "noopener");
       setLogin({ phase: "waiting", attemptId: started.attempt_id, url: started.url });
@@ -515,7 +532,7 @@ function ChatGptSection() {
   };
 
   const cancel = async () => {
-    if (login.phase === "waiting") await client!.chatgptCancelLogin(login.attemptId).catch(() => undefined);
+    if (login.phase === "waiting") await requireClient(client).chatgptCancelLogin(login.attemptId).catch(() => undefined);
     attempt.current = null;
     setLogin({ phase: "idle" });
   };
@@ -542,7 +559,7 @@ function ChatGptSection() {
           {status.accounts.map((a) => (
             <li key={a.client_id} className="flex items-center gap-2">
               {a.email} {a.active ? <Badge variant="primary" className="badge run">active</Badge> : (
-                <button className="text-primary hover:underline" onClick={async () => { await client!.chatgptUseAccount(a.client_id); await refresh(); }}>Use</button>
+                <button className="text-primary hover:underline" onClick={async () => { await requireClient(client).chatgptUseAccount(a.client_id); await refresh(); }}>Use</button>
               )}
             </li>
           ))}
@@ -576,9 +593,15 @@ function ChatGptSection() {
             data-testid="chatgpt-signout"
             className="text-xs text-destructive hover:underline"
             onClick={async () => {
-              if (!confirm("Sign out of ChatGPT? This revokes the session on OpenAI’s side.")) return;
+              const ok = await confirm({
+                title: "Sign out of ChatGPT?",
+                description: "This revokes the session on the provider side.",
+                confirmLabel: "Sign out",
+                destructive: true,
+              });
+              if (!ok) return;
               try {
-                await client!.chatgptLogout();
+                await requireClient(client).chatgptLogout();
                 await refresh();
               } catch (e) {
                 setMsg(errText(e));
@@ -605,7 +628,7 @@ function PluginsSection() {
 
   const refresh = useCallback(async () => {
     try {
-      const [p, s] = await Promise.all([client!.plugins(), client!.skills()]);
+      const [p, s] = await Promise.all([requireClient(client).plugins(), requireClient(client).skills()]);
       setPlugins(p);
       setSkills(s);
       setError(null);
@@ -620,8 +643,8 @@ function PluginsSection() {
 
   const togglePlugin = async (name: string, enable: boolean) => {
     try {
-      if (enable) await client!.enablePlugin(name);
-      else await client!.disablePlugin(name);
+      if (enable) await requireClient(client).enablePlugin(name);
+      else await requireClient(client).disablePlugin(name);
       await refresh();
     } catch (e) {
       setError(errText(e));
