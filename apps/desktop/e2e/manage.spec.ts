@@ -34,7 +34,7 @@ test("the overview surfaces what needs attention across agents", async ({ page }
   const repo = gitRepo();
   await script(approvalTurn);
   await connectAndCreate(page, repo);
-  await radSelect(page, "perm-mode", "strict");
+  await page.getByTestId("perm-mode").selectOption("strict");
   await send(page, "overview task alpha");
   await expect(page.getByTestId("permission-card")).toBeVisible();
 
@@ -76,8 +76,9 @@ test("desktop notifications fire for background agents, not for what you're watc
   await script(approvalTurn);
   await connectAndCreate(page, repo);
   await openSettings(page);
-  await page.getByTestId("notifications-toggle").check();
-  await expect(page.getByTestId("notifications-toggle")).toBeChecked();
+  await page.getByTestId("notifications-toggle").click();
+  // Radix Switch renders a button with aria-checked; wait for it to reflect the on state.
+  await expect(page.getByTestId("notifications-toggle")).toHaveAttribute("data-state", "checked");
 
   // A different agent, started behind the UI's back.
   const bg = await api("POST", "/api/v1/sessions", { directory: repo, provider: "mock", model: "m", title: "Background job" });
@@ -98,7 +99,7 @@ test("settings: default approval mode and agent limits persist across reloads", 
   await connectAndCreate(page, repo);
   try {
     await openSettings(page);
-    await radSelect(page, "default-mode", "strict");
+    await radSelect(page, "default-mode", "Ask for everything");
     await expect(page.getByTestId("settings-msg")).toContainText("Default approval mode saved");
 
     await page.getByTestId("max-steps").fill("7");
@@ -113,7 +114,7 @@ test("settings: default approval mode and agent limits persist across reloads", 
 
     await page.reload();
     await openSettings(page);
-    await expectRadValue(page, "default-mode", "strict");
+    await expectRadValue(page, "default-mode", "Ask for everything");
     await expect(page.getByTestId("max-steps")).toHaveValue("7");
     await expect(page.getByTestId("max-tokens")).toHaveValue("2048");
   } finally {
@@ -212,7 +213,7 @@ test("the audit trail lists approval decisions for a session", async ({ page }) 
   const repo = gitRepo();
   await script(approvalTurn);
   await connectAndCreate(page, repo);
-  await radSelect(page, "perm-mode", "strict");
+  await page.getByTestId("perm-mode").selectOption("strict");
   await send(page, "audited work");
   await page.getByTestId("perm-allow-once").click();
   await expect(page.getByTestId("run-state")).toHaveText("idle");

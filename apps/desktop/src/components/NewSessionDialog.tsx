@@ -12,7 +12,6 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Modal } from "./ui/modal";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void; initialDir?: string | null }) {
   const { client, providers, sessions, createSession } = useApp();
@@ -148,19 +147,20 @@ export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void;
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="provider-select">Provider</Label>
-          <Select value={provider} onValueChange={setProvider}>
-            <SelectTrigger id="provider-select" data-testid="provider-select" className="h-9 w-full">
-              <SelectValue placeholder="Select provider…" />
-            </SelectTrigger>
-            <SelectContent>
-              {providers?.providers.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                  {p.has_api_key || p.kind === "chat_gpt" ? "" : " (no key)"}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <select
+            id="provider-select"
+            data-testid="provider-select"
+            className="h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+          >
+            {providers?.providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.has_api_key || p.kind === "chat_gpt" ? "" : " (no key)"}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col gap-1.5">

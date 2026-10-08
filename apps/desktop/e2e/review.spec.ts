@@ -139,7 +139,7 @@ test("deleting a worktree session can keep or discard its branch", async ({ page
 
   await createSession(page, repo, { isolate: true });
   await runTurn(page, "second");
-  const branchTwo = (await page.getByText(/maukode\//).first().textContent())!.match(/maukode\/\S+/)?.[0] ?? "";
+  const branchTwo = (await page.getByText(/⎇ maukode\//).first().textContent())!.replace(/.*⎇\s*/, "").split(" ")[0];
   await page.getByTestId("delete-session").click();
   await page.getByTestId("delete-branch").check();
   await page.getByTestId("delete-confirm").click();

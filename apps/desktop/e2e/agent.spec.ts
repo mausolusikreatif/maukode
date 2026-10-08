@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { api, connectAndCreate, finish, gatewayRequests, gitRepo, radSelect, script, send, text, toolCall } from "./helpers";
+import { api, connectAndCreate, finish, gatewayRequests, gitRepo, script, send, text, toolCall } from "./helpers";
 
 test("approve a tool call, see the result and the finished answer", async ({ page }) => {
   const repo = gitRepo();
@@ -13,9 +13,9 @@ test("approve a tool call, see the result and the finished answer", async ({ pag
   await connectAndCreate(page, repo, { isolate: true });
 
   // Worktree isolation is visible in the header and the sidebar.
-  await expect(page.getByText(/maukode\//).first()).toBeVisible();
+  await expect(page.getByText(/⎇ maukode\//).first()).toBeVisible();
 
-  await radSelect(page, "perm-mode", "strict");
+  await page.getByTestId("perm-mode").selectOption("strict");
   await send(page, "write a file");
 
   await expect(page.getByTestId("permission-card")).toBeVisible();
@@ -89,7 +89,7 @@ test("Stop works while an approval prompt is open", async ({ page }) => {
     { sse: [text("ok"), finish("stop")] },
   ]);
   await connectAndCreate(page, repo);
-  await radSelect(page, "perm-mode", "strict");
+  await page.getByTestId("perm-mode").selectOption("strict");
   await send(page, "go");
   await expect(page.getByTestId("permission-card")).toBeVisible();
 
@@ -110,7 +110,7 @@ test("reloading mid-turn restores the pending approval", async ({ page }) => {
     { sse: [text("saved"), finish("stop")] },
   ]);
   await connectAndCreate(page, repo);
-  await radSelect(page, "perm-mode", "strict");
+  await page.getByTestId("perm-mode").selectOption("strict");
   await send(page, "go");
   await expect(page.getByTestId("permission-card")).toBeVisible();
 

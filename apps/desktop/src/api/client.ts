@@ -17,11 +17,13 @@ import type {
   ModelsListResponse,
   PermissionDecision,
   PermissionMode,
+  PluginManifest,
   ProviderConfig,
   ProvidersListResponse,
   SecuritySettings,
   SessionDetailResponse,
   SessionListItem,
+  SkillDefinition,
   UndoResponse,
   WorktreeStatus,
 } from "./types";
@@ -185,6 +187,18 @@ export class ApiClient {
   }
   mcp() {
     return this.request<McpListResponse>("GET", "/api/v1/mcp");
+  }
+  plugins() {
+    return this.request<PluginManifest[]>("GET", "/api/v1/plugins");
+  }
+  enablePlugin(name: string) {
+    return this.request<PluginManifest>("POST", `/api/v1/plugins/${enc(name)}/enable`);
+  }
+  disablePlugin(name: string) {
+    return this.request<PluginManifest>("POST", `/api/v1/plugins/${enc(name)}/disable`);
+  }
+  skills() {
+    return this.request<SkillDefinition[]>("GET", "/api/v1/skills");
   }
   chatgptStatus() {
     return this.request<ChatGptStatus>("GET", "/api/v1/auth/chatgpt");

@@ -5,8 +5,10 @@ import type {
   ChatGptStatus,
   McpListResponse,
   PermissionMode,
+  PluginManifest,
   ProviderKind,
   SecuritySettings,
+  SkillDefinition,
 } from "../api/types";
 import { notificationsSupported } from "../state/notify";
 import { useApp } from "../state/store";
@@ -15,7 +17,14 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import { Switch } from "./ui/switch";
 
 const MODES: { value: PermissionMode; label: string }[] = [
   { value: "ask", label: "Ask for risky actions" },
@@ -24,7 +33,55 @@ const MODES: { value: PermissionMode; label: string }[] = [
   { value: "trust", label: "Trust (no prompts)" },
 ];
 
+const PROVIDER_KINDS: { value: ProviderKind; label: string }[] = [
+  { value: "open_ai_compatible", label: "OpenAI-compatible" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "chat_gpt", label: "ChatGPT (Sign in with ChatGPT)" },
+];
+
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/* ------------------------------------------------------------------ */
+/*  Shared config fetchers                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Cache a single in-flight security + agent config fetch so multiple sections
+ * don't duplicate the same HTTP request on mount.
+ */
+function useSharedConfig() {
+  const client = useApp((s) => s.client);
+  const [security, setSecurity] = useState<SecuritySettings | null>(null);
+  const [agent, setAgent] = useState<AgentConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([client?.security(), client?.agentConfig()])
+      .then(([sec, agt]) => {
+        if (cancelled) return;
+        if (sec) setSecurity(sec);
+        if (agt) setAgent(agt);
+      })
+      .catch(() => undefined)
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const refreshSecurity = useCallback(async () => {
+    const sec = await client?.security();
+    if (sec) setSecurity(sec);
+  }, [client]);
+
+  return { security, agent, loading, refreshSecurity, setAgent };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Small reusable building blocks                                     */
+/* ------------------------------------------------------------------ */
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
@@ -38,30 +95,81 @@ function Section({ id, title, children }: { id: string; title: string; children:
   );
 }
 
-function GeneralSection() {
+function LoadingRow({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <span className="inline-block size-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+      {label}
+    </div>
+  );
+}
+
+function Notice({ level, text }: { level: "ok" | "error"; text: string }) {
+  return (
+    <div
+      data-testid="settings-msg"
+      className={cn(
+        "notice rounded-md border px-3 py-2 text-sm",
+        level === "ok"
+          ? "border-success/40 bg-success/10 text-success"
+          : "border-destructive/40 bg-destructive/10 text-destructive",
+        level === "ok" ? "ok" : "error",
+      )}
+    >
+      {text}
+    </div>
+  );
+}
+
+function InlineError({ text }: { text: string }) {
+  return (
+    <div className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      {text}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  General section                                                    */
+/* ------------------------------------------------------------------ */
+
+function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig> }) {
   const { client, notificationsOn, setNotifications } = useApp();
-  const [security, setSecurity] = useState<SecuritySettings | null>(null);
-  const [agent, setAgent] = useState<AgentConfig | null>(null);
+  const { security, agent, loading } = config;
   const [steps, setSteps] = useState("");
   const [tokens, setTokens] = useState("");
   const [msg, setMsg] = useState<{ level: "ok" | "error"; text: string } | null>(null);
 
+  // Don't let a late config response clobber what the user already typed.
+  const touched = useRef(false);
   useEffect(() => {
-    void client?.security().then(setSecurity).catch(() => undefined);
-    void client
-      ?.agentConfig()
-      .then((a) => {
-        setAgent(a);
-        setSteps(String(a.max_steps));
-        setTokens(String(a.max_tokens));
-      })
-      .catch(() => undefined);
-  }, [client]);
+    if (!agent || touched.current) return;
+    setSteps(String(agent.max_steps));
+    setTokens(String(agent.max_tokens));
+  }, [agent]);
+
+  const saveMode = async (mode: PermissionMode) => {
+    setMsg(null);
+    try {
+      await client!.setDefaultPermissionMode(mode);
+      await config.refreshSecurity();
+      setMsg({ level: "ok", text: "Default approval mode saved." });
+    } catch (e) {
+      setMsg({ level: "error", text: errText(e) });
+    }
+  };
 
   const saveLimits = async () => {
+    setMsg(null);
+    touched.current = true;
     try {
-      const saved = await client!.setAgentConfig({ max_steps: Number(steps), max_tokens: Number(tokens) });
-      setAgent(saved);
+      const updated = await client!.setAgentConfig({
+        max_steps: Number(steps),
+        max_tokens: Number(tokens),
+      });
+      config.setAgent(updated);
+      setSteps(String(updated.max_steps));
+      setTokens(String(updated.max_tokens));
       setMsg({ level: "ok", text: "Limits saved." });
     } catch (e) {
       setMsg({ level: "error", text: errText(e) });
@@ -70,27 +178,15 @@ function GeneralSection() {
 
   return (
     <Section id="general" title="General">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="default-mode">Approval mode for new sessions</Label>
+      {/* Default permission mode */}
+      <div className="space-y-1.5">
+        <Label>Default approval mode</Label>
         <Select
-          value={security?.permission_mode ?? undefined}
-          disabled={!security}
-          onValueChange={async (m) => {
-            const mode = m as PermissionMode;
-            setSecurity((s) => (s ? { ...s, permission_mode: mode } : s));
-            try {
-              await client!.setDefaultPermissionMode(mode);
-              setMsg({ level: "ok", text: "Default approval mode saved." });
-            } catch (err) {
-              setMsg({ level: "error", text: errText(err) });
-            }
-          }}
+          value={security?.permission_mode}
+          onValueChange={(v) => void saveMode(v as PermissionMode)}
+          disabled={loading || !security}
         >
-          <SelectTrigger
-            id="default-mode"
-            data-testid="default-mode"
-            className="h-9 w-72"
-          >
+          <SelectTrigger data-testid="default-mode" className="w-64">
             <SelectValue placeholder="Select mode…" />
           </SelectTrigger>
           <SelectContent>
@@ -104,8 +200,9 @@ function GeneralSection() {
         <span className="text-xs text-muted-foreground">Existing sessions keep their own mode.</span>
       </div>
 
+      {/* Agent limits */}
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1.5">
+        <div className="space-y-1.5">
           <Label htmlFor="max-steps">Max steps per turn</Label>
           <Input
             id="max-steps"
@@ -116,11 +213,15 @@ function GeneralSection() {
             value={steps}
             disabled={!agent}
             className="w-32"
-            onChange={(e) => setSteps(e.target.value)}
+            onChange={(e) => {
+              touched.current = true;
+              setSteps(e.target.value);
+            }}
           />
+          <span className="block text-xs text-muted-foreground">Range: 1–200</span>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="max-tokens">Max output tokens</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="max-tokens">Max tokens per turn</Label>
           <Input
             id="max-tokens"
             data-testid="max-tokens"
@@ -129,55 +230,40 @@ function GeneralSection() {
             max={200000}
             value={tokens}
             disabled={!agent}
-            className="w-36"
-            onChange={(e) => setTokens(e.target.value)}
+            className="w-32"
+            onChange={(e) => {
+              touched.current = true;
+              setTokens(e.target.value);
+            }}
           />
+          <span className="block text-xs text-muted-foreground">Range: 1–200 000</span>
         </div>
-        <Button
-          data-testid="save-limits"
-          variant="secondary"
-          disabled={!agent || (Number(steps) === agent.max_steps && Number(tokens) === agent.max_tokens)}
-          onClick={() => void saveLimits()}
-        >
+        <Button data-testid="save-limits" size="sm" disabled={!agent} onClick={() => void saveLimits()}>
           Save limits
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">
-        If your model rejects large outputs, lower the token limit; raise the step limit for long tasks.
-      </p>
 
-      <label className="check flex items-center gap-2 text-sm">
-        <input
+      {/* Notifications */}
+      <label className="flex items-center gap-3 text-sm">
+        <Switch
           data-testid="notifications-toggle"
-          type="checkbox"
-          className="size-4 accent-[var(--primary)]"
           checked={notificationsOn}
+          onCheckedChange={(checked) => void setNotifications(checked)}
           disabled={!notificationsSupported()}
-          onChange={async (e) => {
-            const ok = await setNotifications(e.target.checked);
-            if (e.target.checked && !ok) setMsg({ level: "error", text: "Notifications were not allowed by the system." });
-          }}
         />
         Desktop notifications when an agent needs approval or finishes
         {!notificationsSupported() && <span className="text-muted-foreground"> — not supported here</span>}
       </label>
-      {msg && (
-        <div
-          data-testid="settings-msg"
-          className={cn(
-            "notice rounded-md border px-3 py-2 text-sm",
-            msg.level === "ok"
-              ? "border-success/40 bg-success/10 text-success"
-              : "border-destructive/40 bg-destructive/10 text-destructive",
-            msg.level === "ok" ? "ok" : "error",
-          )}
-        >
-          {msg.text}
-        </div>
-      )}
+
+      {loading && <LoadingRow label="Loading config…" />}
+      {msg && <Notice level={msg.level} text={msg.text} />}
     </Section>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  Providers section                                                  */
+/* ------------------------------------------------------------------ */
 
 interface ProviderForm {
   id: string;
@@ -234,22 +320,25 @@ function ProviderEditor({
         </div>
       )}
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="pf-name">Name</Label>
-        <Input id="pf-name" data-testid="pf-name" value={f.name} onChange={(e) => set("name", e.target.value)} />
+        <Label htmlFor="pf-name">Display name</Label>
+        <Input id="pf-name" data-testid="pf-name" value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. OpenRouter" />
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="pf-kind">Kind</Label>
         <Select
           value={f.kind}
-          disabled={!isNew}
           onValueChange={(v) => set("kind", v as ProviderKind)}
+          disabled={!isNew}
         >
-          <SelectTrigger id="pf-kind" data-testid="pf-kind" className="h-9 w-72">
-            <SelectValue />
+          <SelectTrigger id="pf-kind" data-testid="pf-kind" className="w-full">
+            <SelectValue placeholder="Select kind…" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="open_ai_compatible">OpenAI-compatible</SelectItem>
-            <SelectItem value="anthropic">Anthropic</SelectItem>
+            {PROVIDER_KINDS.map((k) => (
+              <SelectItem key={k.value} value={k.value}>
+                {k.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -262,17 +351,26 @@ function ProviderEditor({
         <Input id="pf-model" data-testid="pf-model" value={f.default_model} onChange={(e) => set("default_model", e.target.value)} />
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="pf-key">
-          API key <span className="text-muted-foreground">{isNew ? "" : "(leave blank to keep the stored key)"}</span>
-        </Label>
-        <Input id="pf-key" data-testid="pf-key" type="password" autoComplete="off" value={f.api_key} onChange={(e) => set("api_key", e.target.value)} />
+        <Label htmlFor="pf-key">API key {isNew ? "" : "(leave blank to keep)"}</Label>
+        <Input
+          id="pf-key"
+          data-testid="pf-key"
+          type="password"
+          value={f.api_key}
+          onChange={(e) => set("api_key", e.target.value)}
+          placeholder={isNew ? "sk-…" : "••••••••"}
+        />
       </div>
       {!isNew && (
-        <label className="check flex items-center gap-2 text-sm">
-          <input type="checkbox" className="size-4 accent-[var(--primary)]" checked={f.removeKey} onChange={(e) => set("removeKey", e.target.checked)} /> Remove the stored key
+        <label className="flex items-center gap-3 text-sm">
+          <Switch
+            checked={f.removeKey}
+            onCheckedChange={(checked) => set("removeKey", checked)}
+          />
+          Remove the stored key
         </label>
       )}
-      {error && <div className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+      {error && <InlineError text={error} />}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onDone}>Cancel</Button>
         <Button data-testid="pf-save" size="sm" type="submit">Save</Button>
@@ -337,7 +435,7 @@ function ProvidersSection() {
           )}
         </div>
       ))}
-      {msg && <div data-testid="providers-msg" className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{msg}</div>}
+      {msg && <div data-testid="providers-msg"><InlineError text={msg} /></div>}
       {editing === "new" ? (
         <ProviderEditor isNew initial={blankForm()} onDone={() => setEditing(null)} />
       ) : (
@@ -346,6 +444,10 @@ function ProvidersSection() {
     </Section>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  ChatGPT section                                                    */
+/* ------------------------------------------------------------------ */
 
 type Login =
   | { phase: "idle" }
@@ -456,8 +558,8 @@ function ChatGptSection() {
           <Button data-testid="chatgpt-cancel" variant="outline" size="sm" onClick={() => void cancel()}>Cancel</Button>
         </div>
       )}
-      {login.phase === "failed" && <div data-testid="chatgpt-error" className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">Sign-in failed: {login.error}</div>}
-      {msg && <div className="notice error rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{msg}</div>}
+      {login.phase === "failed" && <div data-testid="chatgpt-error"><InlineError text={`Sign-in failed: ${login.error}`} /></div>}
+      {msg && <InlineError text={msg} />}
 
       <div className="flex items-center gap-2">
         <Button
@@ -491,43 +593,180 @@ function ChatGptSection() {
   );
 }
 
-function ReadOnlySection() {
+/* ------------------------------------------------------------------ */
+/*  Plugins & Skills section                                           */
+/* ------------------------------------------------------------------ */
+
+function PluginsSection() {
   const client = useApp((s) => s.client);
-  const [mcp, setMcp] = useState<McpListResponse | null>(null);
-  const [security, setSecurity] = useState<SecuritySettings | null>(null);
+  const [plugins, setPlugins] = useState<PluginManifest[] | null>(null);
+  const [skills, setSkills] = useState<SkillDefinition[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [p, s] = await Promise.all([client!.plugins(), client!.skills()]);
+      setPlugins(p);
+      setSkills(s);
+      setError(null);
+    } catch (e) {
+      setError(errText(e));
+    }
+  }, [client]);
+
   useEffect(() => {
-    void client?.mcp().then(setMcp).catch(() => undefined);
-    void client?.security().then(setSecurity).catch(() => undefined);
+    void refresh();
+  }, [refresh]);
+
+  const togglePlugin = async (name: string, enable: boolean) => {
+    try {
+      if (enable) await client!.enablePlugin(name);
+      else await client!.disablePlugin(name);
+      await refresh();
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
+
+  const pluginCount = plugins?.length ?? 0;
+  const skillCount = skills?.length ?? 0;
+
+  return (
+    <Section id="plugins" title="Plugins & Skills">
+      <p className="text-xs text-muted-foreground">
+        Plugins bundle skills, MCP servers, and rules. Skills are reusable prompt-templates the agent can invoke.
+        Toggle plugins on or off; skills and MCP servers defined by a disabled plugin are not loaded.
+      </p>
+
+      {error && <InlineError text={error} />}
+
+      {plugins === null && skills === null ? (
+        <LoadingRow label="Loading plugins…" />
+      ) : pluginCount === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No plugins configured. Add plugins to <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs">.maukode/plugins/</code> in your project or home directory.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {plugins?.map((p) => (
+            <div
+              key={p.name}
+              data-testid="plugin-row"
+              className="space-y-1 rounded-lg border border-border bg-background/30 p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <strong className="text-sm">{p.name}</strong>
+                  <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs">v{p.version}</code>
+                  {p.is_enabled ? (
+                    <Badge variant="primary" className="badge run">enabled</Badge>
+                  ) : (
+                    <Badge variant="default" className="badge">disabled</Badge>
+                  )}
+                </div>
+                <Switch
+                  data-testid={`plugin-toggle-${p.name}`}
+                  checked={p.is_enabled}
+                  onCheckedChange={(checked) => void togglePlugin(p.name, checked)}
+                />
+              </div>
+              {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
+              {p.author && <p className="text-xs text-muted-foreground">by {p.author}</p>}
+              {(p.skills.length > 0 || Object.keys(p.mcp_servers).length > 0 || p.rules.length > 0) && (
+                <ul className="plain ml-2 space-y-0.5 text-xs text-muted-foreground">
+                  {p.skills.length > 0 && <li>{p.skills.length} skill{p.skills.length > 1 ? "s" : ""}</li>}
+                  {Object.keys(p.mcp_servers).length > 0 && <li>{Object.keys(p.mcp_servers).length} MCP server{Object.keys(p.mcp_servers).length > 1 ? "s" : ""}</li>}
+                  {p.rules.length > 0 && <li>{p.rules.length} rule{p.rules.length > 1 ? "s" : ""}</li>}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {skillCount > 0 && (
+        <details className="rounded-lg border border-border bg-background/20 p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            {skillCount} skill{skillCount > 1 ? "s" : ""} available
+          </summary>
+          <ul className="plain mt-2 space-y-1 text-xs text-muted-foreground">
+            {skills?.map((s) => (
+              <li key={s.name}>
+                <strong className="text-foreground">{s.name}</strong>
+                {s.is_built_in && <Badge variant="default" className="ml-1 text-[10px]">built-in</Badge>}
+                {s.run_as_subagent && <Badge variant="default" className="ml-1 text-[10px]">subagent</Badge>}
+                {s.description && <> — {s.description}</>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </Section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Read-only MCP & Security section                                   */
+/* ------------------------------------------------------------------ */
+
+function ReadOnlySection({ config }: { config: ReturnType<typeof useSharedConfig> }) {
+  const client = useApp((s) => s.client);
+  const { security } = config;
+  const [mcp, setMcp] = useState<McpListResponse | null>(null);
+  const [mcpLoading, setMcpLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMcpLoading(true);
+    void client
+      ?.mcp()
+      .then(setMcp)
+      .catch(() => undefined)
+      .finally(() => !cancelled && setMcpLoading(false));
+    return () => {
+      cancelled = true;
+    };
   }, [client]);
 
   return (
     <>
       <Section id="mcp" title="MCP servers">
         <p className="text-xs text-muted-foreground">Read-only. Servers start when an agent first uses them (listing never starts one); they run commands, so they are configured in the config file (<code>mcpServers</code>) or a project’s <code>.maukode/mcp.json</code>.</p>
-        {mcp?.servers.length === 0 && <p className="text-sm text-muted-foreground">None configured.</p>}
-        {mcp?.servers.map((s) => (
-          <div key={s.name} className="provider-row space-y-1 rounded-lg border border-border bg-background/30 p-3">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <strong>{s.name}</strong> <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs">{s.command}</code>{" "}
-              <Badge variant="outline">{s.status === "not_started" ? "not started" : s.status}</Badge>
+        {mcpLoading ? (
+          <LoadingRow label="Loading MCP servers…" />
+        ) : mcp?.servers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">None configured.</p>
+        ) : (
+          mcp?.servers.map((s) => (
+            <div key={s.name} className="rounded-lg border border-border bg-background/30 p-3 text-sm">
+              <div className="flex items-center gap-2">
+                <strong>{s.name}</strong>
+                {s.status === "running" ? <Badge variant="primary" className="badge run">running</Badge> : <Badge variant="default" className="badge">{s.status}</Badge>}
+              </div>
+              <code className="mt-1 block font-mono text-xs text-muted-foreground">{s.command}</code>
             </div>
-            <div className="text-xs text-muted-foreground">{s.tools.length} tool{s.tools.length === 1 ? "" : "s"}{s.error && <> · {s.error}</>}</div>
-          </div>
-        ))}
+          ))
+        )}
       </Section>
       <Section id="security" title="Security">
         <p className="text-xs text-muted-foreground">Read-only: edit these in the config file and restart the daemon.</p>
-        {security && (
+        {security ? (
           <ul className="plain space-y-1 text-sm">
             <li>Restrict file tools to the project directory: <strong>{security.jail_path_traversal ? "on" : "off"}</strong></li>
             <li>Extra allowed paths: {security.allowed_external_paths.length ? security.allowed_external_paths.join(", ") : "none"}</li>
             <li>Commands that never ask: {security.bash_whitelist.length ? <code className="font-mono">{security.bash_whitelist.join(", ")}</code> : "none"}</li>
           </ul>
+        ) : (
+          <LoadingRow label="Loading security config…" />
         )}
       </Section>
     </>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  Connection section                                                 */
+/* ------------------------------------------------------------------ */
 
 function ConnectionSection() {
   const { client, disconnect } = useApp();
@@ -541,16 +780,22 @@ function ConnectionSection() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Page                                                               */
+/* ------------------------------------------------------------------ */
+
 export function SettingsPage() {
+  const config = useSharedConfig();
   return (
     <main data-testid="settings" className="settings scrollbar-thin flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
       </div>
-      <GeneralSection />
+      <GeneralSection config={config} />
       <ProvidersSection />
       <ChatGptSection />
-      <ReadOnlySection />
+      <PluginsSection />
+      <ReadOnlySection config={config} />
       <ConnectionSection />
     </main>
   );

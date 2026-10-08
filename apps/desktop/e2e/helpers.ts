@@ -71,7 +71,7 @@ export async function createSession(page: Page, dir: string, opts: { isolate?: b
   await page.getByTestId("dir-input").fill(dir);
   const iso = page.getByTestId("isolation-checkbox");
   if ((await iso.isChecked()) !== (opts.isolate ?? false)) await iso.click();
-  await radSelect(page, "provider-select", "mock");
+  await page.getByTestId("provider-select").selectOption("mock");
   await page.getByTestId("model-input").fill("m");
   await page.getByTestId("create-session").click();
   await expect(page.getByTestId("composer-input")).toBeVisible();
@@ -88,38 +88,24 @@ export async function runTurn(page: Page, prompt: string) {
   await expect(page.getByTestId("run-state")).toHaveText("idle");
 }
 
-/**
- * Maps a permission-mode value to its visible label in the UI.
- * The Composer and Settings page use slightly different labels, so we match by
- * a substring that is unique to each mode across both label sets.
- */
-const MODE_LABELS: Record<string, string> = {
-  ask: "Ask",
-  strict: "everything",
-  review: "Review",
-  trust: "Trust",
-};
+/* ------------------------------------------------------------------ */
+/*  Radix Select helpers                                               */
+/* ------------------------------------------------------------------ */
 
 /**
- * Selects an option from a Radix Select component identified by its trigger
- * testid. Radix renders a portal with `[role="option"]` elements, so native
- * `selectOption()` does not work — we click the trigger, then the option.
- *
- * For permission-mode selects the value ("strict", "ask"…) is mapped to the
- * human-readable label; for other selects (e.g. provider) the value itself is
- * used as a case-insensitive match.
+ * Open a Radix Select (identified by its trigger test-id) and pick the option
+ * whose visible text or data-value matches `value`.
  */
-export async function radSelect(page: Page, triggerTestid: string, value: string) {
-  const label = MODE_LABELS[value] ?? value;
-  await page.getByTestId(triggerTestid).click();
-  await page.getByRole("option", { name: new RegExp(label, "i") }).click();
+export async function radSelect(page: Page, triggerTestId: string, value: string) {
+  const trigger = page.getByTestId(triggerTestId);
+  await trigger.click();
+  // Radix renders options as role="option"; match by text content.
+  const option = page.getByRole("option", { name: value, exact: false });
+  await option.click();
 }
 
-/**
- * Asserts that a Radix Select trigger shows the expected value. Radix does not
- * expose the underlying value on the trigger, so we check the visible text.
- */
-export async function expectRadValue(page: Page, triggerTestid: string, value: string) {
-  const label = MODE_LABELS[value] ?? value;
-  await expect(page.getByTestId(triggerTestid)).toContainText(label, { ignoreCase: true });
+/** Assert the current value shown in a Radix Select trigger. */
+export async function expectRadValue(page: Page, triggerTestId: string, expected: string) {
+  const trigger = page.getByTestId(triggerTestId);
+  await expect(trigger).toContainText(expected);
 }
