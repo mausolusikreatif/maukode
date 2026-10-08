@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Code2, FileText, Folder, GitBranch, Plus } from "lucide-react";
 import type { PermissionMode } from "../api/types";
 import { useApp } from "../state/store";
 import { cn } from "@/lib/utils";
 import { ModelSelect } from "./ModelSelect";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import {
   buildAutocompleteItems,
   chipIcon,
@@ -39,27 +47,45 @@ function ModeSelect({ sessionId }: { sessionId: string }) {
     };
   }, [client, sessionId]);
 
+  if (!mode) {
+    return (
+      <button
+        type="button"
+        disabled
+        data-testid="perm-mode"
+        className="composer-select perm-mode-select inline-flex h-8 w-auto items-center gap-1 rounded-md border border-border bg-card/60 px-2.5 py-1 text-xs opacity-50"
+      >
+        <span className="text-muted-foreground">Mode…</span>
+      </button>
+    );
+  }
+
   return (
-    <select
-      data-testid="perm-mode"
-      className="composer-select perm-mode-select"
+    <Select
       value={mode}
-      disabled={!mode}
-      title="Session permission mode"
-      onChange={(e) => {
-        const next = e.target.value as PermissionMode;
-        setMode(next);
+      onValueChange={(next) => {
+        const m = next as PermissionMode;
+        setMode(m);
         if (client && sessionId) {
-          void client.setPermissionMode(next, sessionId);
+          void client.setPermissionMode(m, sessionId);
         }
       }}
     >
-      {PERMISSION_MODES.map((m) => (
-        <option key={m.value} value={m.value}>
-          {m.label}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger
+        data-testid="perm-mode"
+        className="composer-select perm-mode-select h-8 w-auto gap-1 rounded-md border border-border bg-card/60 px-2.5 py-1 text-xs"
+        title="Session permission mode"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {PERMISSION_MODES.map((m) => (
+          <SelectItem key={m.value} value={m.value}>
+            {m.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -70,7 +96,6 @@ export function Composer({ running }: { running: boolean }) {
   const [autocompleteQuery, setAutocompleteQuery] = useState("");
   const [autocompleteMode, setAutocompleteMode] = useState<"all" | "file" | "folder" | "symbol">("all");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [codebase, setCodebase] = useState<ParsedCodebase>({ files: [], folders: [], symbols: [] });
 
   const composerRef = useRef<HTMLDivElement>(null);
@@ -111,12 +136,11 @@ export function Composer({ running }: { running: boolean }) {
     };
   }, [client, activeId]);
 
-  // Close menus when clicking outside
+  // Close autocomplete when clicking outside the composer
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (composerRef.current && !composerRef.current.contains(e.target as Node)) {
         setAutocompleteOpen(false);
-        setAttachMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -216,7 +240,6 @@ export function Composer({ running }: { running: boolean }) {
   };
 
   const openPickerMode = (mode: "file" | "folder" | "symbol") => {
-    setAttachMenuOpen(false);
     setAutocompleteMode(mode);
     setAutocompleteQuery("");
     setAutocompleteOpen(true);
@@ -227,7 +250,6 @@ export function Composer({ running }: { running: boolean }) {
     setText("");
     setChips([]);
     setAutocompleteOpen(false);
-    setAttachMenuOpen(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -335,7 +357,7 @@ export function Composer({ running }: { running: boolean }) {
       {autocompleteOpen && (
         <div
           ref={autocompleteListRef}
-          className="composer-autocomplete absolute bottom-full left-4 z-40 mb-2 w-[min(36rem,80vw)] overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
+          className="composer-autocomplete absolute bottom-full left-4 z-40 mb-2 w-[min(36rem,80vw)] animate-in fade-in-0 zoom-in-95 overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
           data-testid="composer-autocomplete"
         >
           <div className="autocomplete-header flex items-center justify-between border-b border-border px-3 py-1.5 text-xs">
@@ -444,65 +466,56 @@ export function Composer({ running }: { running: boolean }) {
       <div className="composer-footer mt-2 flex items-center justify-between gap-3">
         <div className="composer-footer-left flex items-center gap-2">
           {/* Attach Button & Dropdown */}
-          <div className="attach-menu-wrap relative">
-            <button
-              type="button"
-              className="attach-btn rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
-              data-testid="attach-button"
-              onClick={() => setAttachMenuOpen((o) => !o)}
-              title="Add context reference (@file, @folder, @git-diff, @symbol)"
-            >
-              ＋ Attach
-            </button>
-            {attachMenuOpen && (
-              <div
-                className="attach-dropdown absolute bottom-full left-0 z-40 mb-1 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-xl"
-                data-testid="attach-dropdown"
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="attach-btn inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
+                data-testid="attach-button"
+                title="Add context reference (@file, @folder, @git-diff, @symbol)"
               >
-                <button
-                  type="button"
-                  className="attach-dropdown-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
-                  onClick={() => openPickerMode("file")}
-                >
-                  <span className="item-icon">📄</span>
-                  <span>Attach File…</span>
-                </button>
-                <button
-                  type="button"
-                  className="attach-dropdown-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
-                  onClick={() => openPickerMode("folder")}
-                >
-                  <span className="item-icon">📁</span>
-                  <span>Attach Folder…</span>
-                </button>
-                <button
-                  type="button"
-                  className="attach-dropdown-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
-                  onClick={() => {
-                    addChip({
-                      id: `diff-${Date.now()}`,
-                      kind: "diff",
-                      value: "git-diff",
-                      label: "@git-diff",
-                      detail: review.files.length > 0 ? `${review.files.length} changed files` : undefined,
-                    });
-                    setAttachMenuOpen(false);
-                  }}
-                >
-                  <span className="item-icon">⎇</span>
-                  <span>Current Git Diff</span>
-                </button>
-                <button
-                  type="button"
-                  className="attach-dropdown-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
-                  onClick={() => openPickerMode("symbol")}
-                >
-                  <span className="item-icon">◈</span>
-                  <span>Code Symbol…</span>
-                </button>
-              </div>
-            )}
-          </div>
+                <Plus className="size-3" />
+                Attach
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              side="top"
+              sideOffset={4}
+              className="w-48"
+            >
+              <DropdownMenuItem
+                data-testid="attach-dropdown"
+                onClick={() => openPickerMode("file")}
+              >
+                <FileText className="size-4" />
+                Attach File…
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openPickerMode("folder")}>
+                <Folder className="size-4" />
+                Attach Folder…
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  addChip({
+                    id: `diff-${Date.now()}`,
+                    kind: "diff",
+                    value: "git-diff",
+                    label: "@git-diff",
+                    detail:
+                      review.files.length > 0 ? `${review.files.length} changed files` : undefined,
+                  });
+                }}
+              >
+                <GitBranch className="size-4" />
+                Current Git Diff
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openPickerMode("symbol")}>
+                <Code2 className="size-4" />
+                Code Symbol…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Environment / Branch Capability Indicator */}
           <span
@@ -512,7 +525,8 @@ export function Composer({ running }: { running: boolean }) {
             }`}
           >
             <span className="env-dot size-1.5 rounded-full bg-success" />
-            <span className="env-label font-mono">{meta?.branch ? `⎇ ${meta.branch}` : "Local"}</span>
+            <GitBranch className="size-3" />
+            <span className="env-label font-mono">{meta?.branch ?? "Local"}</span>
           </span>
 
           {/* Model Selector in Composer Footer */}

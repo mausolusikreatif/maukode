@@ -34,7 +34,7 @@ test("the overview surfaces what needs attention across agents", async ({ page }
   const repo = gitRepo();
   await script(approvalTurn);
   await connectAndCreate(page, repo);
-  await page.getByTestId("perm-mode").selectOption("strict");
+  await radSelect(page, "perm-mode", "strict");
   await send(page, "overview task alpha");
   await expect(page.getByTestId("permission-card")).toBeVisible();
 
@@ -99,7 +99,7 @@ test("settings: default approval mode and agent limits persist across reloads", 
   await connectAndCreate(page, repo);
   try {
     await openSettings(page);
-    await radSelect(page, "default-mode", "Ask for everything");
+    await radSelect(page, "default-mode", "strict");
     await expect(page.getByTestId("settings-msg")).toContainText("Default approval mode saved");
 
     await page.getByTestId("max-steps").fill("7");
@@ -114,7 +114,7 @@ test("settings: default approval mode and agent limits persist across reloads", 
 
     await page.reload();
     await openSettings(page);
-    await expectRadValue(page, "default-mode", "Ask for everything");
+    await expectRadValue(page, "default-mode", "strict");
     await expect(page.getByTestId("max-steps")).toHaveValue("7");
     await expect(page.getByTestId("max-tokens")).toHaveValue("2048");
   } finally {
@@ -213,7 +213,7 @@ test("the audit trail lists approval decisions for a session", async ({ page }) 
   const repo = gitRepo();
   await script(approvalTurn);
   await connectAndCreate(page, repo);
-  await page.getByTestId("perm-mode").selectOption("strict");
+  await radSelect(page, "perm-mode", "strict");
   await send(page, "audited work");
   await page.getByTestId("perm-allow-once").click();
   await expect(page.getByTestId("run-state")).toHaveText("idle");
