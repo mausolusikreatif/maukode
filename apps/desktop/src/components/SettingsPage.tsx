@@ -15,6 +15,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 const MODES: { value: PermissionMode; label: string }[] = [
   { value: "ask", label: "Ask for risky actions" },
@@ -71,29 +72,35 @@ function GeneralSection() {
     <Section id="general" title="General">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="default-mode">Approval mode for new sessions</Label>
-        <select
-          id="default-mode"
-          data-testid="default-mode"
-          className="h-9 w-72 rounded-md border border-input bg-background/60 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-          value={security?.permission_mode ?? ""}
+        <Select
+          value={security?.permission_mode ?? undefined}
           disabled={!security}
-          onChange={async (e) => {
-            const m = e.target.value as PermissionMode;
-            setSecurity((s) => (s ? { ...s, permission_mode: m } : s));
+          onValueChange={async (m) => {
+            const mode = m as PermissionMode;
+            setSecurity((s) => (s ? { ...s, permission_mode: mode } : s));
             try {
-              await client!.setDefaultPermissionMode(m);
+              await client!.setDefaultPermissionMode(mode);
               setMsg({ level: "ok", text: "Default approval mode saved." });
             } catch (err) {
               setMsg({ level: "error", text: errText(err) });
             }
           }}
         >
-          {MODES.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            id="default-mode"
+            data-testid="default-mode"
+            className="h-9 w-72"
+          >
+            <SelectValue placeholder="Select mode…" />
+          </SelectTrigger>
+          <SelectContent>
+            {MODES.map((m) => (
+              <SelectItem key={m.value} value={m.value}>
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <span className="text-xs text-muted-foreground">Existing sessions keep their own mode.</span>
       </div>
 
@@ -232,17 +239,19 @@ function ProviderEditor({
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="pf-kind">Kind</Label>
-        <select
-          id="pf-kind"
-          data-testid="pf-kind"
-          className="h-9 w-72 rounded-md border border-input bg-background/60 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+        <Select
           value={f.kind}
           disabled={!isNew}
-          onChange={(e) => set("kind", e.target.value as ProviderKind)}
+          onValueChange={(v) => set("kind", v as ProviderKind)}
         >
-          <option value="open_ai_compatible">OpenAI-compatible</option>
-          <option value="anthropic">Anthropic</option>
-        </select>
+          <SelectTrigger id="pf-kind" data-testid="pf-kind" className="h-9 w-72">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="open_ai_compatible">OpenAI-compatible</SelectItem>
+            <SelectItem value="anthropic">Anthropic</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="pf-base-url">Base URL</Label>

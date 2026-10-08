@@ -9,6 +9,7 @@ import {
   Plus,
   Search,
   Settings2,
+  Trash2,
 } from "lucide-react";
 import { baseName, shortAgo } from "../state/format";
 import {
@@ -410,54 +411,50 @@ export function Sidebar() {
 
       {contextMenu && (
         <div
-          className="session-context-menu fixed z-50 min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-xl"
+          className="session-context-menu fixed z-50 min-w-[180px] animate-in fade-in-0 zoom-in-95 overflow-hidden rounded-lg border border-border bg-popover p-1 text-sm text-popover-foreground shadow-xl"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           role="menu"
         >
           <button
             role="menuitem"
             data-testid="context-menu-pin"
-            className="context-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent"
+            className="context-menu-item relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-accent focus:bg-accent focus:text-accent-foreground"
             onClick={() => {
               togglePinSession(contextMenu.sessionId);
               setContextMenu(null);
             }}
           >
-            <span className="context-icon text-muted-foreground">
-              <Pin className="size-3.5" fill={pinnedSet.has(contextMenu.sessionId) ? "currentColor" : "none"} />
-            </span>
+            <Pin className="size-4 shrink-0" fill={pinnedSet.has(contextMenu.sessionId) ? "currentColor" : "none"} />
             <span>{pinnedSet.has(contextMenu.sessionId) ? "Unpin session" : "Pin to top"}</span>
           </button>
           <button
             role="menuitem"
             data-testid="context-menu-archive"
-            className="context-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent"
+            className="context-menu-item relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-accent focus:bg-accent focus:text-accent-foreground"
             onClick={() => {
               toggleArchiveSession(contextMenu.sessionId);
               setContextMenu(null);
             }}
           >
-            <span className="context-icon text-muted-foreground">
-              {archivedSet.has(contextMenu.sessionId) ? (
-                <ArchiveRestore className="size-3.5" />
-              ) : (
-                <Archive className="size-3.5" />
-              )}
-            </span>
+            {archivedSet.has(contextMenu.sessionId) ? (
+              <ArchiveRestore className="size-4 shrink-0" />
+            ) : (
+              <Archive className="size-4 shrink-0" />
+            )}
             <span>{archivedSet.has(contextMenu.sessionId) ? "Restore session" : "Archive session"}</span>
           </button>
-          <hr className="context-divider my-1 h-px border-border" />
+          <div className="context-divider -mx-1 my-1 h-px bg-border" />
           <button
             role="menuitem"
             data-testid="context-menu-delete"
-            className="context-menu-item danger flex w-full items-center gap-2 px-3 py-1.5 text-left text-destructive hover:bg-destructive/10"
+            className="context-menu-item danger relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-left text-destructive outline-none transition-colors hover:bg-destructive/10 focus:bg-destructive/10"
             onClick={() => {
               const id = contextMenu.sessionId;
               setContextMenu(null);
               setDeletingId(id);
             }}
           >
-            <span className="context-icon">✕</span>
+            <Trash2 className="size-4 shrink-0" />
             <span>Delete session…</span>
           </button>
         </div>

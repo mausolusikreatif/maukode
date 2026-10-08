@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { api, connectAndCreate, env, finish, gitRepo, script, send, text, toolCall } from "./helpers";
+import { api, connectAndCreate, env, expectRadValue, finish, gitRepo, radSelect, script, send, text, toolCall } from "./helpers";
 
 const approvalTurn = [
   { sse: [toolCall("c1", "write_file", { path: "n.txt", content: "x" }), finish("tool_calls")] },
@@ -34,7 +34,7 @@ test("the overview surfaces what needs attention across agents", async ({ page }
   const repo = gitRepo();
   await script(approvalTurn);
   await connectAndCreate(page, repo);
-  await page.getByTestId("perm-mode").selectOption("strict");
+  await radSelect(page, "perm-mode", "strict");
   await send(page, "overview task alpha");
   await expect(page.getByTestId("permission-card")).toBeVisible();
 
@@ -98,7 +98,7 @@ test("settings: default approval mode and agent limits persist across reloads", 
   await connectAndCreate(page, repo);
   try {
     await openSettings(page);
-    await page.getByTestId("default-mode").selectOption("strict");
+    await radSelect(page, "default-mode", "strict");
     await expect(page.getByTestId("settings-msg")).toContainText("Default approval mode saved");
 
     await page.getByTestId("max-steps").fill("7");
@@ -113,7 +113,7 @@ test("settings: default approval mode and agent limits persist across reloads", 
 
     await page.reload();
     await openSettings(page);
-    await expect(page.getByTestId("default-mode")).toHaveValue("strict");
+    await expectRadValue(page, "default-mode", "strict");
     await expect(page.getByTestId("max-steps")).toHaveValue("7");
     await expect(page.getByTestId("max-tokens")).toHaveValue("2048");
   } finally {
@@ -212,7 +212,7 @@ test("the audit trail lists approval decisions for a session", async ({ page }) 
   const repo = gitRepo();
   await script(approvalTurn);
   await connectAndCreate(page, repo);
-  await page.getByTestId("perm-mode").selectOption("strict");
+  await radSelect(page, "perm-mode", "strict");
   await send(page, "audited work");
   await page.getByTestId("perm-allow-once").click();
   await expect(page.getByTestId("run-state")).toHaveText("idle");
