@@ -3,7 +3,7 @@ import { Command as CommandPrimitive } from "cmdk";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
@@ -20,12 +20,23 @@ Command.displayName = CommandPrimitive.displayName;
 function CommandDialog({
   children,
   className,
+  contentTestId,
+  filter,
   ...props
-}: React.ComponentProps<typeof Dialog> & { className?: string; children: React.ReactNode }) {
+}: React.ComponentProps<typeof Dialog> & {
+  className?: string;
+  children: React.ReactNode;
+  contentTestId?: string;
+  filter?: (value: string, search: string, keywords?: string[]) => number;
+}) {
   return (
     <Dialog {...props}>
-      <DialogContent className={cn("overflow-hidden p-0", className)} hideClose>
-        <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
+      <DialogContent className={cn("overflow-hidden p-0", className)} hideClose data-testid={contentTestId}>
+        <DialogTitle className="sr-only">Command palette</DialogTitle>
+        <Command
+          filter={filter}
+          className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+        >
           {children}
         </Command>
       </DialogContent>

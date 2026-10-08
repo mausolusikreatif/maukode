@@ -59,6 +59,31 @@ export function isDesktop(): boolean {
   return typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 }
 
+/** True when running on macOS/iOS, where the primary shortcut modifier is Command. */
+export function isMacPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const platform = navigator.platform ?? "";
+  const userAgent = navigator.userAgent ?? "";
+  return /Mac|iPhone|iPad|iPod/.test(platform) || /Mac OS X/.test(userAgent);
+}
+
+/** The primary shortcut modifier label for the current platform. */
+export function primaryMod(): "Cmd" | "Ctrl" {
+  return isMacPlatform() ? "Cmd" : "Ctrl";
+}
+
+/** True when the element is a text-entry surface, where global single-key shortcuts must not fire. */
+export function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== "string") return false;
+  return (
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT" ||
+    el.isContentEditable === true
+  );
+}
+
 export function forgetBootstrap(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);

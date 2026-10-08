@@ -163,8 +163,8 @@ test("settings: add, edit and remove a provider without ever seeing its key", as
   await expect(row).toContainText("model-two");
   await expect(row).toContainText("key stored"); // blank key field keeps the stored key
 
-  page.once("dialog", (d) => void d.accept());
   await row.getByTestId("delete-provider").click();
+  await page.getByTestId("confirm-accept").click();
   await expect(page.getByTestId("provider-row").filter({ hasText: "E2E Extra" })).toHaveCount(0);
 
   // The default provider can't be removed from the UI.
@@ -230,10 +230,12 @@ test("command palette, keyboard shortcuts, and external editor actions", async (
   const repo = gitRepo();
   await connectAndCreate(page, repo);
 
-  // Repository action buttons are visible on the session header
+  // Repository actions live in the session-actions menu.
+  await page.getByTestId("session-actions").click();
   await expect(page.getByTestId("open-vscode")).toBeVisible();
   await expect(page.getByTestId("open-cursor")).toBeVisible();
   await expect(page.getByTestId("reveal-file-manager")).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // Open Command Palette with Ctrl+K
   await page.keyboard.press("Control+k");

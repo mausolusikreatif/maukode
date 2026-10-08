@@ -45,8 +45,8 @@ test("review the agent's changes file by file, then undo them", async ({ page })
   await expect(page.getByTestId("diff-view")).toContainText("there");
 
   // Undo restores files on disk, and the panel empties.
-  page.once("dialog", (d) => void d.accept());
   await page.getByTestId("undo-button").click();
+  await page.getByTestId("confirm-accept").click();
   await expect(page.getByTestId("review-result")).toContainText(/reverted|restored/i);
   await expect(page.getByTestId("no-changes")).toBeVisible();
   expect(fs.existsSync(path.join(repo, "new.txt"))).toBe(false);

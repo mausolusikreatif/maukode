@@ -1,37 +1,21 @@
 import type { ReactNode } from "react";
 import { useApp } from "../state/store";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
+import { primaryMod } from "../platform";
 
 export function ShortcutModal() {
   const closeShortcuts = useApp((s) => s.closeShortcuts);
+  const mod = primaryMod();
 
   return (
-    <div
-      className="palette-backdrop fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-[10vh] backdrop-blur-sm"
-      data-testid="shortcut-modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          closeShortcuts();
-        }
-      }}
-    >
-      <div
-        className="shortcut-modal flex max-h-[80vh] w-full max-w-2xl flex-col overflow-y-auto rounded-xl border border-border bg-popover p-5 shadow-2xl scrollbar-thin"
+    <Dialog open onOpenChange={(open) => !open && closeShortcuts()}>
+      <DialogContent
         data-testid="shortcut-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Keyboard Shortcuts"
+        aria-describedby={undefined}
+        className="shortcut-modal flex max-h-[80vh] max-w-2xl flex-col gap-0 overflow-y-auto scrollbar-thin p-5"
       >
-        <div className="shortcut-modal-head flex items-center justify-between">
-          <h2 className="text-base font-semibold">Keyboard Shortcuts</h2>
-          <button
-            type="button"
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            data-testid="close-shortcuts-icon"
-            onClick={closeShortcuts}
-            title="Close (Esc)"
-          >
-            ✕
-          </button>
+        <div className="shortcut-modal-head flex items-center justify-between pr-6">
+          <DialogTitle>Keyboard Shortcuts</DialogTitle>
         </div>
 
         <section className="shortcut-section mt-4">
@@ -41,25 +25,25 @@ export function ShortcutModal() {
               <tr className="border-b border-border/50">
                 <td className="py-1.5">Command Palette</td>
                 <td className="py-1.5 text-right text-muted-foreground">
-                  <Kbd>Ctrl</Kbd> + <Kbd>K</Kbd> / <Kbd>Cmd</Kbd> + <Kbd>K</Kbd>
+                  <Kbd>{mod}</Kbd> + <Kbd>K</Kbd>
                 </td>
               </tr>
               <tr className="border-b border-border/50">
                 <td className="py-1.5">Toggle Sidebar</td>
                 <td className="py-1.5 text-right text-muted-foreground">
-                  <Kbd>Ctrl</Kbd> + <Kbd>B</Kbd> / <Kbd>Cmd</Kbd> + <Kbd>B</Kbd>
+                  <Kbd>{mod}</Kbd> + <Kbd>B</Kbd>
                 </td>
               </tr>
               <tr className="border-b border-border/50">
                 <td className="py-1.5">New Task / Session</td>
                 <td className="py-1.5 text-right text-muted-foreground">
-                  <Kbd>Ctrl</Kbd> + <Kbd>N</Kbd> / <Kbd>Cmd</Kbd> + <Kbd>N</Kbd>
+                  <Kbd>{mod}</Kbd> + <Kbd>N</Kbd>
                 </td>
               </tr>
               <tr className="border-b border-border/50">
                 <td className="py-1.5">Show Keyboard Shortcuts</td>
                 <td className="py-1.5 text-right text-muted-foreground">
-                  <Kbd>?</Kbd> or <Kbd>Ctrl</Kbd> + <Kbd>/</Kbd>
+                  <Kbd>?</Kbd> or <Kbd>{mod}</Kbd> + <Kbd>/</Kbd>
                 </td>
               </tr>
               <tr>
@@ -79,13 +63,13 @@ export function ShortcutModal() {
               <tr className="border-b border-border/50">
                 <td className="py-1.5">Focus Composer</td>
                 <td className="py-1.5 text-right text-muted-foreground">
-                  <Kbd>Ctrl</Kbd> + <Kbd>L</Kbd> / <Kbd>Cmd</Kbd> + <Kbd>L</Kbd>
+                  <Kbd>{mod}</Kbd> + <Kbd>L</Kbd>
                 </td>
               </tr>
               <tr className="border-b border-border/50">
                 <td className="py-1.5">Send Message</td>
                 <td className="py-1.5 text-right text-muted-foreground">
-                  <Kbd>Enter</Kbd> or <Kbd>Ctrl</Kbd> + <Kbd>Enter</Kbd>
+                  <Kbd>Enter</Kbd> or <Kbd>{mod}</Kbd> + <Kbd>Enter</Kbd>
                 </td>
               </tr>
               <tr className="border-b border-border/50">
@@ -97,13 +81,13 @@ export function ShortcutModal() {
               <tr className="border-b border-border/50">
                 <td className="py-1.5">Toggle Changes (Review Diff)</td>
                 <td className="py-1.5 text-right text-muted-foreground">
-                  <Kbd>Ctrl</Kbd> + <Kbd>Shift</Kbd> + <Kbd>D</Kbd>
+                  <Kbd>{mod}</Kbd> + <Kbd>Shift</Kbd> + <Kbd>D</Kbd>
                 </td>
               </tr>
               <tr>
                 <td className="py-1.5">Stop / Interrupt Agent Turn</td>
                 <td className="py-1.5 text-right text-muted-foreground">
-                  <Kbd>Ctrl</Kbd> + <Kbd>Esc</Kbd>
+                  <Kbd>{mod}</Kbd> + <Kbd>Esc</Kbd>
                 </td>
               </tr>
             </tbody>
@@ -140,8 +124,8 @@ export function ShortcutModal() {
             Close
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

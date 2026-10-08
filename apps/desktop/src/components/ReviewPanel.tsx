@@ -5,6 +5,7 @@ import { parseUnifiedDiff } from "../state/diff";
 import { useApp, type ActionResult } from "../state/store";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
+import { useConfirm } from "./ui/confirm";
 import { Input } from "./ui/input";
 
 const STATUS_LABEL: Record<FileDiffEntry["status"], string> = { added: "A", modified: "M", deleted: "D" };
@@ -157,6 +158,7 @@ function WorktreeSection() {
 
 export function ReviewPanel({ running }: { running: boolean }) {
   const { review, meta, selectFile, refreshReview, undoLast } = useApp();
+  const confirm = useConfirm();
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
 
   const totals = review.files.reduce(
@@ -288,7 +290,16 @@ export function ReviewPanel({ running }: { running: boolean }) {
             size="sm"
             disabled={review.busy || running || review.checkpoints === 0}
             onClick={() => {
-              if (confirm("Undo the last turn's file changes? The conversation is kept; files are restored.")) void undoLast();
+              void (async () => {
+                const ok = await confirm({
+                  title: "Undo the last turn?",
+                  description:
+                    "The conversation is kept; files changed by the agent are restored to the previous checkpoint.",
+                  confirmLabel: "Undo",
+                  destructive: true,
+                });
+                if (ok) void undoLast();
+              })();
             }}
           >
             Undo last turn
