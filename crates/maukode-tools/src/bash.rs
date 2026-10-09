@@ -5,7 +5,6 @@ use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::process::Command;
 
 pub struct BashTool {
     pub default_cwd: PathBuf,
@@ -96,53 +95,13 @@ impl Tool for BashTool {
             .map(Duration::from_secs)
             .unwrap_or(self.default_timeout);
 
-        let mut command = match self.sandbox.effective() {
-            SandboxMode::Bubblewrap => {
-                if which::which("bwrap").is_err() {
-                    return Err(ToolError::Execution(
-                        "bubblewrap sandbox requested but bwrap is not installed".into(),
-                    ));
-                }
-                let mut c = Command::new("bwrap");
-                c.args([
-                    "--die-with-parent",
-                    "--new-session",
-                    "--unshare-pid",
-                    "--unshare-uts",
-                    "--ro-bind",
-                    "/usr",
-                    "/usr",
-                    "--ro-bind",
-                    "/bin",
-                    "/bin",
-                    "--ro-bind",
-                    "/lib",
-                    "/lib",
-                    "--ro-bind",
-                    "/lib64",
-                    "/lib64",
-                    "--proc",
-                    "/proc",
-                    "--dev",
-                    "/dev",
-                    "--bind",
-                    cwd.to_string_lossy().as_ref(),
-                    "/workspace",
-                    "--chdir",
-                    "/workspace",
-                    "--",
-                    "bash",
-                    "-c",
-                    &args.command,
-                ]);
-                c
-            }
-            SandboxMode::Off | SandboxMode::PathJail | SandboxMode::Auto => {
-                let mut c = Command::new("bash");
-                c.args(["-c", &args.command]).current_dir(cwd);
-                c
-            }
-        };
+        let mut command = crate::sandboxed_command(
+            "bash",
+            &["-c".into(), args.command.clone()],
+            &cwd,
+            self.sandbox,
+        )
+        .map_err(ToolError::Execution)?;
         let child = command
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

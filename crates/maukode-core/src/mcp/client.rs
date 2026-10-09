@@ -1,6 +1,7 @@
 use super::protocol::*;
 use crate::config::McpServerConfig;
 use anyhow::{anyhow, Context, Result};
+use maukode_tools::{sandboxed_command, SandboxMode};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
@@ -8,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>>>;
@@ -17,6 +18,7 @@ pub struct McpClient {
     name: String,
     /// Identifies the command this client was started with (see [`McpClient::signature_of`]).
     signature: String,
+    sandbox: SandboxMode,
     stdin_tx: mpsc::Sender<String>,
     pending_requests: PendingRequests,
     next_id: AtomicU64,
@@ -37,15 +39,19 @@ impl McpClient {
         &self.signature
     }
 
+    pub fn sandbox(&self) -> SandboxMode {
+        self.sandbox
+    }
+
     pub async fn connect(
         name: impl Into<String>,
         config: &McpServerConfig,
         cwd: &Path,
+        sandbox: SandboxMode,
     ) -> Result<Self> {
         let name = name.into();
-        let mut cmd = Command::new(&config.command);
-        cmd.args(&config.args);
-        cmd.current_dir(cwd);
+        let mut cmd = sandboxed_command(&config.command, &config.args, cwd, sandbox)
+            .map_err(|e| anyhow!(e))?;
         for (k, v) in &config.env {
             cmd.env(k, v);
         }
@@ -145,6 +151,7 @@ impl McpClient {
             next_id: AtomicU64::new(1),
             child: Arc::new(Mutex::new(Some(child))),
             signature: Self::signature_of(config),
+            sandbox,
         };
 
         // 4. Perform MCP initialize handshake
