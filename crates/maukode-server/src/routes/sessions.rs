@@ -466,7 +466,25 @@ fn start_turn(
             let jail = maukode_tools::PathJail::new(&session_dir)
                 .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
             let mut tool_registry = if config_guard.security.jail_path_traversal {
-                maukode_tools::create_default_registry_with_jail(&session_dir, jail.clone())
+                maukode_tools::create_default_registry_with_sandbox(
+                    &session_dir,
+                    jail.clone(),
+                    config_guard.security.sandbox_mode,
+                )
+            } else if matches!(
+                config_guard.security.sandbox_mode,
+                maukode_tools::SandboxMode::Off
+            ) {
+                create_default_registry(&session_dir)
+            } else if matches!(
+                config_guard.security.sandbox_mode,
+                maukode_tools::SandboxMode::Bubblewrap | maukode_tools::SandboxMode::Auto
+            ) {
+                maukode_tools::create_default_registry_with_sandbox(
+                    &session_dir,
+                    jail.clone(),
+                    config_guard.security.sandbox_mode,
+                )
             } else {
                 create_default_registry(&session_dir)
             };

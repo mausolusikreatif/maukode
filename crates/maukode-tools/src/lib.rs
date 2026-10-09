@@ -10,7 +10,7 @@ pub use bash::BashTool;
 pub use file::{EditFileTool, GlobTool, ReadFileTool, WriteFileTool};
 pub use grep::GrepTool;
 pub use registry::ToolRegistry;
-pub use security::{assess_bash_command, PathJail, RiskAssessment, RiskLevel};
+pub use security::{assess_bash_command, PathJail, RiskAssessment, RiskLevel, SandboxMode};
 pub use tool::{Tool, ToolDefinition, ToolError};
 pub use web::{html_to_clean_markdown, FetchWebContentTool, SearchResultItem, WebSearchTool};
 
@@ -21,6 +21,18 @@ pub fn create_default_registry(cwd: impl Into<PathBuf>) -> ToolRegistry {
     let cwd = cwd.into();
     let jail = PathJail::new(&cwd);
     create_default_registry_with_jail(cwd, jail)
+}
+
+pub fn create_default_registry_with_sandbox(
+    cwd: impl Into<PathBuf>,
+    jail: PathJail,
+    sandbox: SandboxMode,
+) -> ToolRegistry {
+    let cwd = cwd.into();
+    let mut registry = create_default_registry_with_jail(cwd.clone(), jail.clone());
+    registry.unregister("bash");
+    registry.register(Arc::new(BashTool::with_sandbox(cwd, jail, sandbox)));
+    registry
 }
 
 pub fn create_default_registry_with_jail(cwd: impl Into<PathBuf>, jail: PathJail) -> ToolRegistry {

@@ -11,10 +11,10 @@ tokio.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+which = "7"
 thiserror.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
 regex.workspace = true
 similar.workspace = true
 reqwest.workspace = true
-

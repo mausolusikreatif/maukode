@@ -1,5 +1,47 @@
 use crate::tool::ToolError;
+use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
+
+/// Process isolation policy for command-like tools. `PathJail` is the compatibility default;
+/// `Bubblewrap` is opt-in and only selected when the host provides bubblewrap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxMode {
+    Off,
+    #[default]
+    PathJail,
+    Bubblewrap,
+    Auto,
+}
+
+impl SandboxMode {
+    pub fn effective(self) -> Self {
+        match self {
+            Self::Auto if cfg!(target_os = "linux") && which::which("bwrap").is_ok() => {
+                Self::Bubblewrap
+            }
+            Self::Auto => Self::PathJail,
+            mode => mode,
+        }
+    }
+}
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::SandboxMode;
+
+    #[test]
+    fn default_preserves_existing_path_jail_behavior() {
+        assert_eq!(SandboxMode::default(), SandboxMode::PathJail);
+    }
+
+    #[test]
+    fn explicit_modes_are_not_changed() {
+        assert_eq!(SandboxMode::Off.effective(), SandboxMode::Off);
+        assert_eq!(SandboxMode::PathJail.effective(), SandboxMode::PathJail);
+        assert_eq!(SandboxMode::Bubblewrap.effective(), SandboxMode::Bubblewrap);
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct PathJail {
