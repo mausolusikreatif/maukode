@@ -6,11 +6,11 @@ pub mod compaction;
 pub mod config;
 pub mod context;
 pub mod mcp;
-pub mod memory;
 pub mod paths;
 pub mod permission;
 pub mod plugin;
 pub mod repo_map;
+pub mod rules;
 pub mod runner;
 pub mod session;
 pub mod skills;
@@ -28,15 +28,19 @@ pub use config::{
     AgentConfig, AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig,
     WebSearchConfig,
 };
-pub use context::ContextManager;
-pub use mcp::{McpClient, McpManager, McpTool};
-pub use memory::{
-    init_project, DetectedStack, DiscoveredRule, InitResult, ProjectDetector, ProjectMemory,
-    RuleSource,
+pub use context::{
+    context_with_project_memory, memory_auto_extract_enabled, register_memory_tools,
+    ContextManager, MemoryBinding,
 };
+pub use maukode_memory::{MemoryContext, MemoryStore, Scope};
+pub use mcp::{McpClient, McpManager, McpTool};
 pub use permission::{PermissionManager, PermissionMode};
 pub use plugin::PluginManager;
 pub use repo_map::{CodebaseMapTool, RepoMapGenerator};
+pub use rules::{
+    init_project, DetectedStack, DiscoveredRule, InitResult, ProjectDetector, ProjectMemory,
+    RuleSource,
+};
 pub use runner::{RunnerConfig, SessionRunner};
 pub use session::Session;
 pub use skills::SkillManager;

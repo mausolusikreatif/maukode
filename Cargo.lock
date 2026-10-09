@@ -1599,6 +1599,7 @@ dependencies = [
  "futures",
  "ignore",
  "maukode-llm",
+ "maukode-memory",
  "maukode-protocol",
  "maukode-tools",
  "reqwest",
@@ -1618,8 +1619,8 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
- "ts-rs",
- "uuid",
+  "ts-rs",
+  "uuid",
 ]
 
 [[package]]
@@ -1638,6 +1639,23 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "maukode-memory"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "maukode-protocol",
+ "maukode-tools",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

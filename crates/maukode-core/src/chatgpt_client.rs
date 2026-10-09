@@ -467,6 +467,7 @@ mod tests {
                 name: "grep".into(),
                 description: "Search files".into(),
                 parameters: json!({"type":"object"}),
+                source: maukode_tools::ToolSource::Native,
             },
         ]);
         let result = tokio::time::timeout(

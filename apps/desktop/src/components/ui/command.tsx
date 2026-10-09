@@ -22,16 +22,23 @@ function CommandDialog({
   className,
   contentTestId,
   filter,
+  onOpenAutoFocus,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   className?: string;
   children: React.ReactNode;
   contentTestId?: string;
   filter?: (value: string, search: string, keywords?: string[]) => number;
+  onOpenAutoFocus?: React.ComponentPropsWithoutRef<typeof DialogContent>["onOpenAutoFocus"];
 }) {
   return (
     <Dialog {...props}>
-      <DialogContent className={cn("overflow-hidden p-0", className)} hideClose data-testid={contentTestId}>
+      <DialogContent
+        className={cn("overflow-hidden p-0", className)}
+        hideClose
+        data-testid={contentTestId}
+        onOpenAutoFocus={onOpenAutoFocus}
+      >
         <DialogTitle className="sr-only">Command palette</DialogTitle>
         <Command
           filter={filter}

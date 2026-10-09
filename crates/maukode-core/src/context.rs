@@ -1,13 +1,91 @@
-use crate::memory::ProjectMemory;
 use crate::repo_map::RepoMapGenerator;
+use crate::rules::ProjectMemory;
+use crate::store::sqlite::SqliteSessionStore;
 use chrono::Utc;
+use maukode_memory::{MemoryContext, MemoryStore, Scope};
+use maukode_tools::ToolRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// A memory store bound to a scope, plus whether end-of-turn extraction is enabled. The runner
+/// and context manager share one of these; the tools use [`MemoryContext`] directly.
+#[derive(Clone)]
+pub struct MemoryBinding {
+    pub context: MemoryContext,
+    pub auto_extract: bool,
+}
+
+impl MemoryBinding {
+    pub fn new(store: Arc<MemoryStore>, scope: Scope) -> Self {
+        Self {
+            context: MemoryContext::new(store, scope),
+            auto_extract: false,
+        }
+    }
+
+    /// Open the shared `maukode.db` and bind it to `scope`. Returns an error if the database
+    /// cannot be opened; callers usually degrade gracefully by skipping memory rather than failing.
+    pub fn open_default(scope: Scope) -> anyhow::Result<Self> {
+        let store = Arc::new(MemoryStore::open(SqliteSessionStore::default_db_path())?);
+        Ok(Self::new(store, scope))
+    }
+
+    pub fn with_auto_extract(mut self, enabled: bool) -> Self {
+        self.auto_extract = enabled;
+        self
+    }
+
+    pub fn store(&self) -> &Arc<MemoryStore> {
+        &self.context.store
+    }
+
+    pub fn scope(&self) -> &Scope {
+        &self.context.scope
+    }
+}
+
+/// Register the memory tools for `binding` into `registry`.
+pub fn register_memory_tools(registry: &mut ToolRegistry, binding: &MemoryBinding) {
+    maukode_memory::register_tools(registry, binding.context.clone());
+}
+
+/// Whether automatic end-of-turn extraction is enabled, from `MAUKODE_MEMORY_AUTO_EXTRACT`.
+pub fn memory_auto_extract_enabled() -> bool {
+    std::env::var("MAUKODE_MEMORY_AUTO_EXTRACT")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Build a context for `dir` with the project-scoped memory store attached when it can be opened.
+/// Also registers the memory tools into `registry` and returns the binding for the runner. When
+/// the store cannot be opened the context works exactly as before and `None` is returned.
+pub fn context_with_project_memory(
+    dir: impl AsRef<Path>,
+    registry: &mut ToolRegistry,
+) -> (ContextManager, Option<MemoryBinding>) {
+    let dir = dir.as_ref();
+    let binding = match MemoryBinding::open_default(Scope::project(dir)) {
+        Ok(binding) => Some(binding.with_auto_extract(memory_auto_extract_enabled())),
+        Err(e) => {
+            tracing::warn!("Memory store unavailable, continuing without it: {e}");
+            None
+        }
+    };
+    if let Some(binding) = &binding {
+        register_memory_tools(registry, binding);
+    }
+    let context = match &binding {
+        Some(binding) => ContextManager::new(dir).with_knowledge(binding.clone()),
+        None => ContextManager::new(dir),
+    };
+    (context, binding)
+}
 
 pub struct ContextManager {
     cwd: PathBuf,
     repo_map: Arc<RepoMapGenerator>,
     memory: Arc<ProjectMemory>,
+    knowledge: Option<MemoryBinding>,
 }
 
 impl ContextManager {
@@ -19,7 +97,19 @@ impl ContextManager {
             cwd,
             repo_map,
             memory,
+            knowledge: None,
         }
+    }
+
+    /// Attach a knowledge store so the system prompt can carry the taxonomy template and relevant
+    /// recall hits. Without this, memory tools are still usable but nothing is auto-injected.
+    pub fn with_knowledge(mut self, binding: MemoryBinding) -> Self {
+        self.knowledge = Some(binding);
+        self
+    }
+
+    pub fn knowledge(&self) -> Option<&MemoryBinding> {
+        self.knowledge.as_ref()
     }
 
     pub fn repo_map(&self) -> &Arc<RepoMapGenerator> {
@@ -41,6 +131,48 @@ impl ContextManager {
             None
         } else {
             Some(merged)
+        }
+    }
+
+    /// Render the taxonomy template plus top-ranked recall hits for `query`, within a bounded
+    /// token budget. Deterministic (FTS5 only); returns an empty string when no store is attached.
+    pub async fn render_knowledge_context(&self, query: Option<&str>) -> String {
+        let Some(binding) = &self.knowledge else {
+            return String::new();
+        };
+        let scope = binding.scope();
+
+        let mut out = String::new();
+        if let Ok(branches) = binding.store().taxonomy_template(scope).await {
+            if !branches.is_empty() {
+                out.push_str(
+                    "\n--- Memory Taxonomy (file new memories under these branches) ---\n",
+                );
+                for branch in branches {
+                    out.push_str(&format!("- {}: {}\n", branch.path, branch.description));
+                }
+            }
+        }
+
+        if let Some(query) = query.filter(|q| !q.trim().is_empty()) {
+            if let Ok(results) = binding.store().search(scope, query, None, Some(1500)).await {
+                if !results.results.is_empty() {
+                    out.push_str("\n--- Relevant Memories (recent recall) ---\n");
+                    for hit in &results.results {
+                        out.push_str(&format!("- [{}] {}: {}\n", hit.id, hit.title, hit.content));
+                    }
+                }
+            }
+        }
+
+        if out.is_empty() {
+            out
+        } else {
+            out.push_str(
+                "---------------------------------------------------------\n\
+                 Use `memory_search` to recall more, and `memory_write` to store durable facts.",
+            );
+            out
         }
     }
 

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { GitBranch, Play, Plus, Search, Settings, Square, PanelLeft, Eye, Keyboard, Home, Zap } from "lucide-react";
 import { baseName } from "../state/format";
 import { Badge } from "./ui/badge";
@@ -33,6 +33,7 @@ export function CommandPalette() {
   } = useApp();
 
   const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const mod = primaryMod();
   const currentThread = activeId ? threads[activeId] : null;
   const isRunning = Boolean(currentThread?.running);
@@ -69,8 +70,11 @@ export function CommandPalette() {
         shortcut: `${mod}+B`,
         icon: <PanelLeft className="size-4 shrink-0 text-muted-foreground" />,
         run: () => {
-          toggleSidebar();
           closeCommandPalette();
+          // Let the dialog unmount before changing the surrounding layout.
+          // Otherwise Radix can leave the closing dialog visible when both
+          // store updates are batched together.
+          setTimeout(toggleSidebar, 0);
         },
       },
       {
@@ -190,11 +194,18 @@ export function CommandPalette() {
     <CommandDialog
       open
       onOpenChange={(open) => !open && closeCommandPalette()}
+      onOpenAutoFocus={(event) => {
+        // Radix focuses the dialog content after mounting, which races cmdk's
+        // autoFocus and leaves the palette input inactive in Chromium/CI.
+        event.preventDefault();
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }}
       className="max-w-xl"
       contentTestId="command-palette"
       filter={filter}
     >
       <CommandInput
+        ref={inputRef}
         autoFocus
         data-testid="palette-input"
         placeholder="Type a command or search sessions…"
