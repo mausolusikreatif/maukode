@@ -7,6 +7,7 @@ pub use tool::McpTool;
 
 use crate::config::{AppConfig, McpServerConfig};
 use maukode_protocol::{McpServerStatus, McpToolInfo};
+use maukode_tools::SandboxMode;
 use maukode_tools::ToolRegistry;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -85,17 +86,22 @@ impl McpManager {
         name: &str,
         config: &McpServerConfig,
         cwd: &Path,
+        sandbox: SandboxMode,
     ) -> anyhow::Result<Arc<McpClient>> {
         {
             let guard = self.clients.read().await;
             if let Some(client) = guard.get(name) {
-                return Ok(Arc::clone(client));
+                if client.sandbox() == sandbox {
+                    return Ok(Arc::clone(client));
+                }
             }
         }
 
-        let client = Arc::new(McpClient::connect(name, config, cwd).await?);
+        let client = Arc::new(McpClient::connect(name, config, cwd, sandbox).await?);
         let mut guard = self.clients.write().await;
-        guard.insert(name.to_string(), Arc::clone(&client));
+        if let Some(previous) = guard.insert(name.to_string(), Arc::clone(&client)) {
+            previous.shutdown().await;
+        }
         Ok(client)
     }
 
@@ -131,7 +137,10 @@ impl McpManager {
                 }
             }
 
-            match self.get_or_connect(&name, &config, cwd).await {
+            match self
+                .get_or_connect(&name, &config, cwd, app_config.security.sandbox_mode)
+                .await
+            {
                 Ok(client) => match client.list_tools().await {
                     Ok(tools) => {
                         let mut registered_count = 0;
@@ -184,7 +193,10 @@ impl McpManager {
             let cmd_str = format!("{} {}", config.command, config.args.join(" "))
                 .trim()
                 .to_string();
-            match self.get_or_connect(&name, &config, cwd).await {
+            match self
+                .get_or_connect(&name, &config, cwd, app_config.security.sandbox_mode)
+                .await
+            {
                 Ok(client) => match client.list_tools().await {
                     Ok(tools) => {
                         let tool_infos = tools
@@ -408,7 +420,9 @@ for line in sys.stdin:
             env: HashMap::new(),
         };
 
-        let client = McpClient::connect("mock", &cfg, cwd).await.unwrap();
+        let client = McpClient::connect("mock", &cfg, cwd, SandboxMode::Off)
+            .await
+            .unwrap();
         assert_eq!(client.name(), "mock");
 
         // Test tools/list

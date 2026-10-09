@@ -1,6 +1,7 @@
 use crate::tool::ToolError;
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
+use tokio::process::Command;
 
 /// Process isolation policy for command-like tools. `PathJail` is the compatibility default;
 /// `Bubblewrap` is opt-in and only selected when the host provides bubblewrap.
@@ -24,6 +25,59 @@ impl SandboxMode {
             Self::Auto if Self::available() => Self::Bubblewrap,
             Self::Auto => Self::PathJail,
             mode => mode,
+        }
+    }
+}
+
+/// Build a command using the selected process isolation policy.  The workspace is
+/// mounted at `/workspace` in bubblewrap mode so that the child sees a stable cwd.
+pub fn sandboxed_command(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    mode: SandboxMode,
+) -> Result<Command, String> {
+    match mode.effective() {
+        SandboxMode::Bubblewrap => {
+            if !SandboxMode::available() {
+                return Err("bubblewrap sandbox requested but bwrap is not installed".into());
+            }
+            let mut command = Command::new("bwrap");
+            command.args([
+                "--die-with-parent",
+                "--new-session",
+                "--unshare-pid",
+                "--unshare-uts",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--ro-bind",
+                "/bin",
+                "/bin",
+                "--ro-bind",
+                "/lib",
+                "/lib",
+                "--ro-bind",
+                "/lib64",
+                "/lib64",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--bind",
+                cwd.to_string_lossy().as_ref(),
+                "/workspace",
+                "--chdir",
+                "/workspace",
+                "--",
+            ]);
+            command.arg(program).args(args);
+            Ok(command)
+        }
+        SandboxMode::Off | SandboxMode::PathJail | SandboxMode::Auto => {
+            let mut command = Command::new(program);
+            command.args(args).current_dir(cwd);
+            Ok(command)
         }
     }
 }
