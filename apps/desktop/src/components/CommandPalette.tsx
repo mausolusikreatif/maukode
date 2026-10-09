@@ -71,7 +71,10 @@ export function CommandPalette() {
         icon: <PanelLeft className="size-4 shrink-0 text-muted-foreground" />,
         run: () => {
           closeCommandPalette();
-          toggleSidebar();
+          // Let the dialog unmount before changing the surrounding layout.
+          // Otherwise Radix can leave the closing dialog visible when both
+          // store updates are batched together.
+          setTimeout(toggleSidebar, 0);
         },
       },
       {
