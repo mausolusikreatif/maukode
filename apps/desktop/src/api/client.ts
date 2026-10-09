@@ -185,6 +185,9 @@ export class ApiClient {
   setDefaultPermissionMode(mode: PermissionMode) {
     return this.request<void>("PUT", "/api/v1/config/security", { permission_mode: mode });
   }
+  setSandboxMode(mode: "off" | "path_jail" | "bubblewrap" | "auto") {
+    return this.request<void>("PUT", "/api/v1/config/security/sandbox", { sandbox_mode: mode });
+  }
   mcp() {
     return this.request<McpListResponse>("GET", "/api/v1/mcp");
   }

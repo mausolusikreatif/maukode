@@ -8,6 +8,7 @@ import type {
   PluginManifest,
   ProviderKind,
   SecuritySettings,
+  SandboxMode,
   SkillDefinition,
 } from "../api/types";
 import { notificationsSupported } from "../state/notify";
@@ -32,6 +33,12 @@ const MODES: { value: PermissionMode; label: string }[] = [
   { value: "strict", label: "Ask for everything" },
   { value: "review", label: "Review (private results)" },
   { value: "trust", label: "Trust (no prompts)" },
+];
+const SANDBOX_MODES: { value: SandboxMode; label: string }[] = [
+  { value: "path_jail", label: "Path jail (default)" },
+  { value: "auto", label: "Automatic (strongest available)" },
+  { value: "bubblewrap", label: "Bubblewrap (Linux)" },
+  { value: "off", label: "Off" },
 ];
 
 const PROVIDER_KINDS: { value: ProviderKind; label: string }[] = [
@@ -166,6 +173,17 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
     }
   };
 
+  const saveSandbox = async (mode: SandboxMode) => {
+    setMsg(null);
+    try {
+      await requireClient(client).setSandboxMode(mode);
+      await config.refreshSecurity();
+      setMsg({ level: "ok", text: "Sandbox mode saved for new sessions." });
+    } catch (e) {
+      setMsg({ level: "error", text: errText(e) });
+    }
+  };
+
   const saveLimits = async () => {
     setMsg(null);
     touched.current = true;
@@ -205,6 +223,14 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
           </SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground">Existing sessions keep their own mode.</span>
+      </div>
+      <div className="space-y-1.5">
+        <Label>Command sandbox</Label>
+        <Select value={security?.sandbox_mode} onValueChange={(v) => void saveSandbox(v as SandboxMode)} disabled={loading || !security}>
+          <SelectTrigger className="w-64"><SelectValue placeholder="Select sandbox…" /></SelectTrigger>
+          <SelectContent>{SANDBOX_MODES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">Applies to commands in new sessions. Automatic falls back to the path jail when Bubblewrap is unavailable.</p>
       </div>
 
       {/* Agent limits */}

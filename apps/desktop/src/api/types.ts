@@ -33,6 +33,7 @@ export type { ProviderKind } from "./generated/ProviderKind";
 export type { ProvidersListResponse } from "./generated/ProvidersListResponse";
 export type { QueueSteeringPrompt } from "./generated/QueueSteeringPrompt";
 export type { SecuritySettings } from "./generated/SecuritySettings";
+export type { SandboxMode } from "./generated/SandboxMode";
 export type { SessionDetailResponse } from "./generated/SessionDetailResponse";
 export type { SessionListItem } from "./generated/SessionListItem";
 export type { SkillDefinition } from "./generated/SkillDefinition";

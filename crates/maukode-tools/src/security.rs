@@ -15,11 +15,13 @@ pub enum SandboxMode {
 }
 
 impl SandboxMode {
+    pub fn available() -> bool {
+        cfg!(target_os = "linux") && which::which("bwrap").is_ok()
+    }
+
     pub fn effective(self) -> Self {
         match self {
-            Self::Auto if cfg!(target_os = "linux") && which::which("bwrap").is_ok() => {
-                Self::Bubblewrap
-            }
+            Self::Auto if Self::available() => Self::Bubblewrap,
             Self::Auto => Self::PathJail,
             mode => mode,
         }
