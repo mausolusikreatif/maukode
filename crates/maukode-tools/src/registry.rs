@@ -1,4 +1,4 @@
-use crate::tool::{Tool, ToolDefinition, ToolError};
+use crate::tool::{Tool, ToolDefinition, ToolError, ToolSource};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -57,6 +57,37 @@ impl ToolRegistry {
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools.values().map(|t| t.definition()).collect()
+    }
+
+    /// Definitions for a single source group (native, memory, sandbox, mcp).
+    pub fn definitions_by_source(&self, source: ToolSource) -> Vec<ToolDefinition> {
+        self.tools
+            .values()
+            .filter(|t| t.source() == source)
+            .map(|t| t.definition())
+            .collect()
+    }
+
+    /// Drop every tool belonging to the given source group (and any alias pointing at one).
+    pub fn retain_source(&mut self, source: ToolSource) {
+        let removed: Vec<String> = self
+            .tools
+            .iter()
+            .filter(|(_, tool)| tool.source() == source)
+            .map(|(name, _)| name.clone())
+            .collect();
+        self.tools.retain(|_, tool| tool.source() != source);
+        self.aliases
+            .retain(|alias, target| !removed.contains(alias) && !removed.contains(target));
+    }
+
+    /// Estimated token cost of the schemas for a source group, summed over tools that report one.
+    pub fn token_cost_by_source(&self, source: ToolSource) -> usize {
+        self.tools
+            .values()
+            .filter(|t| t.source() == source)
+            .filter_map(|t| t.token_cost())
+            .sum()
     }
 
     pub async fn execute(&self, name: &str, args: serde_json::Value) -> Result<String, ToolError> {

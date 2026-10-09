@@ -104,6 +104,7 @@ pub struct SessionRunner {
     permission_manager: Option<Arc<PermissionManager>>,
     permission_store: Option<Arc<SqliteSessionStore>>,
     checkpoint_manager: Option<Arc<crate::checkpoint::CheckpointManager>>,
+    memory: Option<crate::context::MemoryBinding>,
 }
 
 impl SessionRunner {
@@ -123,7 +124,15 @@ impl SessionRunner {
             permission_manager: None,
             permission_store: None,
             checkpoint_manager: None,
+            memory: None,
         }
+    }
+
+    /// Attach the knowledge-store binding. Enables end-of-turn extraction when the binding has
+    /// `auto_extract` set; the tools themselves are registered separately by the caller.
+    pub fn with_memory(mut self, memory: crate::context::MemoryBinding) -> Self {
+        self.memory = Some(memory);
+        self
     }
 
     pub fn with_permission_manager(mut self, pm: Arc<PermissionManager>) -> Self {
@@ -215,7 +224,15 @@ impl SessionRunner {
             }
         }
 
-        let system_prompt = self.context.render_system_context().await;
+        let mut system_prompt = self.context.render_system_context().await;
+        let knowledge = self
+            .context
+            .render_knowledge_context(user_prompt.as_deref())
+            .await;
+        if !knowledge.trim().is_empty() {
+            system_prompt.push('\n');
+            system_prompt.push_str(&knowledge);
+        }
         let mut step = 0;
         let mut continuations = 0usize;
         let mut stop: (StopReason, Option<String>) = (StopReason::Completed, None);
@@ -765,8 +782,48 @@ impl SessionRunner {
 
         let mut session = self.session.write().await;
         session.state = SessionState::Idle;
+        let final_messages = session.messages.clone();
+        drop(session);
+
+        // End-of-turn extraction: fold any auto-captured candidate memories into the store. Runs
+        // only on a clean completion and only when the binding opted in.
+        if stop.0 == StopReason::Completed {
+            self.extract_memories(&final_messages).await;
+        }
 
         Ok(stop)
+    }
+
+    /// Persist auto-extracted candidate memories from a finished turn, logging (never failing the
+    /// turn) on error. Explicit `memory_write` tool calls are the primary path; this is a safety
+    /// net for durable notes a turn leaves behind automatically.
+    async fn extract_memories(&self, messages: &[maukode_protocol::Message]) {
+        let Some(binding) = &self.memory else {
+            return;
+        };
+        if !binding.auto_extract {
+            return;
+        }
+        let candidates = maukode_memory::extract::candidates_from_messages(messages);
+        if candidates.is_empty() {
+            return;
+        }
+        match maukode_memory::persist_candidates(
+            binding.store(),
+            binding.scope(),
+            &candidates,
+            binding.context.author.as_deref(),
+        )
+        .await
+        {
+            Ok(report) => {
+                debug!(
+                    "Memory extraction: {} proposed, {} written, {} updated, {} skipped",
+                    report.proposed, report.written, report.updated, report.skipped
+                );
+            }
+            Err(e) => tracing::warn!("Memory extraction failed: {e}"),
+        }
     }
 }
 

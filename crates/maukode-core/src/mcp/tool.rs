@@ -1,6 +1,6 @@
 use super::client::McpClient;
 use async_trait::async_trait;
-use maukode_tools::{Tool, ToolError};
+use maukode_tools::{Tool, ToolError, ToolSource};
 use std::sync::Arc;
 
 pub struct McpTool {
@@ -50,6 +50,10 @@ impl Tool for McpTool {
 
     fn parameters(&self) -> serde_json::Value {
         self.parameters.clone()
+    }
+
+    fn source(&self) -> ToolSource {
+        ToolSource::Mcp
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<String, ToolError> {

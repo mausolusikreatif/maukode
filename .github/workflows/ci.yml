@@ -51,7 +51,9 @@ jobs:
       - name: End-to-end UI tests (real daemon, scripted LLM gateway)
         working-directory: apps/desktop
         run: |
-          npx playwright install --with-deps chromium
+          # Browser system libraries live on the runner host (see #57); `--with-deps` would run
+          # `sudo apt-get`, which the self-hosted runner cannot do non-interactively.
+          npx playwright install chromium
           CI=1 npx playwright test
 
   tauri:

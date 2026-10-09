@@ -9,6 +9,7 @@ authors.workspace = true
 maukode-protocol.workspace = true
 maukode-llm.workspace = true
 maukode-tools.workspace = true
+maukode-memory.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true

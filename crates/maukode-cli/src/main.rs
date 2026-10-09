@@ -675,7 +675,7 @@ async fn main() -> anyhow::Result<()> {
             maukode_core::PermissionManager::new(config.security.permission_mode)
                 .with_whitelist(config.security.bash_whitelist.clone()),
         );
-        let context = Arc::new(ContextManager::new(&cwd));
+        let mut context = ContextManager::new(&cwd);
         let mut tool_reg = if config.security.jail_path_traversal {
             let jail = maukode_tools::PathJail::new(&cwd)
                 .with_allowed_paths(config.security.allowed_external_paths.clone());
@@ -688,6 +688,21 @@ async fn main() -> anyhow::Result<()> {
         mcp_manager
             .register_tools_into_registry(&mut tool_reg, &cwd, &config)
             .await;
+        let memory =
+            match maukode_core::MemoryBinding::open_default(maukode_core::Scope::project(&cwd)) {
+                Ok(binding) => {
+                    let binding =
+                        binding.with_auto_extract(maukode_core::memory_auto_extract_enabled());
+                    maukode_core::register_memory_tools(&mut tool_reg, &binding);
+                    context = context.with_knowledge(binding.clone());
+                    Some(binding)
+                }
+                Err(e) => {
+                    tracing::warn!("Memory store unavailable, continuing without it: {e}");
+                    None
+                }
+            };
+        let context = Arc::new(context);
         tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
             context.repo_map(),
         ))));
@@ -712,6 +727,10 @@ async fn main() -> anyhow::Result<()> {
         .with_permission_manager(Arc::clone(&perm_mgr))
         .with_permission_store(Arc::clone(&store))
         .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
+        let runner = match memory {
+            Some(binding) => runner.with_memory(binding),
+            None => runner,
+        };
 
         execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(prompt)).await?;
 
@@ -755,7 +774,7 @@ async fn main() -> anyhow::Result<()> {
             maukode_core::PermissionManager::new(config.security.permission_mode)
                 .with_whitelist(config.security.bash_whitelist.clone()),
         );
-        let context = Arc::new(ContextManager::new(&cwd));
+        let mut context = ContextManager::new(&cwd);
         let mut tool_reg = if config.security.jail_path_traversal {
             let jail = maukode_tools::PathJail::new(&cwd)
                 .with_allowed_paths(config.security.allowed_external_paths.clone());
@@ -768,6 +787,21 @@ async fn main() -> anyhow::Result<()> {
         mcp_manager
             .register_tools_into_registry(&mut tool_reg, &cwd, &config)
             .await;
+        let memory =
+            match maukode_core::MemoryBinding::open_default(maukode_core::Scope::project(&cwd)) {
+                Ok(binding) => {
+                    let binding =
+                        binding.with_auto_extract(maukode_core::memory_auto_extract_enabled());
+                    maukode_core::register_memory_tools(&mut tool_reg, &binding);
+                    context = context.with_knowledge(binding.clone());
+                    Some(binding)
+                }
+                Err(e) => {
+                    tracing::warn!("Memory store unavailable, continuing without it: {e}");
+                    None
+                }
+            };
+        let context = Arc::new(context);
         tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
             context.repo_map(),
         ))));
@@ -775,7 +809,7 @@ async fn main() -> anyhow::Result<()> {
         let llm_client = config.create_active_llm_client()?;
         let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&cwd).await?);
 
-        let runner = SessionRunner::new(
+        let mut runner = SessionRunner::new(
             Arc::clone(&session_arc),
             llm_client,
             tools,
@@ -790,6 +824,9 @@ async fn main() -> anyhow::Result<()> {
         .with_permission_manager(Arc::clone(&perm_mgr))
         .with_permission_store(Arc::clone(&store))
         .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
+        if let Some(binding) = memory {
+            runner = runner.with_memory(binding);
+        }
 
         loop {
             print!("\x1b[1;32mmaukode>\x1b[0m ");

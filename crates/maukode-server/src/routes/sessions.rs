@@ -11,7 +11,7 @@ use axum::{
 };
 use futures::Stream;
 use maukode_core::worktree::{self, WorktreeError, WorktreeInfo};
-use maukode_core::{ContextManager, RunnerConfig, Session, SessionRunner, SubagentTool};
+use maukode_core::{RunnerConfig, Session, SessionRunner, SubagentTool};
 use maukode_protocol::{
     GlobalEvent, LLMEvent, Message, QueueSteeringPrompt, SessionId, SessionState, StopReason,
     SubagentProfile,
@@ -503,10 +503,15 @@ fn start_turn(
 
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
 
-        let context = Arc::new(ContextManager::new(&session_dir));
+        // Bind the project-scoped knowledge store before building the context so the system prompt
+        // can carry the taxonomy template and recall hits.
+        let (context, memory) =
+            maukode_core::context_with_project_memory(&session_dir, &mut tool_registry);
+        let context = Arc::new(context);
         tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
             context.repo_map(),
         ))));
+
         tool_registry.register(Arc::new(
             SubagentTool::new(
                 id,
@@ -529,6 +534,9 @@ fn start_turn(
         )
         .with_permission_manager(permission_mgr)
         .with_permission_store(Arc::clone(&state.store));
+        if let Some(binding) = memory {
+            runner = runner.with_memory(binding);
+        }
 
         if let Ok(cm) = checkpoint_mgr {
             runner = runner.with_checkpoint_manager(cm);
