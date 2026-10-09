@@ -2083,6 +2083,7 @@ dependencies = [
  "futures",
  "ignore",
  "maukode-llm",
+ "maukode-memory",
  "maukode-protocol",
  "maukode-tools",
  "reqwest 0.12.28",
@@ -2133,6 +2134,22 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "maukode-memory"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "maukode-protocol",
+ "maukode-tools",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

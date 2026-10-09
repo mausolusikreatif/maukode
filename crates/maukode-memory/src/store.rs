@@ -237,15 +237,15 @@ impl MemoryStore {
         let scope_key = scope.as_key();
 
         let mut sql = String::from(
-            "SELECT m.id, m.title, m.taxonomy, m.content, bm25(f) AS bm25_score,
+            "SELECT m.id, m.title, m.taxonomy, m.content, bm25(memories_fts) AS bm25_score,
                     (SELECT COUNT(*) FROM memory_edges e
                        WHERE e.scope = m.scope AND e.dst_id = m.id
                          AND e.rel IN ('relates', 'depends-on')) AS authority,
                     EXISTS(SELECT 1 FROM memory_edges e
                        WHERE e.scope = m.scope AND e.dst_id = m.id AND e.rel = 'supersedes') AS superseded
-             FROM memories_fts f
-             JOIN memories m ON m.rowid = f.rowid
-             WHERE f MATCH ?1 AND m.scope = ?2 AND m.deleted_at IS NULL",
+             FROM memories_fts
+             JOIN memories m ON m.rowid = memories_fts.rowid
+             WHERE memories_fts MATCH ?1 AND m.scope = ?2 AND m.deleted_at IS NULL",
         );
         let mut args: Vec<Box<dyn rusqlite::ToSql>> =
             vec![Box::new(match_expr), Box::new(scope_key.clone())];
