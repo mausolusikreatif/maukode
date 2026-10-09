@@ -11,7 +11,7 @@ pub use file::{EditFileTool, GlobTool, ReadFileTool, WriteFileTool};
 pub use grep::GrepTool;
 pub use registry::ToolRegistry;
 pub use security::{assess_bash_command, PathJail, RiskAssessment, RiskLevel};
-pub use tool::{Tool, ToolDefinition, ToolError};
+pub use tool::{Tool, ToolDefinition, ToolError, ToolSource};
 pub use web::{html_to_clean_markdown, FetchWebContentTool, SearchResultItem, WebSearchTool};
 
 use std::path::PathBuf;

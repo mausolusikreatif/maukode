@@ -535,6 +535,7 @@ mod tests {
                 name: "grep".into(),
                 description: "Search text".into(),
                 parameters: json!({"type": "object"}),
+                source: maukode_tools::ToolSource::Native,
             }]);
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(2),

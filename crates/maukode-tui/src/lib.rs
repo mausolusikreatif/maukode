@@ -673,10 +673,21 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     if let Some(loaded_session) = loaded {
                         let messages = loaded_session.messages.clone();
                         app.cwd = loaded_session.directory.clone();
-                        app.tools =
-                            std::sync::Arc::new(maukode_tools::create_default_registry(&app.cwd));
-                        app.context =
-                            std::sync::Arc::new(maukode_core::ContextManager::new(&app.cwd));
+                        let mut registry = maukode_tools::create_default_registry(&app.cwd);
+                        let mut context_manager = maukode_core::ContextManager::new(&app.cwd);
+                        app.memory = maukode_core::MemoryBinding::open_default(
+                            maukode_core::Scope::project(&app.cwd),
+                        )
+                        .ok()
+                        .map(|binding| {
+                            binding.with_auto_extract(maukode_core::memory_auto_extract_enabled())
+                        });
+                        if let Some(binding) = &app.memory {
+                            maukode_core::register_memory_tools(&mut registry, binding);
+                            context_manager = context_manager.with_knowledge(binding.clone());
+                        }
+                        app.tools = std::sync::Arc::new(registry);
+                        app.context = std::sync::Arc::new(context_manager);
                         app.session = std::sync::Arc::new(tokio::sync::RwLock::new(loaded_session));
                         app.items = crate::app::chat_items_from_messages(&messages);
                         app.set_status(format!(

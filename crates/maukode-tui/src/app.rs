@@ -238,6 +238,8 @@ pub struct App {
     pub store: SqliteSessionStore,
     pub tools: Arc<ToolRegistry>,
     pub context: Arc<ContextManager>,
+    /// Project-scoped knowledge binding, when the memory store could be opened.
+    pub memory: Option<maukode_core::MemoryBinding>,
     pub permission_manager: Arc<PermissionManager>,
     pub checkpoint_manager: Arc<CheckpointManager>,
     pub items: Vec<ChatItem>,
@@ -285,7 +287,22 @@ impl App {
         mcp_manager
             .register_tools_into_registry(&mut tool_registry, &cwd, &config)
             .await;
-        let context = Arc::new(ContextManager::new(&cwd));
+        let mut context_manager = ContextManager::new(&cwd);
+        let memory =
+            match maukode_core::MemoryBinding::open_default(maukode_core::Scope::project(&cwd)) {
+                Ok(binding) => {
+                    let binding =
+                        binding.with_auto_extract(maukode_core::memory_auto_extract_enabled());
+                    maukode_core::register_memory_tools(&mut tool_registry, &binding);
+                    context_manager = context_manager.with_knowledge(binding.clone());
+                    Some(binding)
+                }
+                Err(e) => {
+                    tracing::warn!("Memory store unavailable, continuing without it: {e}");
+                    None
+                }
+            };
+        let context = Arc::new(context_manager);
         tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
             context.repo_map(),
         ))));
@@ -357,6 +374,7 @@ impl App {
             store,
             tools,
             context,
+            memory,
             permission_manager,
             checkpoint_manager,
             items,
@@ -570,7 +588,20 @@ impl App {
                                     ),
                                 )
                             });
-                            let context = Arc::new(ContextManager::new(&canonical));
+                            self.memory = maukode_core::MemoryBinding::open_default(
+                                maukode_core::Scope::project(&canonical),
+                            )
+                            .ok()
+                            .map(|binding| {
+                                binding
+                                    .with_auto_extract(maukode_core::memory_auto_extract_enabled())
+                            });
+                            let mut context_manager = ContextManager::new(&canonical);
+                            if let Some(binding) = &self.memory {
+                                maukode_core::register_memory_tools(&mut tool_reg, binding);
+                                context_manager = context_manager.with_knowledge(binding.clone());
+                            }
+                            let context = Arc::new(context_manager);
                             tool_reg.register(Arc::new(maukode_core::CodebaseMapTool::new(
                                 Arc::clone(context.repo_map()),
                             )));
@@ -970,6 +1001,10 @@ impl App {
             .with_permission_manager(Arc::clone(&self.permission_manager))
             .with_permission_store(Arc::new(self.store.clone()))
             .with_checkpoint_manager(Arc::clone(&self.checkpoint_manager));
+        let runner = match &self.memory {
+            Some(binding) => runner.with_memory(binding.clone()),
+            None => runner,
+        };
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let app_event_tx = self.event_tx.clone();
 
