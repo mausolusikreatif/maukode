@@ -70,8 +70,8 @@ export function CommandPalette() {
         shortcut: `${mod}+B`,
         icon: <PanelLeft className="size-4 shrink-0 text-muted-foreground" />,
         run: () => {
-          toggleSidebar();
           closeCommandPalette();
+          toggleSidebar();
         },
       },
       {
