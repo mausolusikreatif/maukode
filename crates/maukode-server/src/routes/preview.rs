@@ -24,7 +24,8 @@ async fn session_dir(state: &ServerState, id: SessionId) -> ApiResult<std::path:
         .get(&id)
         .cloned()
         .ok_or_else(|| error(StatusCode::NOT_FOUND, "Session not found"))?;
-    Ok(session.read().await.directory.clone())
+    let directory = session.read().await.directory.clone();
+    Ok(directory)
 }
 
 pub async fn start_preview(
