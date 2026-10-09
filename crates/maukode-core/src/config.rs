@@ -1,6 +1,7 @@
 use crate::permission::PermissionMode;
 use anyhow::Result;
 use maukode_llm::{AnthropicClient, LLMClient, OpenAIClient};
+use maukode_tools::SandboxMode;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,6 +50,8 @@ pub struct SecurityConfig {
     pub jail_path_traversal: bool,
     #[serde(default)]
     pub allowed_external_paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub sandbox_mode: SandboxMode,
     #[serde(default = "default_whitelist")]
     pub bash_whitelist: Vec<String>,
 }
@@ -72,6 +75,7 @@ impl Default for SecurityConfig {
             permission_mode: PermissionMode::Ask,
             jail_path_traversal: true,
             allowed_external_paths: Vec::new(),
+            sandbox_mode: SandboxMode::default(),
             bash_whitelist: default_whitelist(),
         }
     }

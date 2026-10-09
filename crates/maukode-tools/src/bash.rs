@@ -1,4 +1,4 @@
-use crate::security::PathJail;
+use crate::security::{PathJail, SandboxMode};
 use crate::tool::{Tool, ToolError};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -11,6 +11,7 @@ pub struct BashTool {
     pub default_cwd: PathBuf,
     pub jail: PathJail,
     pub default_timeout: Duration,
+    pub sandbox: SandboxMode,
 }
 
 impl BashTool {
@@ -20,6 +21,7 @@ impl BashTool {
             jail: PathJail::new(&dir),
             default_cwd: dir,
             default_timeout: Duration::from_secs(120),
+            sandbox: SandboxMode::PathJail,
         }
     }
 
@@ -28,6 +30,16 @@ impl BashTool {
             default_cwd: cwd.into(),
             jail,
             default_timeout: Duration::from_secs(120),
+            sandbox: SandboxMode::PathJail,
+        }
+    }
+
+    pub fn with_sandbox(cwd: impl Into<PathBuf>, jail: PathJail, sandbox: SandboxMode) -> Self {
+        Self {
+            default_cwd: cwd.into(),
+            jail,
+            default_timeout: Duration::from_secs(120),
+            sandbox,
         }
     }
 }
@@ -84,10 +96,54 @@ impl Tool for BashTool {
             .map(Duration::from_secs)
             .unwrap_or(self.default_timeout);
 
-        let child = Command::new("bash")
-            .arg("-c")
-            .arg(&args.command)
-            .current_dir(cwd)
+        let mut command = match self.sandbox.effective() {
+            SandboxMode::Bubblewrap => {
+                if which::which("bwrap").is_err() {
+                    return Err(ToolError::Execution(
+                        "bubblewrap sandbox requested but bwrap is not installed".into(),
+                    ));
+                }
+                let mut c = Command::new("bwrap");
+                c.args([
+                    "--die-with-parent",
+                    "--new-session",
+                    "--unshare-pid",
+                    "--unshare-uts",
+                    "--ro-bind",
+                    "/usr",
+                    "/usr",
+                    "--ro-bind",
+                    "/bin",
+                    "/bin",
+                    "--ro-bind",
+                    "/lib",
+                    "/lib",
+                    "--ro-bind",
+                    "/lib64",
+                    "/lib64",
+                    "--proc",
+                    "/proc",
+                    "--dev",
+                    "/dev",
+                    "--bind",
+                    cwd.to_string_lossy().as_ref(),
+                    "/workspace",
+                    "--chdir",
+                    "/workspace",
+                    "--",
+                    "bash",
+                    "-c",
+                    &args.command,
+                ]);
+                c
+            }
+            SandboxMode::Off | SandboxMode::PathJail | SandboxMode::Auto => {
+                let mut c = Command::new("bash");
+                c.args(["-c", &args.command]).current_dir(cwd);
+                c
+            }
+        };
+        let child = command
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()

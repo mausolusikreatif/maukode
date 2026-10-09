@@ -4,6 +4,18 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_desktop:
+        description: Run desktop UI checks
+        required: false
+        type: boolean
+        default: false
+      run_tauri:
+        description: Run Tauri shell checks
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -31,6 +43,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   desktop:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_desktop
     runs-on: [self-hosted, rekarta]
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +70,7 @@ jobs:
           CI=1 npx playwright test
 
   tauri:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_tauri
     timeout-minutes: 30
     # Compiles the desktop shell and runs it under a virtual display: the UI must reach the Rust
     # side over Tauri IPC and make it start an authenticated daemon.

@@ -5,7 +5,7 @@ export type SecuritySettings = {
 /**
  * Approval mode new sessions start with.
  */
-permission_mode: PermissionMode, jail_path_traversal: boolean, allowed_external_paths: Array<string>, 
+permission_mode: PermissionMode, jail_path_traversal: boolean, allowed_external_paths: Array<string>, sandbox_mode: string, 
 /**
  * Shown for information; changing it requires editing the config file and restarting.
  */
