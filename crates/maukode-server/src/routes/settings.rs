@@ -24,7 +24,7 @@ pub struct SecuritySettings {
     pub permission_mode: PermissionMode,
     pub jail_path_traversal: bool,
     pub allowed_external_paths: Vec<String>,
-    pub sandbox_mode: SandboxMode,
+    pub sandbox_mode: String,
     /// Shown for information; changing it requires editing the config file and restarting.
     pub bash_whitelist: Vec<String>,
 }
@@ -52,7 +52,11 @@ pub async fn get_security(State(state): State<Arc<ServerState>>) -> impl IntoRes
             .map(|p| p.display().to_string())
             .collect(),
         bash_whitelist: config.security.bash_whitelist.clone(),
-        sandbox_mode: config.security.sandbox_mode,
+        sandbox_mode: serde_json::to_value(config.security.sandbox_mode)
+            .unwrap_or_else(|_| serde_json::Value::String("path_jail".into()))
+            .as_str()
+            .unwrap_or("path_jail")
+            .to_string(),
     })
 }
 
