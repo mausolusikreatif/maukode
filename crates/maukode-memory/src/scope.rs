@@ -70,7 +70,7 @@ mod tests {
         let scope = Scope::project("/tmp/example");
         assert!(scope.as_key().starts_with("project:"));
         assert_eq!(
-            Scope::parse(&scope.as_key()).and_then(|s| if s.is_global() { None } else { Some(s) }),
+            Scope::parse(&scope.as_key()).filter(|s| !s.is_global()),
             Some(scope)
         );
     }
