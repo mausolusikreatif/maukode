@@ -62,8 +62,7 @@ async fn inject_mock_preview(state: &ServerState, id: &str, port: u16) {
     use maukode_protocol::PreviewInfo;
     use maukode_server::state::PreviewProcess;
 
-    let sid: maukode_protocol::SessionId =
-        serde_json::from_value(serde_json::json!(id)).unwrap();
+    let sid: maukode_protocol::SessionId = serde_json::from_value(serde_json::json!(id)).unwrap();
 
     // Spawn a dummy child process so the PreviewProcess.child field is valid.
     let mut cmd = tokio::process::Command::new("sleep");
@@ -78,13 +77,11 @@ async fn inject_mock_preview(state: &ServerState, id: &str, port: u16) {
         error: None,
     };
 
-    state.previews.lock().await.insert(
-        sid,
-        PreviewProcess {
-            child,
-            info,
-        },
-    );
+    state
+        .previews
+        .lock()
+        .await
+        .insert(sid, PreviewProcess { child, info });
 }
 
 #[tokio::test]
@@ -143,9 +140,7 @@ async fn test_proxy_rewrites_redirect_location() {
     let mock_port = mock_listener.local_addr().unwrap().port();
     let mock_app = axum::Router::new().route(
         "/old",
-        axum::routing::get(|| async {
-            axum::response::Redirect::to("/new")
-        }),
+        axum::routing::get(|| async { axum::response::Redirect::to("/new") }),
     );
     tokio::spawn(async move {
         axum::serve(mock_listener, mock_app).await.unwrap();
@@ -210,10 +205,7 @@ async fn test_preview_get_and_stop_lifecycle() {
     // GET preview status.
     let info: serde_json::Value = h
         .http
-        .get(format!(
-            "{}/api/v1/sessions/{}/preview",
-            h.url, session_id
-        ))
+        .get(format!("{}/api/v1/sessions/{}/preview", h.url, session_id))
         .send()
         .await
         .unwrap()
@@ -223,18 +215,12 @@ async fn test_preview_get_and_stop_lifecycle() {
     assert_eq!(info["status"], "running");
     assert_eq!(info["port"], mock_port);
     assert_eq!(info["ready"], true);
-    assert!(info["url"]
-        .as_str()
-        .unwrap()
-        .contains("/preview/proxy"));
+    assert!(info["url"].as_str().unwrap().contains("/preview/proxy"));
 
     // Stop the preview.
     let stopped: serde_json::Value = h
         .http
-        .delete(format!(
-            "{}/api/v1/sessions/{}/preview",
-            h.url, session_id
-        ))
+        .delete(format!("{}/api/v1/sessions/{}/preview", h.url, session_id))
         .send()
         .await
         .unwrap()
@@ -247,10 +233,7 @@ async fn test_preview_get_and_stop_lifecycle() {
     // After stop, the preview is removed so GET returns 404.
     let after = h
         .http
-        .get(format!(
-            "{}/api/v1/sessions/{}/preview",
-            h.url, session_id
-        ))
+        .get(format!("{}/api/v1/sessions/{}/preview", h.url, session_id))
         .send()
         .await
         .unwrap();
@@ -326,10 +309,11 @@ async fn test_preview_status_failed_when_child_exits_nonzero() {
         error: None,
     };
 
-    h.state.previews.lock().await.insert(
-        sid,
-        PreviewProcess { child, info },
-    );
+    h.state
+        .previews
+        .lock()
+        .await
+        .insert(sid, PreviewProcess { child, info });
 
     // Wait briefly for the child to exit, then query status.
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -381,10 +365,11 @@ async fn test_preview_health_check_transitions_starting_to_running() {
         error: None,
     };
 
-    h.state.previews.lock().await.insert(
-        sid,
-        PreviewProcess { child, info },
-    );
+    h.state
+        .previews
+        .lock()
+        .await
+        .insert(sid, PreviewProcess { child, info });
 
     // Give the mock server a moment to start accepting connections.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

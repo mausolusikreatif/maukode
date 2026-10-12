@@ -226,7 +226,9 @@ async fn proxy_preview_inner(
         let preview = previews
             .get(&id)
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "No preview for session"))?;
-        preview.info.port
+        preview
+            .info
+            .port
             .ok_or_else(|| error(StatusCode::CONFLICT, "Preview has no port assigned"))?
     };
 
@@ -287,8 +289,7 @@ async fn proxy_preview_inner(
                 let rewritten = rewrite_redirect(loc, port, &id);
                 response_builder = response_builder.header(
                     name.clone(),
-                    HeaderValue::from_str(&rewritten)
-                        .unwrap_or_else(|_| value.clone()),
+                    HeaderValue::from_str(&rewritten).unwrap_or_else(|_| value.clone()),
                 );
                 continue;
             }
@@ -305,7 +306,12 @@ async fn proxy_preview_inner(
 
     response_builder
         .body(Body::from_stream(stream))
-        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, format!("proxy body error: {e}")))
+        .map_err(|e| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("proxy body error: {e}"),
+            )
+        })
 }
 
 /// Hop-by-hop headers that must not be forwarded by a proxy (RFC 7230 §6.1).
@@ -375,7 +381,9 @@ async fn proxy_preview_ws_inner(
         let preview = previews
             .get(&id)
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "No preview for session"))?;
-        preview.info.port
+        preview
+            .info
+            .port
             .ok_or_else(|| error(StatusCode::CONFLICT, "Preview has no port assigned"))?
     };
 
@@ -391,7 +399,12 @@ async fn proxy_preview_ws_inner(
     // Connect to the upstream dev server WebSocket.
     let (upstream, _resp) = tokio_tungstenite::connect_async(&upstream_url)
         .await
-        .map_err(|e| error(StatusCode::BAD_GATEWAY, format!("ws upstream connect failed: {e}")))?;
+        .map_err(|e| {
+            error(
+                StatusCode::BAD_GATEWAY,
+                format!("ws upstream connect failed: {e}"),
+            )
+        })?;
 
     // Accept the client WebSocket and bridge the two connections.
     Ok(ws.on_upgrade(move |client_ws| async move {
@@ -402,7 +415,9 @@ async fn proxy_preview_ws_inner(
 /// Bidirectionally bridge two WebSocket connections until either side closes.
 async fn bridge_websockets(
     client: WebSocket,
-    upstream: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    upstream: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
 ) {
     let (mut client_tx, mut client_rx) = client.split();
     let (mut upstream_tx, mut upstream_rx) = upstream.split();
