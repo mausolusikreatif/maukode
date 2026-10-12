@@ -148,18 +148,16 @@ pub async fn get_preview(
         // server responds (status flips to "running").
         if let Some(port) = preview.info.port {
             let addr = format!("127.0.0.1:{port}");
-            match tokio::time::timeout(
+            if let Ok(Ok(_)) = tokio::time::timeout(
                 std::time::Duration::from_millis(500),
                 tokio::net::TcpStream::connect(&addr),
             )
             .await
             {
-                Ok(Ok(_)) => {
-                    preview.info.status = "running".into();
-                    preview.info.ready = true;
-                }
-                _ => {} // still starting — leave status as "starting"
+                preview.info.status = "running".into();
+                preview.info.ready = true;
             }
+            // still starting — leave status as "starting"
         }
     }
 
@@ -317,11 +315,9 @@ async fn proxy_preview_inner(
     }
 
     // Stream the body chunks back to the client.
-    let stream = upstream_resp.bytes_stream().map(|result| {
-        result.map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::Other, format!("stream error: {e}"))
-        })
-    });
+    let stream = upstream_resp
+        .bytes_stream()
+        .map(|result| result.map_err(|e| std::io::Error::other(format!("stream error: {e}"))));
 
     response_builder
         .body(Body::from_stream(stream))
