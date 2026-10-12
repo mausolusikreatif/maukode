@@ -209,6 +209,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             axum::routing::any(preview::proxy_preview_root),
         )
         .route(
+            "/api/v1/sessions/{id}/preview/proxy/",
+            axum::routing::any(preview::proxy_preview_root),
+        )
+        .route(
             "/api/v1/sessions/{id}/preview/proxy/{*rest}",
             axum::routing::any(preview::proxy_preview_path),
         )
