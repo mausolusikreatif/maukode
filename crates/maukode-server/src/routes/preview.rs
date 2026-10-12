@@ -195,7 +195,7 @@ pub async fn proxy_preview_root(
     ws: Option<WebSocketUpgrade>,
     req: Request,
 ) -> Result<Response, (StatusCode, String)> {
-    proxy_preview_inner(state.state, *id, ws, req).await
+    proxy_preview_inner(state.0, *id, ws, req).await
 }
 
 /// Reverse-proxy handler for sub-paths (`/preview/proxy/{*rest}`).
@@ -205,7 +205,7 @@ pub async fn proxy_preview_path(
     ws: Option<WebSocketUpgrade>,
     req: Request,
 ) -> Result<Response, (StatusCode, String)> {
-    proxy_preview_inner(state.state, params.0, ws, req).await
+    proxy_preview_inner(state.0, params.0.0, ws, req).await
 }
 
 async fn proxy_preview_inner(
