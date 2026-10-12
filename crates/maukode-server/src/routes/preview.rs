@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use maukode_protocol::{PreviewInfo, PreviewRequest, SessionId};
-use maukode_tools::{sandboxed_command, SandboxMode};
+use maukode_tools::sandboxed_command;
 use serde_json::Value;
 use std::sync::Arc;
 
