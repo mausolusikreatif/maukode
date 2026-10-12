@@ -68,7 +68,7 @@ pub async fn start_preview(
         .map(|s| serde_json::from_str(&format!("\"{s}\"")))
         .transpose()
         .map_err(|_| error(StatusCode::BAD_REQUEST, "Invalid sandbox_mode"))?
-        .unwrap_or_else(|| SandboxMode::default());
+        .unwrap_or_default();
     let port = request.port.unwrap_or(3000);
     let mut command = sandboxed_command(
         "npm",
