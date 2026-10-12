@@ -205,7 +205,7 @@ pub async fn proxy_preview_path(
     ws: Option<WebSocketUpgrade>,
     req: Request,
 ) -> Result<Response, (StatusCode, String)> {
-    proxy_preview_inner(state.0, params.0.0, ws, req).await
+    proxy_preview_inner(state.0, params.0 .0, ws, req).await
 }
 
 async fn proxy_preview_inner(
