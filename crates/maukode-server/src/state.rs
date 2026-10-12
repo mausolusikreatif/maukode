@@ -9,6 +9,11 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tokio_util::sync::CancellationToken;
 
+pub struct PreviewProcess {
+    pub child: tokio::process::Child,
+    pub info: maukode_protocol::PreviewInfo,
+}
+
 /// Number of recent events kept per session so reconnecting clients can catch up.
 const EVENT_LOG_CAPACITY: usize = 2000;
 
@@ -146,6 +151,8 @@ pub struct ServerState {
     /// without a token on a loopback bind; `run_server` turns it off for other bind addresses.
     pub enforce_local_host: bool,
     pub default_dir: PathBuf,
+    /// At most one daemon-owned preview process per session.
+    pub previews: Arc<tokio::sync::Mutex<HashMap<SessionId, PreviewProcess>>>,
 }
 
 impl ServerState {
@@ -183,6 +190,7 @@ impl ServerState {
             enforce_local_host: auth_token.is_none(),
             auth_token,
             default_dir: dir,
+            previews: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -400,5 +408,8 @@ impl ServerState {
         self.pending_permissions.write().await.remove(&id);
         self.session_permissions.write().await.remove(&id);
         self.queued_prompts.write().await.remove(&id);
+        if let Some(mut preview) = self.previews.lock().await.remove(&id) {
+            let _ = preview.child.kill().await;
+        }
     }
 }

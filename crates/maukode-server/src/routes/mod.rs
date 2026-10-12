@@ -2,6 +2,7 @@ pub mod auth;
 pub mod events;
 pub mod health;
 pub mod plugins;
+pub mod preview;
 pub mod providers;
 pub mod sessions;
 pub mod settings;
@@ -196,6 +197,12 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/api/v1/sessions/{id}/messages",
             get(sessions::get_session_messages),
+        )
+        .route(
+            "/api/v1/sessions/{id}/preview",
+            post(preview::start_preview)
+                .get(preview::get_preview)
+                .delete(preview::stop_preview),
         )
         .route(
             "/api/v1/sessions/{id}/model",
