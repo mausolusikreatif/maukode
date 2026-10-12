@@ -3,7 +3,7 @@ use axum::{
     body::Body,
     extract::{
         ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
-        Path, Request, State,
+        FromRequest, Path, Request, State,
     },
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
@@ -192,31 +192,50 @@ pub async fn stop_preview(
 pub async fn proxy_preview_root(
     state: State<Arc<ServerState>>,
     id: Path<SessionId>,
-    ws: Option<WebSocketUpgrade>,
     req: Request,
 ) -> Result<Response, (StatusCode, String)> {
-    proxy_preview_inner(state.0, *id, ws, req).await
+    proxy_preview_inner(state.0, *id, req).await
 }
 
 /// Reverse-proxy handler for sub-paths (`/preview/proxy/{*rest}`).
 pub async fn proxy_preview_path(
     state: State<Arc<ServerState>>,
     params: Path<(SessionId, String)>,
-    ws: Option<WebSocketUpgrade>,
     req: Request,
 ) -> Result<Response, (StatusCode, String)> {
-    proxy_preview_inner(state.0, params.0 .0, ws, req).await
+    proxy_preview_inner(state.0, params.0 .0, req).await
 }
 
 async fn proxy_preview_inner(
     state: Arc<ServerState>,
     id: SessionId,
-    ws_upgrade: Option<WebSocketUpgrade>,
     req: Request,
 ) -> Result<Response, (StatusCode, String)> {
-    // If this is a WebSocket upgrade request, handle it as a WS proxy.
-    if let Some(ws) = ws_upgrade {
-        return proxy_preview_ws_inner(state, id, ws, req).await;
+    // Check whether this is a WebSocket upgrade request by inspecting headers.
+    // We cannot use `WebSocketUpgrade` as an extractor alongside `Request` because
+    // both consume the request body in axum 0.8.
+    let is_ws_upgrade = req
+        .headers()
+        .get(axum::http::header::UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
+        && req
+            .headers()
+            .get(axum::http::header::CONNECTION)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.to_ascii_lowercase().contains("upgrade"));
+
+    if is_ws_upgrade {
+        // Capture the path before the request is consumed by WebSocketUpgrade extraction.
+        let path = req
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str().to_string())
+            .unwrap_or_default();
+        let ws = WebSocketUpgrade::from_request(req, &())
+            .await
+            .map_err(|e| error(StatusCode::BAD_REQUEST, format!("ws upgrade failed: {e}")))?;
+        return proxy_preview_ws_inner(state, id, ws, &path).await;
     }
 
     // Otherwise, handle as a normal HTTP reverse-proxy request.
@@ -373,7 +392,7 @@ async fn proxy_preview_ws_inner(
     state: Arc<ServerState>,
     id: SessionId,
     ws: WebSocketUpgrade,
-    req: Request,
+    original_path: &str,
 ) -> Result<Response, (StatusCode, String)> {
     // Look up the preview port.
     let port = {
@@ -388,11 +407,6 @@ async fn proxy_preview_ws_inner(
     };
 
     // Build the upstream WS URL from the request path.
-    let original_path = req
-        .uri()
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or("/");
     let forward_path = strip_proxy_prefix(original_path, &id);
     let upstream_url = format!("ws://127.0.0.1:{port}{forward_path}");
 
