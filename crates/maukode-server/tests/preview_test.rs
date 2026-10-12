@@ -108,6 +108,9 @@ async fn test_proxy_forwards_html_and_strips_frame_headers() {
         axum::serve(mock_listener, mock_app).await.unwrap();
     });
 
+    // Give the mock server a moment to start accepting connections.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
     let session_id = h.create(dir.path()).await;
     inject_mock_preview(&h.state, &session_id, mock_port).await;
 
@@ -145,6 +148,9 @@ async fn test_proxy_rewrites_redirect_location() {
     tokio::spawn(async move {
         axum::serve(mock_listener, mock_app).await.unwrap();
     });
+
+    // Give the mock server a moment to start accepting connections.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let session_id = h.create(dir.path()).await;
     inject_mock_preview(&h.state, &session_id, mock_port).await;
@@ -250,11 +256,14 @@ async fn test_proxy_strips_hop_by_hop_headers() {
     let mock_app = axum::Router::new().route(
         "/",
         axum::routing::get(|| async {
+            // Use hop-by-hop headers that hyper won't reject when set manually.
+            // `transfer-encoding` and `connection` are managed by the transport
+            // layer, so we use `proxy-connection`, `keep-alive`, and `te` instead.
             (
                 [
-                    ("connection", "keep-alive"),
-                    ("transfer-encoding", "chunked"),
+                    ("proxy-connection", "keep-alive"),
                     ("keep-alive", "timeout=5"),
+                    ("te", "trailers"),
                 ],
                 "data",
             )
@@ -263,6 +272,9 @@ async fn test_proxy_strips_hop_by_hop_headers() {
     tokio::spawn(async move {
         axum::serve(mock_listener, mock_app).await.unwrap();
     });
+
+    // Give the mock server a moment to start accepting connections.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let session_id = h.create(dir.path()).await;
     inject_mock_preview(&h.state, &session_id, mock_port).await;
@@ -278,10 +290,9 @@ async fn test_proxy_strips_hop_by_hop_headers() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     // Hop-by-hop headers must not be forwarded.
-    assert!(resp.headers().get("connection").is_none());
+    assert!(resp.headers().get("proxy-connection").is_none());
     assert!(resp.headers().get("keep-alive").is_none());
-    // Note: transfer-encoding may be re-added by hyper's transport layer
-    // when streaming a body without Content-Length, so we don't assert on it.
+    assert!(resp.headers().get("te").is_none());
 }
 
 #[tokio::test]
