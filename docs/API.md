@@ -53,6 +53,10 @@ bodies with a 4xx/5xx status.
 | POST | `/sessions/{id}/worktree/merge` | `{message?}` | commits, then `--no-ff` merge into the project's current branch → `{result: merged\|nothing_to_merge\|conflict, ...}`; `409` if running or the project has modified tracked files; conflicts are rolled back |
 | POST | `/sessions/{id}/init` | `{force}` | |
 | POST | `/sessions/{id}/compact` | `{focus?}` | |
+| POST | `/sessions/{id}/preview` | `{port?, sandbox_mode?}` | starts a sandboxed `npm run dev` (or `npm start`) in the session's directory; returns `PreviewInfo` |
+| GET | `/sessions/{id}/preview` | | returns current `PreviewInfo` (status, port, proxy URL, ready) |
+| DELETE | `/sessions/{id}/preview` | | kills the dev server process |
+| ANY | `/sessions/{id}/preview/proxy/{*path}` | | reverse-proxy to the dev server; streams body, strips `X-Frame-Options`/`CSP` for iframe embedding, rewrites redirects |
 
 (`/api/v1` prefix omitted above except for health.)
 

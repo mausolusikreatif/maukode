@@ -7,6 +7,7 @@ import type {
   GlobalEvent,
   LLMEvent,
   PermissionDecision,
+  PreviewInfo,
   ProvidersListResponse,
   SessionDetailResponse,
   SessionListItem,
@@ -60,6 +61,21 @@ export interface ActionResult {
   /** Files listed for a merge conflict. */
   files?: string[];
 }
+
+/** State for the live dev-server preview panel. */
+export interface PreviewState {
+  open: boolean;
+  loading: boolean;
+  info: PreviewInfo | null;
+  error: string | null;
+}
+
+const initialPreview: PreviewState = {
+  open: false,
+  loading: false,
+  info: null,
+  error: null,
+};
 
 /** What the agent changed in the open session, and what can be done about it. */
 export interface ReviewState {
@@ -138,6 +154,13 @@ interface AppState {
   undoLast: () => Promise<void>;
   commitWorktree: (message: string) => Promise<void>;
   mergeWorktree: (message: string) => Promise<void>;
+
+  // Preview
+  preview: PreviewState;
+  startPreview: (id: string, port?: number) => Promise<void>;
+  refreshPreview: (id: string) => Promise<void>;
+  stopPreview: (id: string) => Promise<void>;
+  togglePreview: () => void;
 
   sidebarOpen: boolean;
   newSessionOpen: boolean;
@@ -293,6 +316,7 @@ export const useApp = create<AppState>((set, get) => {
     threads: {},
     loadingOlder: false,
     review: emptyReview(),
+    preview: initialPreview,
     view: "home",
     lastStop: {},
     notificationsOn: loadNotificationsPref(),
@@ -329,6 +353,53 @@ export const useApp = create<AppState>((set, get) => {
     closeShortcuts: () => set({ shortcutsOpen: false }),
     toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
     closeCommandPalette: () => set({ commandPaletteOpen: false }),
+
+    // ── Preview ──────────────────────────────────────────────────────────
+    startPreview: async (id, port) => {
+      const { client } = get();
+      if (!client) return;
+      set((s) => ({ preview: { ...s.preview, loading: true, error: null } }));
+      try {
+        const info = await client.startPreview(id, port ? { port } : undefined);
+        set((s) => ({
+          preview: {
+            open: true,
+            loading: false,
+            info,
+            error: null,
+          },
+        }));
+      } catch (e) {
+        set((s) => ({ preview: { ...s.preview, loading: false, error: errorText(e) } }));
+      }
+    },
+    refreshPreview: async (id) => {
+      const { client } = get();
+      if (!client) return;
+      try {
+        const info = await client.getPreview(id);
+        set((s) => ({
+          preview: {
+            ...s.preview,
+            info,
+            error: null,
+          },
+        }));
+      } catch (e) {
+        set((s) => ({ preview: { ...s.preview, error: errorText(e) } }));
+      }
+    },
+    stopPreview: async (id) => {
+      const { client } = get();
+      if (!client) return;
+      try {
+        await client.stopPreview(id);
+        set((s) => ({ preview: { ...s.preview, info: null, open: false } }));
+      } catch (e) {
+        set((s) => ({ preview: { ...s.preview, error: errorText(e) } }));
+      }
+    },
+    togglePreview: () => set((s) => ({ preview: { ...s.preview, open: !s.preview.open } })),
 
     refreshProviders: async () => {
       const client = get().client;
@@ -404,7 +475,7 @@ export const useApp = create<AppState>((set, get) => {
       sessionAbort?.abort();
       const ctrl = new AbortController();
       sessionAbort = ctrl;
-      set((s) => ({ activeId: id, meta: null, view: "home", review: emptyReview(s.review.open) }));
+      set((s) => ({ activeId: id, meta: null, view: "home", review: emptyReview(s.review.open), preview: { ...initialPreview, open: s.preview.open } }));
       try {
         const d = await client.getSession(id, PAGE);
         if (ctrl.signal.aborted) return;
