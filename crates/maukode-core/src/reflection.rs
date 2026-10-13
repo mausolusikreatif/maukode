@@ -279,10 +279,7 @@ fn build_conversation_summary(messages: &[Message]) -> String {
                 }
                 maukode_protocol::ContentPart::ToolCall(call) => {
                     tool_calls += 1;
-                    summary.push_str(&format!(
-                        "[{role} tool_call #{tool_calls}]: {}",
-                        call.name
-                    ));
+                    summary.push_str(&format!("[{role} tool_call #{tool_calls}]: {}", call.name));
                 }
                 maukode_protocol::ContentPart::ToolResult(result) => {
                     let status = if result.is_error { "ERROR" } else { "OK" };
@@ -316,13 +313,7 @@ fn sanitize_skill_name(name: &str) -> String {
     name.trim()
         .to_lowercase()
         .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c
-            } else {
-                '-'
-            }
-        })
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .trim_matches('-')
         .to_string()
@@ -399,7 +390,8 @@ fn parse_lesson_line(text: &str) -> Option<CandidateMemory> {
 
     // Default taxonomy; check if content starts with "taxonomy: X" prefix
     let taxonomy = if let Some(rest) = content.strip_prefix("taxonomy:") {
-        let (tax, remaining) = rest.split_once(|c: char| c.is_whitespace() || c == ',')
+        let (tax, remaining) = rest
+            .split_once(|c: char| c.is_whitespace() || c == ',')
             .unwrap_or((rest, ""));
         let tax = tax.trim().to_string();
         if !tax.is_empty() {
@@ -492,10 +484,7 @@ mod tests {
         assert_eq!(output.lessons.len(), 1);
         let skill = output.skill.expect("skill should be parsed");
         assert_eq!(skill.name, "check-types-first");
-        assert_eq!(
-            skill.description,
-            "Verify types before using unwrap"
-        );
+        assert_eq!(skill.description, "Verify types before using unwrap");
         assert!(skill.prompt.starts_with("Before calling unwrap"));
     }
 

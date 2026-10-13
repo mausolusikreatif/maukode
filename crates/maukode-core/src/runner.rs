@@ -139,10 +139,7 @@ impl SessionRunner {
 
     /// Enable post-turn reflection. When set, the agent will evaluate its performance
     /// after each completed turn and extract lessons / propose skills.
-    pub fn with_reflection_config(
-        mut self,
-        config: crate::reflection::ReflectionConfig,
-    ) -> Self {
+    pub fn with_reflection_config(mut self, config: crate::reflection::ReflectionConfig) -> Self {
         self.reflection_config = Some(config);
         self
     }
