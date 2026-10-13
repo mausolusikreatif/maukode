@@ -25,6 +25,7 @@ pub async fn run_tui(
     session_id: Option<SessionId>,
     continue_latest: bool,
     server_client: Option<std::sync::Arc<maukode_server::ServerClient>>,
+    max_steps: Option<usize>,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -37,7 +38,8 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(backend)?;
 
     let (mut events, event_tx) = EventHandler::new(Duration::from_millis(50));
-    let mut app = App::new(cwd, event_tx, session_id, continue_latest, server_client).await?;
+    let mut app =
+        App::new(cwd, event_tx, session_id, continue_latest, server_client, max_steps).await?;
 
     let res = run_loop(&mut terminal, &mut app, &mut events).await;
 
@@ -409,11 +411,34 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                         let name = provider.name.clone();
                         match app.config.set_active_provider(&id) {
                             Ok(()) => {
-                                if let Some(ref client) = app.server_client {
-                                    let client = client.clone();
-                                    let id_clone = id.clone();
+                                let id_clone = id.clone();
+                                let model_clone = app.config.active_model.clone();
+                                let session_id = app.session.try_read().map(|s| s.id).ok();
+
+                                if let Some(sid) = session_id {
+                                    let store = app.store.clone();
+                                    let p_store = id_clone.clone();
+                                    let m_store = model_clone.clone();
                                     tokio::spawn(async move {
-                                        let _ = client.set_active_provider(&id_clone).await;
+                                        let _ = store.set_session_model(sid, &p_store, &m_store).await;
+                                    });
+
+                                    if let Some(ref client) = app.server_client {
+                                        let client = client.clone();
+                                        let p_client = id_clone.clone();
+                                        let m_client = model_clone.clone();
+                                        tokio::spawn(async move {
+                                            let _ = client.set_active_provider(&p_client).await;
+                                            let _ = client
+                                                .set_session_model(sid, &m_client, Some(&p_client))
+                                                .await;
+                                        });
+                                    }
+                                } else if let Some(ref client) = app.server_client {
+                                    let client = client.clone();
+                                    let id_c = id_clone.clone();
+                                    tokio::spawn(async move {
+                                        let _ = client.set_active_provider(&id_c).await;
                                     });
                                 }
                                 app.set_status(format!("Activated provider '{name}'"));
@@ -590,7 +615,29 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     };
 
                     app.config.set_active_model(&chosen);
-                    if let Some(ref client) = app.server_client {
+                    let provider = app.config.active_provider.clone();
+                    let session_id = app.session.try_read().map(|s| s.id).ok();
+
+                    if let Some(sid) = session_id {
+                        let store = app.store.clone();
+                        let p_store = provider.clone();
+                        let m_store = chosen.clone();
+                        tokio::spawn(async move {
+                            let _ = store.set_session_model(sid, &p_store, &m_store).await;
+                        });
+
+                        if let Some(ref client) = app.server_client {
+                            let client = client.clone();
+                            let chosen_clone = chosen.clone();
+                            let p_client = provider.clone();
+                            tokio::spawn(async move {
+                                let _ = client.set_active_model(&chosen_clone).await;
+                                let _ = client
+                                    .set_session_model(sid, &chosen_clone, Some(&p_client))
+                                    .await;
+                            });
+                        }
+                    } else if let Some(ref client) = app.server_client {
                         let client = client.clone();
                         let chosen_clone = chosen.clone();
                         tokio::spawn(async move {
@@ -1044,7 +1091,7 @@ mod end_to_end_wrap_tests {
         let temp = tempfile::tempdir()?;
         let _data_dir = TestDataDir::set(temp.path());
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mut app = App::new(temp.path().to_path_buf(), tx, None, false, None).await?;
+        let mut app = App::new(temp.path().to_path_buf(), tx, None, false, None, None).await?;
         let mut terminal = Terminal::new(TestBackend::new(24, 16))?;
 
         for ch in "alpha beta gamma delta epsilon".chars() {

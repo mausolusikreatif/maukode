@@ -70,6 +70,13 @@ impl TokenEstimator {
     /// (200K for older models).
     pub fn context_window_for_model(model: &str) -> usize {
         let m = model.to_lowercase();
+        let m = m.trim();
+
+        // ── Auto / Gateway Routing Default ─────────────────────────────
+        // Gateways like llmkita route "auto" to top frontier models (GLM-5 / Claude 1M).
+        if m == "auto" || m.ends_with("/auto") {
+            return 1_000_000;
+        }
 
         // ── Anthropic Claude ────────────────────────────────────────────
         //
@@ -297,6 +304,13 @@ mod tests {
         assert_eq!(
             TokenEstimator::context_window_for_model("deepseek-coder"),
             64_000
+        );
+
+        // Auto gateway routing
+        assert_eq!(TokenEstimator::context_window_for_model("auto"), 1_000_000);
+        assert_eq!(
+            TokenEstimator::context_window_for_model("llmkita/auto"),
+            1_000_000
         );
 
         // Unknown model → fallback

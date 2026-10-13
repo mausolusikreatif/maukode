@@ -146,6 +146,53 @@ impl ServerClient {
         Ok(())
     }
 
+    pub async fn set_session_model(
+        &self,
+        id: SessionId,
+        model: &str,
+        provider_id: Option<&str>,
+    ) -> Result<()> {
+        let body = serde_json::json!({
+            "model": model,
+            "provider_id": provider_id,
+        });
+        let resp = self
+            .http
+            .put(format!("{}/api/v1/sessions/{id}/model", self.base_url))
+            .json(&body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to set session model: {err}"));
+        }
+        Ok(())
+    }
+
+    pub async fn set_agent_config(
+        &self,
+        max_steps: Option<usize>,
+        max_tokens: Option<u32>,
+        reflection: Option<maukode_core::ReflectionConfig>,
+    ) -> Result<()> {
+        let body = serde_json::json!({
+            "max_steps": max_steps,
+            "max_tokens": max_tokens,
+            "reflection": reflection,
+        });
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/agent/config", self.base_url))
+            .json(&body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to set agent config: {err}"));
+        }
+        Ok(())
+    }
+
     pub async fn list_sessions(
         &self,
         directory: Option<&Path>,
@@ -171,9 +218,22 @@ impl ServerClient {
         directory: Option<&Path>,
         title: Option<&str>,
     ) -> Result<SessionMetadata> {
+        self.create_session_with_options(directory, title, None, None)
+            .await
+    }
+
+    pub async fn create_session_with_options(
+        &self,
+        directory: Option<&Path>,
+        title: Option<&str>,
+        provider: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<SessionMetadata> {
         let body = serde_json::json!({
             "directory": directory.map(|d| d.to_string_lossy().to_string()),
             "title": title,
+            "provider": provider,
+            "model": model,
         });
         let resp = self
             .http
