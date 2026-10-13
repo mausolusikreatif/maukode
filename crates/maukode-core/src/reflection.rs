@@ -440,12 +440,12 @@ fn parse_skill_block(text: &str) -> Option<ProposedSkill> {
     }
 
     Some(ProposedSkill {
-        name,
         description: if description.is_empty() {
             format!("Learned skill: {}", name)
         } else {
             description
         },
+        name,
         prompt: prompt.trim().to_string(),
     })
 }
