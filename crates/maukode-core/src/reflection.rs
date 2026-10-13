@@ -390,9 +390,9 @@ fn parse_lesson_line(text: &str) -> Option<CandidateMemory> {
 
     // Default taxonomy; check if content starts with "taxonomy: X" prefix
     let taxonomy = if let Some(rest) = content.strip_prefix("taxonomy:") {
-        let (tax, remaining) = rest
-            .split_once(|c: char| c.is_whitespace() || c == ',')
-            .unwrap_or((rest, ""));
+        let rest = rest.trim_start();
+        // Taxonomy extends to the first comma; everything after is the lesson content.
+        let (tax, remaining) = rest.split_once(',').unwrap_or((rest, ""));
         let tax = tax.trim().to_string();
         if !tax.is_empty() {
             content = remaining.trim().to_string();
