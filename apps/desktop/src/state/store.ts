@@ -360,15 +360,15 @@ export const useApp = create<AppState>((set, get) => {
       if (!client) return;
       set((s) => ({ preview: { ...s.preview, loading: true, error: null } }));
       try {
-        const info = await client.startPreview(id, port ? { port } : undefined);
-        set((s) => ({
+        const info = await client.startPreview(id, port ? { port, sandbox_mode: null } : undefined);
+        set({
           preview: {
             open: true,
             loading: false,
             info,
             error: null,
           },
-        }));
+        });
       } catch (e) {
         set((s) => ({ preview: { ...s.preview, loading: false, error: errorText(e) } }));
       }
