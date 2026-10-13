@@ -18,6 +18,8 @@ import type {
   PermissionDecision,
   PermissionMode,
   PluginManifest,
+  PreviewInfo,
+  PreviewRequest,
   ProviderConfig,
   ProvidersListResponse,
   SecuritySettings,
@@ -258,6 +260,22 @@ export class ApiClient {
   }
   audit(id: string) {
     return this.request<AuditResponse>("GET", `/api/v1/sessions/${id}/audit`);
+  }
+
+  // ── Preview lifecycle ────────────────────────────────────────────────────
+
+  startPreview(id: string, req?: PreviewRequest) {
+    return this.request<PreviewInfo>("POST", `/api/v1/sessions/${id}/preview`, req ?? {});
+  }
+  getPreview(id: string) {
+    return this.request<PreviewInfo>("GET", `/api/v1/sessions/${id}/preview`);
+  }
+  stopPreview(id: string) {
+    return this.request<PreviewInfo>("DELETE", `/api/v1/sessions/${id}/preview`);
+  }
+  /** Returns the proxy URL that an iframe `src` can point to for live preview. */
+  previewProxyUrl(id: string, path = "/") {
+    return `${this.baseUrl}/api/v1/sessions/${id}/preview/proxy${path}`;
   }
 
   /**

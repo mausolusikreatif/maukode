@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Folder, GitBranch, MoreHorizontal, PanelLeft, Pin, Archive, ShieldCheck, Trash2 } from "lucide-react";
+import { Eye, Folder, GitBranch, MoreHorizontal, PanelLeft, Pin, Archive, ShieldCheck, Trash2 } from "lucide-react";
 import { AuditDialog } from "./components/AuditDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { Composer } from "./components/Composer";
@@ -10,6 +10,7 @@ import { DeleteDialog } from "./components/DeleteDialog";
 import { ModelSelect } from "./components/ModelSelect";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Prompts } from "./components/Prompts";
+import { PreviewPanel } from "./components/PreviewPanel";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SettingsPage } from "./components/SettingsPage";
 import { ShortcutModal } from "./components/ShortcutModal";
@@ -88,12 +89,14 @@ function SessionView() {
     threads,
     sidebarOpen,
     review,
+    preview,
     archivedSessionIds,
     pinnedSessionIds,
     toggleSidebar,
     togglePinSession,
     toggleArchiveSession,
     toggleReview,
+    togglePreview,
   } = useApp();
   const [deleting, setDeleting] = useState(false);
   const [auditing, setAuditing] = useState(false);
@@ -187,6 +190,7 @@ function SessionView() {
               </DropdownMenuContent>
             </DropdownMenu>
             <button data-testid="audit-button" className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground" title="Audit session" onClick={() => setAuditing(true)}><ShieldCheck className="size-4" /></button>
+            <button data-testid="preview-toggle" className={cn("rounded-md p-2 transition-colors", preview.open ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground")} title="Toggle preview" onClick={togglePreview}><Eye className="size-4" /></button>
             <button data-testid="delete-session" className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Delete session" onClick={() => setDeleting(true)}><Trash2 className="size-4" /></button>
           </div>
         </header>
@@ -195,6 +199,7 @@ function SessionView() {
         <Composer running={thread.running} />
       </main>
       {review.open && <ReviewPanel running={thread.running} />}
+      {preview.open && activeId && <PreviewPanel sessionId={activeId} />}
       {auditing && <AuditDialog sessionId={activeId} onClose={() => setAuditing(false)} />}
       {deleting && <DeleteDialog sessionId={activeId} onClose={() => setDeleting(false)} />}
     </div>

@@ -28,6 +28,8 @@ export type { PermissionRequest } from "./generated/PermissionRequest";
 export type { Plan } from "./generated/Plan";
 export type { PlanStep } from "./generated/PlanStep";
 export type { PluginManifest } from "./generated/PluginManifest";
+export type { PreviewInfo } from "./generated/PreviewInfo";
+export type { PreviewRequest } from "./generated/PreviewRequest";
 export type { ProviderConfig } from "./generated/ProviderConfig";
 export type { ProviderKind } from "./generated/ProviderKind";
 export type { ProvidersListResponse } from "./generated/ProvidersListResponse";

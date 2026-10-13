@@ -153,6 +153,8 @@ pub struct ServerState {
     pub default_dir: PathBuf,
     /// At most one daemon-owned preview process per session.
     pub previews: Arc<tokio::sync::Mutex<HashMap<SessionId, PreviewProcess>>>,
+    /// Shared HTTP client used by the preview reverse proxy for connection pooling.
+    pub proxy_client: reqwest::Client,
 }
 
 impl ServerState {
@@ -191,6 +193,9 @@ impl ServerState {
             auth_token,
             default_dir: dir,
             previews: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            proxy_client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
         })
     }
 
