@@ -151,7 +151,7 @@ pub struct SetAgentConfigRequest {
 }
 
 pub async fn get_agent_config(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
-    Json(state.config.read().await.agent)
+    Json(state.config.read().await.agent.clone())
 }
 
 pub async fn set_agent_config(
@@ -178,7 +178,7 @@ pub async fn set_agent_config(
     if let Some(reflection) = payload.reflection {
         agent.reflection = reflection;
     }
-    config.agent = agent;
+    config.agent = agent.clone();
     config
         .save()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
