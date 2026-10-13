@@ -5,6 +5,33 @@ Semua perubahan penting untuk proyek ini akan didokumentasikan dalam file ini.
 Format berdasarkan [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-14
+
+Patch release. 1 PR (#72) sejak v0.3.0.
+
+### Fixed
+
+- **Sinkronisasi Session Model**: Memperbaiki issue di mana pemilihan model via
+  TUI (`/model`, `ModelSelector` via F2, dan `ProviderSelector` via F3) atau saat
+  pembuatan sesi baru tidak tersinkronisasi ke sesi yang tersimpan di SQLite database.
+  Akibatnya server `effective_model` tetap terkunci pada model default sesi
+  (misal `"auto"`). Sekarang memanggil `set_session_model` (`PUT /api/v1/sessions/{id}/model`)
+  dan menyinkronkan status sesi secara konsisten.
+- **Propagasi CLI `--max-steps`**: Memperbaiki flag CLI `maukode --max-steps <N>` yang
+  sebelumnya terabaikan dan selalu fallback ke default 50 steps pada daemon mode
+  dan standalone TUI mode. Sekarang nilai `--max-steps` dikirim ke endpoint
+  `POST /api/v1/agent/config` (`client.set_agent_config`) pada daemon mode dan
+  diteruskan ke `run_tui` pada standalone mode.
+- **Context Window Gateway Routing (`"auto"`)**: Memperbaiki resolusi context window
+  estimator untuk alias routing seperti `"auto"` (yang umum digunakan oleh gateway
+  seperti LLMKita dengan target model 1M seperti GLM-5.3/Claude/GPT) agar tidak
+  fallback ke batas konservatif 128k, melainkan teresolusi ke 1.000.000 tokens (1M).
+
+### Release Process
+
+- Bump versi ke 0.3.1 di seluruh manifest (workspace Cargo.toml, Tauri Cargo.toml,
+  tauri.conf.json, package.json, kedua Cargo.lock)
+
 ## [0.3.0] - 2026-10-13
 
 Minor release. 1 PR (#69) sejak v0.2.1.
