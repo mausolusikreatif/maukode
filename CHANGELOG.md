@@ -5,6 +5,44 @@ Semua perubahan penting untuk proyek ini akan didokumentasikan dalam file ini.
 Format berdasarkan [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-13
+
+Minor release. 1 PR (#69) sejak v0.2.1.
+
+### Added — Post-Turn Reflection Loop
+
+- **Reflection engine** (`crates/maukode-core/src/reflection.rs`): setelah sebuah
+  turn selesai, agent mengevaluasi performanya sendiri dan mengekstrak lessons
+  yang durable dari percakapan yang telah diselesaikan.
+- **`ReflectionConfig`**: opt-in via config dengan parameter:
+  - `enabled` — master switch (default: false)
+  - `min_tool_calls` — minimum jumlah tool calls dalam turn sebelum reflection
+    triggers (default: 3), menghindari refleksi pada turn trivial
+  - `skill_creation` — mengizinkan engine menulis skill files baru ke
+    `.maukode/skills/learned/` (default: false)
+- **Lesson extraction**: parsing output LLM untuk `[memory: title | taxonomy: X,
+  content]` blocks, dengan taxonomy extraction (gotchas, conventions, dll)
+- **Skill proposal**: parsing `SKILL:` blocks menjadi `ProposedSkill` dengan
+  name, description, dan prompt
+- **SessionRunner integration**: `with_reflection_config()` builder method
+- **CLI flag**: `--reflection` untuk mengaktifkan reflection di TUI
+- **Server API**: field `reflection` di `AgentConfig` dan `SetAgentConfigRequest`
+  untuk mengatur reflection via REST API
+- **Desktop Settings**: UI toggle untuk reflection config di Settings page
+- **TS bindings**: `ReflectionConfig.ts` generated untuk desktop app
+
+### Changed
+
+- `AgentConfig` tidak lagi mengimplementasikan `Copy` (menambahkan field
+  non-Copy `ReflectionConfig`). Handler server di-update untuk menggunakan
+  `.clone()`.
+- Workspace version bumped dari 0.2.1 ke 0.3.0
+
+### Release Process
+
+- Bump versi ke 0.3.0 di seluruh manifest (workspace Cargo.toml, Tauri Cargo.toml,
+  tauri.conf.json, package.json, kedua Cargo.lock)
+
 ## [0.2.1] - 2026-10-13
 
 Patch release. 1 PR (#66) sejak v0.2.0.
