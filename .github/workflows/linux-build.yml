@@ -19,6 +19,8 @@ jobs:
   linux:
     runs-on: blacksmith-4vcpu-ubuntu-2204
     timeout-minutes: 45
+    permissions:
+      contents: write    # needed by gh release create/upload
     steps:
       - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
