@@ -90,3 +90,46 @@ jobs:
             maukode-linux-x86_64-*.tar.gz.sha256
             apps/desktop/release-shell.png
           if-no-files-found: error
+      # ── Publish GitHub Release when triggered by a tag push ──────────────
+      # On `workflow_dispatch` or branch pushes we only upload artifacts (above).
+      # On `v*` tag pushes we also create a proper GitHub Release with the
+      # tarball and checksum attached, so users can download from the Releases
+      # page instead of hunting for CI artifacts (which expire in 1 day).
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER="${TAG#v}"  # strip leading 'v' to match CHANGELOG [x.y.z] format
+          # Extract the CHANGELOG section matching this version.
+          # Captures lines between "## [VER]" and the next "## [" heading.
+          NOTES="$(awk -v ver="$VER" '
+            BEGIN { capture = 0 }
+            /^## \[/ {
+              if (capture) exit          # next section → stop
+              match($0, /\[([0-9.]+)\]/, m)
+              if (m[1] == ver) capture = 1
+              next
+            }
+            capture { print }
+          ' CHANGELOG.md 2>/dev/null || true)"
+          if [ -z "$NOTES" ]; then
+            NOTES="Release ${TAG}. See CHANGELOG.md for details."
+          fi
+          # Create release with assets attached. If the release already exists
+          # (e.g. re-run), fall back to uploading assets with --clobber.
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "MauKode ${TAG}" \
+            --notes "$NOTES" \
+            --verify-tag \
+            --latest \
+            maukode-linux-x86_64-*.tar.gz \
+            maukode-linux-x86_64-*.tar.gz.sha256 \
+            || gh release upload "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            maukode-linux-x86_64-*.tar.gz \
+            maukode-linux-x86_64-*.tar.gz.sha256

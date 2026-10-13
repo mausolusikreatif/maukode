@@ -5,6 +5,30 @@ Semua perubahan penting untuk proyek ini akan didokumentasikan dalam file ini.
 Format berdasarkan [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-13
+
+Patch release. 1 PR (#66) sejak v0.2.0.
+
+### Fixed
+
+- **Compaction context window sizes**: Ganti hardcoded 200K-for-all-Claude dan
+  128K default dengan ukuran context window per-model yang akurat, bersumber
+  dari dokumentasi provider resmi:
+  - **Claude**: 5 family (opus/sonnet/haiku/fable/mythos) + Opus 4.7/4.8 → 1M;
+    Opus 4/4.5, Sonnet 4/4.5, Haiku 3.5, 3.x → 200K
+  - **GPT**: GPT-6/5.4/5.6 → 1.050.000; GPT-5/5.1 → 400.000; GPT-4o → 128.000;
+    GPT-4 → 8.192; GPT-4-32k → 32.768; GPT-3.5 → 16.384
+  - **GLM**: GLM-5.x → 1.000.000; GLM-4.x → 131.072
+  - Pattern matching mendukung notasi dashed (`claude-opus-4-8`) dan dotted
+    (`claude-opus-4.8`)
+
+### Release Process
+
+- Bump versi ke 0.2.1 di seluruh manifest (workspace Cargo.toml, Tauri Cargo.toml,
+  tauri.conf.json, package.json, kedua Cargo.lock)
+- Tag `v0.2.1` sebelumnya dibuat tanpa release commit — versi masih 0.2.0.
+  Perbaikan ini memastikan binary melaporkan versi yang benar.
+
 ## [0.2.0] - 2026-10-13
 
 144 commit, 41 PR (#18–#64) sejak v0.1.0. ~27.000 baris kode baru.
