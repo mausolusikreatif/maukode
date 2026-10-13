@@ -197,7 +197,7 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
         max_tokens: Number(tokens),
         reflection: {
           enabled: reflectionEnabled,
-          min_tool_calls: agent.reflection.min_tool_calls,
+          min_tool_calls: agent?.reflection.min_tool_calls ?? 3,
           skill_creation: reflectionSkillCreation,
         },
       });
