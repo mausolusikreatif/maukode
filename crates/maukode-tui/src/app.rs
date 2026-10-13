@@ -777,9 +777,7 @@ impl App {
                             let p_s = provider.clone();
                             tokio::spawn(async move {
                                 let _ = client.set_active_model(&m_s).await;
-                                let _ = client
-                                    .set_session_model(sid, &m_s, Some(&p_s))
-                                    .await;
+                                let _ = client.set_session_model(sid, &m_s, Some(&p_s)).await;
                             });
                         }
                     } else if let Some(client) = self.server_client.clone() {
