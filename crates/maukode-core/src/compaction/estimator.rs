@@ -57,32 +57,128 @@ impl TokenEstimator {
         total
     }
 
-    /// Determine context window size (in tokens) for a given model identifier
+    /// Determine context window size (in tokens) for a given model identifier.
+    ///
+    /// Values are sourced from official provider documentation:
+    /// - Anthropic (platform.claude.com/docs/en/models)
+    /// - OpenAI (platform.openai.com/docs/models)
+    /// - Zhipu/GLM (contextwindows.dev, verified against zhipuai official docs)
+    ///
+    /// Models are matched by substring of the lowercased identifier.  More
+    /// specific patterns are checked before broader ones so that, e.g.,
+    /// `claude-opus-4-8` (1M) is not swallowed by the general `claude` branch
+    /// (200K for older models).
     pub fn context_window_for_model(model: &str) -> usize {
         let m = model.to_lowercase();
 
+        // ── Anthropic Claude ────────────────────────────────────────────
+        //
+        // Claude 5.x and Opus 4.7+  → 1M context window
+        // Claude 4.x (Opus 4, Sonnet 4/4.5, Haiku 3.5) → 200K
+        // Claude 3.x                → 200K
         if m.contains("claude") {
-            200_000
-        } else if m.contains("gemini") {
-            1_000_000
-        } else if m.contains("gpt-4-32k") {
-            32_768
-        } else if m.contains("gpt-4")
-            && !m.contains("gpt-4o")
-            && !m.contains("turbo")
-            && !m.contains("1106")
-            && !m.contains("0125")
-        {
-            8_192
-        } else if m.contains("gpt-3.5") {
-            16_384
-        } else if m.contains("deepseek") {
-            64_000
-        } else if m.contains("qwen") {
-            32_768
-        } else {
-            128_000
+            // Claude 5 family — all have 1M context
+            if m.contains("claude-opus-5")
+                || m.contains("claude-sonnet-5")
+                || m.contains("claude-haiku-5")
+                || m.contains("claude-fable-5")
+                || m.contains("claude-mythos")
+            {
+                return 1_000_000;
+            }
+            // Claude Opus 4.7 and 4.8 — upgraded to 1M
+            // Accept both dash (claude-opus-4-7) and dot (claude-opus-4.7) separators
+            // since gateways like llmkita use dotted version notation.
+            if m.contains("claude-opus-4")
+                && (m.contains("4-7")
+                    || m.contains("4.7")
+                    || m.contains("4-8")
+                    || m.contains("4.8"))
+            {
+                return 1_000_000;
+            }
+            // All other Claude models (Opus 4/4.5, Sonnet 4/4.5, Haiku 3.5, 3.x)
+            return 200_000;
         }
+
+        // ── OpenAI GPT ──────────────────────────────────────────────────
+        //
+        // GPT-6 family       → 1,050,000 (922K input + 128K output)
+        // GPT-5.4 / 5.6 family → 1,050,000 (922K input + 128K output)
+        // GPT-5 / GPT-5.1    → 400,000 (272K input + 128K output)
+        // GPT-4o             → 128,000
+        // GPT-4 (non-turbo)  → 8,192
+        // GPT-4-32k          → 32,768
+        // GPT-3.5            → 16,384
+        if m.contains("gpt") {
+            // GPT-6 family
+            if m.contains("gpt-6") {
+                return 1_050_000;
+            }
+            // GPT-5.4 and GPT-5.6 families — 1M+ context
+            if m.contains("gpt-5-4")
+                || m.contains("gpt-5.4")
+                || m.contains("gpt-5-6")
+                || m.contains("gpt-5.6")
+            {
+                return 1_050_000;
+            }
+            // GPT-5 and GPT-5.1 — 400K context (272K input + 128K output)
+            if m.contains("gpt-5") {
+                return 400_000;
+            }
+            // GPT-4o — 128K context
+            if m.contains("gpt-4o") {
+                return 128_000;
+            }
+            // GPT-4-32k variant
+            if m.contains("gpt-4-32k") {
+                return 32_768;
+            }
+            // GPT-4 non-turbo base models — 8K
+            if m.contains("gpt-4")
+                && !m.contains("turbo")
+                && !m.contains("1106")
+                && !m.contains("0125")
+            {
+                return 8_192;
+            }
+            // GPT-3.5 — 16K
+            if m.contains("gpt-3.5") {
+                return 16_384;
+            }
+        }
+
+        // ── Zhipu GLM ───────────────────────────────────────────────────
+        //
+        // GLM-5.x   → 1,000,000
+        // GLM-4.5   → 131,072 (128K)
+        // GLM-4     → 131,072 (128K)
+        if m.contains("glm") {
+            if m.contains("glm-5") || m.contains("glm5") {
+                return 1_000_000;
+            }
+            // GLM-4.x and GLM-latest variants
+            return 131_072;
+        }
+
+        // ── Google Gemini ───────────────────────────────────────────────
+        if m.contains("gemini") {
+            return 1_000_000;
+        }
+
+        // ── DeepSeek ────────────────────────────────────────────────────
+        if m.contains("deepseek") {
+            return 64_000;
+        }
+
+        // ── Qwen ────────────────────────────────────────────────────────
+        if m.contains("qwen") {
+            return 32_768;
+        }
+
+        // ── Default fallback ────────────────────────────────────────────
+        128_000
     }
 
     /// Check conversation token usage against model context limit
@@ -119,18 +215,94 @@ mod tests {
 
     #[test]
     fn test_context_window_lookup() {
+        // Claude
         assert_eq!(
             TokenEstimator::context_window_for_model("claude-3-7-sonnet"),
             200_000
         );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-sonnet-4-5"),
+            200_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-opus-4-1"),
+            200_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-opus-4-8"),
+            1_000_000
+        );
+        // Dotted notation (used by llmkita gateway: "claude-opus-4.8")
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-opus-4.8"),
+            1_000_000
+        );
+        // Opus 4.1 must NOT match the 4.7/4.8 1M rule
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-opus-4-1"),
+            200_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-haiku-5-5"),
+            1_000_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-sonnet-5-5"),
+            1_000_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("claude-opus-4.8"),
+            1_000_000
+        );
+
+        // GPT
         assert_eq!(TokenEstimator::context_window_for_model("gpt-4o"), 128_000);
+        assert_eq!(TokenEstimator::context_window_for_model("gpt-5"), 400_000);
+        assert_eq!(TokenEstimator::context_window_for_model("gpt-5.1"), 400_000);
+        assert_eq!(
+            TokenEstimator::context_window_for_model("gpt-5.6"),
+            1_050_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("gpt-5.6-luna"),
+            1_050_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("gpt-6-astra"),
+            1_050_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("gpt-6-luna"),
+            1_050_000
+        );
+
+        // GLM
+        assert_eq!(TokenEstimator::context_window_for_model("glm-4.5"), 131_072);
+        assert_eq!(
+            TokenEstimator::context_window_for_model("glm-5.2"),
+            1_000_000
+        );
+        assert_eq!(
+            TokenEstimator::context_window_for_model("glm-5.3-flash"),
+            1_000_000
+        );
+
+        // Gemini
         assert_eq!(
             TokenEstimator::context_window_for_model("gemini-1.5-pro"),
             1_000_000
         );
+
+        // DeepSeek
         assert_eq!(
             TokenEstimator::context_window_for_model("deepseek-coder"),
             64_000
+        );
+
+        // Unknown model → fallback
+        assert_eq!(
+            TokenEstimator::context_window_for_model("some-unknown-model"),
+            128_000
         );
     }
 
