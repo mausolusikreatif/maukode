@@ -9,6 +9,7 @@ pub mod mcp;
 pub mod paths;
 pub mod permission;
 pub mod plugin;
+pub mod reflection;
 pub mod repo_map;
 pub mod rules;
 pub mod runner;
@@ -36,6 +37,7 @@ pub use maukode_memory::{MemoryContext, MemoryStore, Scope};
 pub use mcp::{McpClient, McpManager, McpTool};
 pub use permission::{PermissionManager, PermissionMode};
 pub use plugin::PluginManager;
+pub use reflection::{ProposedSkill, ReflectionConfig, ReflectionEngine};
 pub use repo_map::{CodebaseMapTool, RepoMapGenerator};
 pub use rules::{
     init_project, DetectedStack, DiscoveredRule, InitResult, ProjectDetector, ProjectMemory,

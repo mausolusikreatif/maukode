@@ -178,7 +178,11 @@ export class ApiClient {
   agentConfig() {
     return this.request<AgentConfig>("GET", "/api/v1/config/agent");
   }
-  setAgentConfig(c: { max_steps?: number; max_tokens?: number }) {
+  setAgentConfig(c: {
+    max_steps?: number;
+    max_tokens?: number;
+    reflection?: { enabled: boolean; min_tool_calls: number; skill_creation: boolean };
+  }) {
     return this.request<AgentConfig>("POST", "/api/v1/config/agent", c);
   }
   security() {

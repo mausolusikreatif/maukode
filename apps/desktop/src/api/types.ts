@@ -34,6 +34,7 @@ export type { ProviderConfig } from "./generated/ProviderConfig";
 export type { ProviderKind } from "./generated/ProviderKind";
 export type { ProvidersListResponse } from "./generated/ProvidersListResponse";
 export type { QueueSteeringPrompt } from "./generated/QueueSteeringPrompt";
+export type { ReflectionConfig } from "./generated/ReflectionConfig";
 export type { SecuritySettings } from "./generated/SecuritySettings";
 export type { SandboxMode } from "./generated/SandboxMode";
 export type { SessionDetailResponse } from "./generated/SessionDetailResponse";
