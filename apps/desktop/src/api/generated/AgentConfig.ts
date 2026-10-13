@@ -4,11 +4,9 @@ import type { ReflectionConfig } from "./ReflectionConfig";
 /**
  * Agent loop limits applied to every turn started through the server.
  */
-export type AgentConfig = {
-    max_steps: number,
-    max_tokens: number,
-    /**
-     * Post-turn reflection: the agent evaluates its performance and extracts lessons.
-     */
-    reflection: ReflectionConfig,
-};
+export type AgentConfig = { max_steps: number, max_tokens: number, 
+/**
+ * Post-turn reflection: the agent evaluates its performance and extracts lessons.
+ * See [`crate::reflection::ReflectionConfig`].
+ */
+reflection: ReflectionConfig, };
