@@ -56,12 +56,8 @@ struct Cli {
     #[arg(short = 'c', long, help = "Continue the latest session")]
     continue_session: bool,
 
-    #[arg(
-        long,
-        default_value_t = 50,
-        help = "Maximum turns of tool execution loop"
-    )]
-    max_steps: usize,
+    #[arg(long, help = "Maximum turns of tool execution loop")]
+    max_steps: Option<usize>,
 
     #[arg(
         long,
@@ -411,6 +407,9 @@ async fn main() -> anyhow::Result<()> {
         if let Some(model) = &cli.model {
             client.set_active_model(model).await?;
         }
+        if let Some(steps) = cli.max_steps {
+            let _ = client.set_agent_config(Some(steps), None, None).await;
+        }
         let is_remote_vps = cli.remote.is_some();
         let label = if is_remote_vps {
             "remote server"
@@ -428,10 +427,26 @@ async fn main() -> anyhow::Result<()> {
             if let Some(first) = sessions.first() {
                 first.id
             } else {
-                client.create_session(Some(&cwd), None).await?.id
+                client
+                    .create_session_with_options(
+                        Some(&cwd),
+                        None,
+                        cli.provider.as_deref(),
+                        cli.model.as_deref(),
+                    )
+                    .await?
+                    .id
             }
         } else {
-            client.create_session(Some(&cwd), None).await?.id
+            client
+                .create_session_with_options(
+                    Some(&cwd),
+                    None,
+                    cli.provider.as_deref(),
+                    cli.model.as_deref(),
+                )
+                .await?
+                .id
         };
 
         if let Some(prompt) = prompt_to_run {
@@ -614,12 +629,16 @@ async fn main() -> anyhow::Result<()> {
             Some(target_session_id),
             cli.continue_session,
             Some(client),
+            cli.max_steps,
         )
         .await?;
         return Ok(());
     }
 
     let mut config = AppConfig::load();
+    if let Some(steps) = cli.max_steps {
+        config.agent.max_steps = steps;
+    }
 
     // Override config with CLI flags if provided
     if let Some(ref p) = cli.provider {
@@ -711,7 +730,7 @@ async fn main() -> anyhow::Result<()> {
 
         let runner_config = RunnerConfig {
             model: config.active_model.clone(),
-            max_steps: cli.max_steps,
+            max_steps: cli.max_steps.unwrap_or(config.agent.max_steps),
             max_tokens: Some(config.agent.max_tokens),
             temperature: None,
         };
@@ -821,7 +840,7 @@ async fn main() -> anyhow::Result<()> {
             Arc::clone(&context),
             RunnerConfig {
                 model: config.active_model.clone(),
-                max_steps: cli.max_steps,
+                max_steps: cli.max_steps.unwrap_or(config.agent.max_steps),
                 max_tokens: Some(config.agent.max_tokens),
                 temperature: None,
             },
@@ -1027,7 +1046,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Default: Launch the full Interactive TUI in standalone mode!
-    maukode_tui::run_tui(cwd, parsed_session_id, cli.continue_session, None).await?;
+    maukode_tui::run_tui(
+        cwd,
+        parsed_session_id,
+        cli.continue_session,
+        None,
+        cli.max_steps,
+    )
+    .await?;
 
     Ok(())
 }

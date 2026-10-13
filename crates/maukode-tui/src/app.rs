@@ -272,8 +272,12 @@ impl App {
         session_id_to_load: Option<SessionId>,
         continue_latest: bool,
         server_client: Option<Arc<ServerClient>>,
+        max_steps: Option<usize>,
     ) -> anyhow::Result<Self> {
-        let config = AppConfig::load();
+        let mut config = AppConfig::load();
+        if let Some(steps) = max_steps {
+            config.agent.max_steps = steps;
+        }
         let store = SqliteSessionStore::new(SqliteSessionStore::default_db_path())?;
         let mut tool_registry = if config.security.jail_path_traversal {
             let jail = PathJail::new(&cwd)
@@ -343,9 +347,18 @@ impl App {
             let client = Arc::clone(client);
             let dir = cwd.clone();
             let sid = initial_session.id;
+            let provider = config.active_provider.clone();
+            let model = config.active_model.clone();
             tokio::spawn(async move {
                 if client.get_session(sid).await.is_err() {
-                    let _ = client.create_session(Some(&dir), None).await;
+                    let _ = client
+                        .create_session_with_options(
+                            Some(&dir),
+                            None,
+                            Some(&provider),
+                            Some(&model),
+                        )
+                        .await;
                 }
             });
         }
@@ -537,8 +550,12 @@ impl App {
 
         if let Some(client) = self.server_client.clone() {
             let cwd = self.cwd.clone();
+            let provider = self.config.active_provider.clone();
+            let model = self.config.active_model.clone();
             tokio::spawn(async move {
-                let _ = client.create_session(Some(&cwd), None).await;
+                let _ = client
+                    .create_session_with_options(Some(&cwd), None, Some(&provider), Some(&model))
+                    .await;
             });
         }
     }
@@ -646,10 +663,32 @@ impl App {
                             content: err.to_string(),
                         });
                     } else {
-                        if let Some(client) = self.server_client.clone() {
-                            let id_s = id.to_string();
+                        let id_s = id.to_string();
+                        let model_s = self.config.active_model.clone();
+                        let session_id = self.session.try_read().map(|s| s.id).ok();
+
+                        if let Some(sid) = session_id {
+                            let store = self.store.clone();
+                            let p = id_s.clone();
+                            let m = model_s.clone();
                             tokio::spawn(async move {
-                                let _ = client.set_active_provider(&id_s).await;
+                                let _ = store.set_session_model(sid, &p, &m).await;
+                            });
+
+                            if let Some(client) = self.server_client.clone() {
+                                let p_client = id_s.clone();
+                                let m_client = model_s.clone();
+                                tokio::spawn(async move {
+                                    let _ = client.set_active_provider(&p_client).await;
+                                    let _ = client
+                                        .set_session_model(sid, &m_client, Some(&p_client))
+                                        .await;
+                                });
+                            }
+                        } else if let Some(client) = self.server_client.clone() {
+                            let p_client = id_s.clone();
+                            tokio::spawn(async move {
+                                let _ = client.set_active_provider(&p_client).await;
                             });
                         }
                         self.set_status(format!("Active provider switched to {id}"));
@@ -676,10 +715,32 @@ impl App {
                     };
                     self.config.add_or_update_provider(p);
                     let _ = self.config.set_active_provider(&id);
-                    if let Some(client) = self.server_client.clone() {
-                        let id_s = id.clone();
+                    let id_s = id.clone();
+                    let model_s = self.config.active_model.clone();
+                    let session_id = self.session.try_read().map(|s| s.id).ok();
+
+                    if let Some(sid) = session_id {
+                        let store = self.store.clone();
+                        let p_store = id_s.clone();
+                        let m_store = model_s.clone();
                         tokio::spawn(async move {
-                            let _ = client.set_active_provider(&id_s).await;
+                            let _ = store.set_session_model(sid, &p_store, &m_store).await;
+                        });
+
+                        if let Some(client) = self.server_client.clone() {
+                            let p_client = id_s.clone();
+                            let m_client = model_s.clone();
+                            tokio::spawn(async move {
+                                let _ = client.set_active_provider(&p_client).await;
+                                let _ = client
+                                    .set_session_model(sid, &m_client, Some(&p_client))
+                                    .await;
+                            });
+                        }
+                    } else if let Some(client) = self.server_client.clone() {
+                        let p_client = id_s.clone();
+                        tokio::spawn(async move {
+                            let _ = client.set_active_provider(&p_client).await;
                         });
                     }
                     self.set_status(format!("Added and activated provider '{name}'"));
@@ -700,7 +761,26 @@ impl App {
                 } else {
                     let model = parts[1..].join(" ");
                     self.config.set_active_model(&model);
-                    if let Some(client) = self.server_client.clone() {
+                    let provider = self.config.active_provider.clone();
+                    let session_id = self.session.try_read().map(|s| s.id).ok();
+
+                    if let Some(sid) = session_id {
+                        let store = self.store.clone();
+                        let p = provider.clone();
+                        let m = model.clone();
+                        tokio::spawn(async move {
+                            let _ = store.set_session_model(sid, &p, &m).await;
+                        });
+
+                        if let Some(client) = self.server_client.clone() {
+                            let m_s = model.clone();
+                            let p_s = provider.clone();
+                            tokio::spawn(async move {
+                                let _ = client.set_active_model(&m_s).await;
+                                let _ = client.set_session_model(sid, &m_s, Some(&p_s)).await;
+                            });
+                        }
+                    } else if let Some(client) = self.server_client.clone() {
                         let m_s = model.clone();
                         tokio::spawn(async move {
                             let _ = client.set_active_model(&m_s).await;
@@ -1714,7 +1794,7 @@ mod stream_tests {
     async fn plan_lifecycle_updates_state() {
         let (tx, _rx) = mpsc::unbounded_channel();
         let dir = tempfile::tempdir().unwrap();
-        let mut app = App::new(dir.path().to_path_buf(), tx, None, false, None)
+        let mut app = App::new(dir.path().to_path_buf(), tx, None, false, None, None)
             .await
             .unwrap();
 
@@ -1756,7 +1836,7 @@ mod stream_tests {
     async fn subagent_lifecycle_records_trace_and_updates_items() {
         let (tx, _rx) = mpsc::unbounded_channel();
         let dir = tempfile::tempdir().unwrap();
-        let mut app = App::new(dir.path().to_path_buf(), tx, None, false, None)
+        let mut app = App::new(dir.path().to_path_buf(), tx, None, false, None, None)
             .await
             .unwrap();
 
