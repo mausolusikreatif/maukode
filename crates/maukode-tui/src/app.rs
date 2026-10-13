@@ -1005,6 +1005,11 @@ impl App {
             Some(binding) => runner.with_memory(binding.clone()),
             None => runner,
         };
+        let runner = if self.config.agent.reflection.enabled {
+            runner.with_reflection_config(self.config.agent.reflection.clone())
+        } else {
+            runner
+        };
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let app_event_tx = self.event_tx.clone();
 

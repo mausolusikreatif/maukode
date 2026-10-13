@@ -731,6 +731,11 @@ async fn main() -> anyhow::Result<()> {
             Some(binding) => runner.with_memory(binding),
             None => runner,
         };
+        let runner = if config.agent.reflection.enabled {
+            runner.with_reflection_config(config.agent.reflection.clone())
+        } else {
+            runner
+        };
 
         execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(prompt)).await?;
 
@@ -826,6 +831,9 @@ async fn main() -> anyhow::Result<()> {
         .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
         if let Some(binding) = memory {
             runner = runner.with_memory(binding);
+        }
+        if config.agent.reflection.enabled {
+            runner = runner.with_reflection_config(config.agent.reflection.clone());
         }
 
         loop {

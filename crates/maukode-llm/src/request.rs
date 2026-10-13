@@ -33,4 +33,9 @@ impl LLMRequest {
         self.tools = tools;
         self
     }
+
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
 }

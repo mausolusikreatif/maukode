@@ -105,6 +105,7 @@ pub struct SessionRunner {
     permission_store: Option<Arc<SqliteSessionStore>>,
     checkpoint_manager: Option<Arc<crate::checkpoint::CheckpointManager>>,
     memory: Option<crate::context::MemoryBinding>,
+    reflection_config: Option<crate::reflection::ReflectionConfig>,
 }
 
 impl SessionRunner {
@@ -125,6 +126,7 @@ impl SessionRunner {
             permission_store: None,
             checkpoint_manager: None,
             memory: None,
+            reflection_config: None,
         }
     }
 
@@ -132,6 +134,13 @@ impl SessionRunner {
     /// `auto_extract` set; the tools themselves are registered separately by the caller.
     pub fn with_memory(mut self, memory: crate::context::MemoryBinding) -> Self {
         self.memory = Some(memory);
+        self
+    }
+
+    /// Enable post-turn reflection. When set, the agent will evaluate its performance
+    /// after each completed turn and extract lessons / propose skills.
+    pub fn with_reflection_config(mut self, config: crate::reflection::ReflectionConfig) -> Self {
+        self.reflection_config = Some(config);
         self
     }
 
@@ -789,9 +798,43 @@ impl SessionRunner {
         // only on a clean completion and only when the binding opted in.
         if stop.0 == StopReason::Completed {
             self.extract_memories(&final_messages).await;
+
+            // Post-turn reflection: the agent evaluates its own performance and extracts
+            // lessons / proposes skills. Runs only on clean completion with reflection enabled.
+            self.reflect_on_turn(&final_messages).await;
         }
 
         Ok(stop)
+    }
+
+    /// Run the reflection engine over the completed turn, if configured. Never fails
+    /// the turn — all errors are logged internally.
+    async fn reflect_on_turn(&self, messages: &[maukode_protocol::Message]) {
+        let Some(reflection_config) = &self.reflection_config else {
+            return;
+        };
+        if !reflection_config.enabled {
+            return;
+        }
+        let Some(memory) = &self.memory else {
+            return;
+        };
+
+        // Count tool calls in the conversation to gate reflection.
+        let tool_call_count = messages
+            .iter()
+            .flat_map(|m| m.parts.iter())
+            .filter(|p| matches!(p, maukode_protocol::ContentPart::ToolCall(..)))
+            .count();
+
+        let engine = crate::reflection::ReflectionEngine::new(
+            &self.llm,
+            &self.config.model,
+            memory,
+            self.context.cwd(),
+            reflection_config,
+        );
+        engine.reflect(messages, tool_call_count).await;
     }
 
     /// Persist auto-extracted candidate memories from a finished turn, logging (never failing the

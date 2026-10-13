@@ -538,6 +538,11 @@ fn start_turn(
             runner = runner.with_memory(binding);
         }
 
+        // Enable post-turn reflection if configured.
+        if app_config.agent.reflection.enabled {
+            runner = runner.with_reflection_config(app_config.agent.reflection.clone());
+        }
+
         if let Ok(cm) = checkpoint_mgr {
             runner = runner.with_checkpoint_manager(cm);
         }

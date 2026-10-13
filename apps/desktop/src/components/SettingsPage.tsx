@@ -152,6 +152,8 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
   const { security, agent, loading } = config;
   const [steps, setSteps] = useState("");
   const [tokens, setTokens] = useState("");
+  const [reflectionEnabled, setReflectionEnabled] = useState(false);
+  const [reflectionSkillCreation, setReflectionSkillCreation] = useState(false);
   const [msg, setMsg] = useState<{ level: "ok" | "error"; text: string } | null>(null);
 
   // Don't let a late config response clobber what the user already typed.
@@ -160,6 +162,8 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
     if (!agent || touched.current) return;
     setSteps(String(agent.max_steps));
     setTokens(String(agent.max_tokens));
+    setReflectionEnabled(agent.reflection.enabled);
+    setReflectionSkillCreation(agent.reflection.skill_creation);
   }, [agent]);
 
   const saveMode = async (mode: PermissionMode) => {
@@ -191,10 +195,17 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
       const updated = await requireClient(client).setAgentConfig({
         max_steps: Number(steps),
         max_tokens: Number(tokens),
+        reflection: {
+          enabled: reflectionEnabled,
+          min_tool_calls: agent.reflection.min_tool_calls,
+          skill_creation: reflectionSkillCreation,
+        },
       });
       config.setAgent(updated);
       setSteps(String(updated.max_steps));
       setTokens(String(updated.max_tokens));
+      setReflectionEnabled(updated.reflection.enabled);
+      setReflectionSkillCreation(updated.reflection.skill_creation);
       setMsg({ level: "ok", text: "Limits saved." });
     } catch (e) {
       setMsg({ level: "error", text: errText(e) });
@@ -274,6 +285,37 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
         <Button data-testid="save-limits" size="sm" disabled={!agent} onClick={() => void saveLimits()}>
           Save limits
         </Button>
+      </div>
+
+      {/* Reflection */}
+      <div className="space-y-2">
+        <Label>Self-reflection</Label>
+        <label className="flex items-center gap-3 text-sm">
+          <Switch
+            checked={reflectionEnabled}
+            onCheckedChange={(v) => {
+              touched.current = true;
+              setReflectionEnabled(v);
+            }}
+          />
+          <span>Enable post-turn reflection (extract lessons from completed turns)</span>
+        </label>
+        {reflectionEnabled && (
+          <label className="flex items-center gap-3 text-sm pl-7">
+            <Switch
+              checked={reflectionSkillCreation}
+              onCheckedChange={(v) => {
+                touched.current = true;
+                setReflectionSkillCreation(v);
+              }}
+            />
+            <span>Allow creating learned skills in <code>.maukode/skills/learned/</code></span>
+          </label>
+        )}
+        <p className="text-xs text-muted-foreground">
+          When enabled, the agent reviews its performance after each turn and saves
+          lessons to memory. Learned skills are discovered on the next session.
+        </p>
       </div>
 
       {/* Notifications */}

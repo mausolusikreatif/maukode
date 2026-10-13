@@ -147,10 +147,11 @@ pub async fn set_active_model(
 pub struct SetAgentConfigRequest {
     pub max_steps: Option<usize>,
     pub max_tokens: Option<u32>,
+    pub reflection: Option<maukode_core::ReflectionConfig>,
 }
 
 pub async fn get_agent_config(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
-    Json(state.config.read().await.agent)
+    Json(state.config.read().await.agent.clone())
 }
 
 pub async fn set_agent_config(
@@ -158,7 +159,7 @@ pub async fn set_agent_config(
     Json(payload): Json<SetAgentConfigRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let mut config = state.config.write().await;
-    let mut agent = config.agent;
+    let mut agent = config.agent.clone();
     if let Some(steps) = payload.max_steps {
         if !(1..=200).contains(&steps) {
             return Err((StatusCode::BAD_REQUEST, "max_steps must be 1..=200".into()));
@@ -174,7 +175,10 @@ pub async fn set_agent_config(
         }
         agent.max_tokens = tokens;
     }
-    config.agent = agent;
+    if let Some(reflection) = payload.reflection {
+        agent.reflection = reflection;
+    }
+    config.agent = agent.clone();
     config
         .save()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
