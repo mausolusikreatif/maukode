@@ -56,10 +56,7 @@ struct Cli {
     #[arg(short = 'c', long, help = "Continue the latest session")]
     continue_session: bool,
 
-    #[arg(
-        long,
-        help = "Maximum turns of tool execution loop"
-    )]
+    #[arg(long, help = "Maximum turns of tool execution loop")]
     max_steps: Option<usize>,
 
     #[arg(
@@ -1049,7 +1046,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Default: Launch the full Interactive TUI in standalone mode!
-    maukode_tui::run_tui(cwd, parsed_session_id, cli.continue_session, None, cli.max_steps).await?;
+    maukode_tui::run_tui(
+        cwd,
+        parsed_session_id,
+        cli.continue_session,
+        None,
+        cli.max_steps,
+    )
+    .await?;
 
     Ok(())
 }

@@ -38,8 +38,15 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(backend)?;
 
     let (mut events, event_tx) = EventHandler::new(Duration::from_millis(50));
-    let mut app =
-        App::new(cwd, event_tx, session_id, continue_latest, server_client, max_steps).await?;
+    let mut app = App::new(
+        cwd,
+        event_tx,
+        session_id,
+        continue_latest,
+        server_client,
+        max_steps,
+    )
+    .await?;
 
     let res = run_loop(&mut terminal, &mut app, &mut events).await;
 
@@ -420,7 +427,8 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
                                     let p_store = id_clone.clone();
                                     let m_store = model_clone.clone();
                                     tokio::spawn(async move {
-                                        let _ = store.set_session_model(sid, &p_store, &m_store).await;
+                                        let _ =
+                                            store.set_session_model(sid, &p_store, &m_store).await;
                                     });
 
                                     if let Some(ref client) = app.server_client {

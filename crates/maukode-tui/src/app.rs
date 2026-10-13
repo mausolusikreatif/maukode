@@ -554,12 +554,7 @@ impl App {
             let model = self.config.active_model.clone();
             tokio::spawn(async move {
                 let _ = client
-                    .create_session_with_options(
-                        Some(&cwd),
-                        None,
-                        Some(&provider),
-                        Some(&model),
-                    )
+                    .create_session_with_options(Some(&cwd), None, Some(&provider), Some(&model))
                     .await;
             });
         }
@@ -685,7 +680,9 @@ impl App {
                                 let m_client = model_s.clone();
                                 tokio::spawn(async move {
                                     let _ = client.set_active_provider(&p_client).await;
-                                    let _ = client.set_session_model(sid, &m_client, Some(&p_client)).await;
+                                    let _ = client
+                                        .set_session_model(sid, &m_client, Some(&p_client))
+                                        .await;
                                 });
                             }
                         } else if let Some(client) = self.server_client.clone() {
@@ -735,7 +732,9 @@ impl App {
                             let m_client = model_s.clone();
                             tokio::spawn(async move {
                                 let _ = client.set_active_provider(&p_client).await;
-                                let _ = client.set_session_model(sid, &m_client, Some(&p_client)).await;
+                                let _ = client
+                                    .set_session_model(sid, &m_client, Some(&p_client))
+                                    .await;
                             });
                         }
                     } else if let Some(client) = self.server_client.clone() {
@@ -778,7 +777,9 @@ impl App {
                             let p_s = provider.clone();
                             tokio::spawn(async move {
                                 let _ = client.set_active_model(&m_s).await;
-                                let _ = client.set_session_model(sid, &m_s, Some(&p_s)).await;
+                                let _ = client
+                                    .set_session_model(sid, &m_s, Some(&p_s))
+                                    .await;
                             });
                         }
                     } else if let Some(client) = self.server_client.clone() {
