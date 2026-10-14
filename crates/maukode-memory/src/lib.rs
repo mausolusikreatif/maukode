@@ -5,6 +5,7 @@
 //! existing SQLite database. Retrieval is deterministic FTS5 only — no embeddings, no vector
 //! store. Every read and write is filtered by a [`Scope`], the security boundary.
 
+pub mod consolidation;
 pub mod error;
 pub mod extract;
 pub mod links;
@@ -12,8 +13,10 @@ pub mod models;
 pub mod scope;
 pub mod store;
 pub mod tools;
-pub mod consolidation;
 
+pub use consolidation::{
+    ConsolidationAction, ConsolidationReport, ConsolidationSuggestion, DuplicatePair,
+};
 pub use error::{MemoryError, Result};
 pub use extract::{persist_candidates, CandidateMemory, ExtractionReport};
 pub use links::{normalize_target, parse_links, ParsedLink};
@@ -24,7 +27,6 @@ pub use models::{
 };
 pub use scope::Scope;
 pub use store::MemoryStore;
-pub use consolidation::{ConsolidationAction, ConsolidationReport, ConsolidationSuggestion, DuplicatePair};
 pub use tools::{register_tools, taxonomy_branches, MemoryContext};
 
 #[cfg(test)]

@@ -304,10 +304,7 @@ impl Tool for MemoryWriteTool {
         let title = required_str(&args, "title")?;
         let taxonomy = required_str(&args, "taxonomy")?;
         let content = required_str(&args, "content")?;
-        let importance = args
-            .get("importance")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(3);
+        let importance = args.get("importance").and_then(|v| v.as_i64()).unwrap_or(3);
         let scope = self.0.scope_for(&args);
         let result = self
             .0

@@ -286,7 +286,17 @@ impl MemoryStore {
             let superseded: i64 = row.get(6)?;
             let importance: i64 = row.get(7)?;
             let created_at: String = row.get(8)?;
-            Ok((id, title, taxonomy, content, rank, authority, superseded, importance, created_at))
+            Ok((
+                id,
+                title,
+                taxonomy,
+                content,
+                rank,
+                authority,
+                superseded,
+                importance,
+                created_at,
+            ))
         })?;
 
         let now = Utc::now();

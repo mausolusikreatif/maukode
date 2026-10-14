@@ -48,13 +48,9 @@ pub enum ConsolidationAction {
         merged_importance: i64,
     },
     /// Mark `newer` as superseding `older`. `older` gets a `supersedes` backlink.
-    Supersede {
-        reason: String,
-    },
+    Supersede { reason: String },
     /// Keep both memories as-is; they are distinct despite textual overlap.
-    KeepSeparate {
-        reason: String,
-    },
+    KeepSeparate { reason: String },
 }
 
 /// A single reconciliation decision output by the LLM reconciler.
@@ -162,11 +158,13 @@ impl crate::store::MemoryStore {
         drop(conn);
 
         // Pre-compute token sets for each memory to avoid redundant tokenization.
-        let token_sets: Vec<(std::collections::HashSet<String>, std::collections::HashSet<String>)> =
-            memories
-                .iter()
-                .map(|m| (tokenize(&m.title), tokenize(&m.content)))
-                .collect();
+        let token_sets: Vec<(
+            std::collections::HashSet<String>,
+            std::collections::HashSet<String>,
+        )> = memories
+            .iter()
+            .map(|m| (tokenize(&m.title), tokenize(&m.content)))
+            .collect();
 
         let mut pairs = Vec::new();
         for i in 0..memories.len() {
@@ -221,10 +219,8 @@ impl crate::store::MemoryStore {
             } => {
                 // First, append a supersedes link to the newer memory's content so the
                 // edge graph records the relationship after tombstoning.
-                let link_text = format!(
-                    "\n\n[consolidated] Superseded by [[{}]].",
-                    merged_title
-                );
+                let link_text =
+                    format!("\n\n[consolidated] Superseded by [[{}]].", merged_title);
                 self.update(
                     scope,
                     &suggestion.pair.newer.id,
