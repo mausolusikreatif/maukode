@@ -60,6 +60,7 @@ impl MemoryStore {
     // ---- writes ---------------------------------------------------------------------------
 
     /// Create a new memory. Fails if the title already exists in this scope.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         scope: &Scope,

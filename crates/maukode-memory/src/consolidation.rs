@@ -383,7 +383,7 @@ mod tests {
         let store = MemoryStore::open(dir.path().join("mem.db")).unwrap();
         let scope = Scope::global();
 
-        let res_a = store
+        store
             .create(&scope, "gotchas", "Alpha", "content a", 3, None, "tool")
             .await
             .unwrap();
