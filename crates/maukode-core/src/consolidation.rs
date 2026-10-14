@@ -14,8 +14,7 @@ use std::sync::Arc;
 
 use maukode_llm::{LLMClient, LLMRequest};
 use maukode_memory::{
-    ConsolidationAction, ConsolidationReport, ConsolidationSuggestion, DuplicatePair,
-    MemoryContext,
+    ConsolidationAction, ConsolidationReport, ConsolidationSuggestion, DuplicatePair, MemoryContext,
 };
 use maukode_protocol::Message;
 use serde::Deserialize;
@@ -256,12 +255,9 @@ impl<'a> ConsolidationEngine<'a> {
     ) -> anyhow::Result<Vec<ConsolidationSuggestion>> {
         let prompt = format_batch_prompt(pairs);
 
-        let request = LLMRequest::new(
-            self.model.to_string(),
-            vec![Message::user(prompt)],
-        )
-        .with_system_prompt(CONSOLIDATION_SYSTEM_PROMPT)
-        .with_max_tokens(2048);
+        let request = LLMRequest::new(self.model.to_string(), vec![Message::user(prompt)])
+            .with_system_prompt(CONSOLIDATION_SYSTEM_PROMPT)
+            .with_max_tokens(2048);
 
         let mut stream = self.llm.stream(request).await?;
         use futures::StreamExt;
@@ -320,7 +316,10 @@ impl<'a> ConsolidationEngine<'a> {
 
         // Any pairs the LLM didn't address are treated as keep-separate.
         for (i, pair) in pairs.iter().enumerate() {
-            if !suggestions.iter().any(|s| s.pair.older.id == pair.older.id && s.pair.newer.id == pair.newer.id) {
+            if !suggestions
+                .iter()
+                .any(|s| s.pair.older.id == pair.older.id && s.pair.newer.id == pair.newer.id)
+            {
                 suggestions.push(ConsolidationSuggestion {
                     pair: pair.clone(),
                     action: ConsolidationAction::KeepSeparate {
@@ -367,16 +366,19 @@ impl<'a> ConsolidationEngine<'a> {
         };
 
         // Collect existing titles to avoid duplicate abstractions.
-        let existing_titles: std::collections::HashSet<String> = memories
-            .iter()
-            .map(|m| m.title.to_lowercase())
-            .collect();
+        let existing_titles: std::collections::HashSet<String> =
+            memories.iter().map(|m| m.title.to_lowercase()).collect();
 
         // Group memories by top-level taxonomy branch.
         let mut groups: std::collections::BTreeMap<String, Vec<&maukode_memory::Memory>> =
             std::collections::BTreeMap::new();
         for mem in &memories {
-            let branch = mem.taxonomy.split('.').next().unwrap_or("overview").to_string();
+            let branch = mem
+                .taxonomy
+                .split('.')
+                .next()
+                .unwrap_or("overview")
+                .to_string();
             groups.entry(branch).or_default().push(mem);
         }
 
@@ -387,12 +389,9 @@ impl<'a> ConsolidationEngine<'a> {
             }
 
             let prompt = format_abstraction_prompt(branch, group);
-            let request = LLMRequest::new(
-                self.model.to_string(),
-                vec![Message::user(prompt)],
-            )
-            .with_system_prompt(ABSTRACTION_SYSTEM_PROMPT)
-            .with_max_tokens(2048);
+            let request = LLMRequest::new(self.model.to_string(), vec![Message::user(prompt)])
+                .with_system_prompt(ABSTRACTION_SYSTEM_PROMPT)
+                .with_max_tokens(2048);
 
             let stream = match self.llm.stream(request).await {
                 Ok(s) => s,
@@ -435,11 +434,7 @@ impl<'a> ConsolidationEngine<'a> {
                 let content = if source_links.is_empty() {
                     abstr.content
                 } else {
-                    format!(
-                        "{}\n\nSources:\n{}",
-                        abstr.content,
-                        source_links.join("\n")
-                    )
+                    format!("{}\n\nSources:\n{}", abstr.content, source_links.join("\n"))
                 };
 
                 let taxonomy = format!("{branch}.abstraction");
@@ -541,10 +536,7 @@ fn extract_json(text: &str) -> &str {
 }
 
 /// Format the user prompt for abstraction synthesis, listing all memories in a taxonomy branch.
-fn format_abstraction_prompt(
-    branch: &str,
-    memories: &[&maukode_memory::Memory],
-) -> String {
+fn format_abstraction_prompt(branch: &str, memories: &[&maukode_memory::Memory]) -> String {
     let mut out = format!(
         "Below are all live memories under the '{branch}' taxonomy branch. \
          Identify cross-cutting patterns or higher-level principles that emerge \
@@ -574,10 +566,7 @@ mod tests {
     #[test]
     fn extract_json_plain() {
         assert_eq!(extract_json(r#"[]"#), "[]");
-        assert_eq!(
-            extract_json(r#"  [{"index":0}]  "#),
-            r#"[{"index":0}]"#
-        );
+        assert_eq!(extract_json(r#"  [{"index":0}]  "#), r#"[{"index":0}]"#);
     }
 
     #[test]
