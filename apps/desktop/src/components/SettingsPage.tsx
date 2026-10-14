@@ -154,6 +154,8 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
   const [tokens, setTokens] = useState("");
   const [reflectionEnabled, setReflectionEnabled] = useState(false);
   const [reflectionSkillCreation, setReflectionSkillCreation] = useState(false);
+  const [consolidationEnabled, setConsolidationEnabled] = useState(false);
+  const [consolidationAbstraction, setConsolidationAbstraction] = useState(false);
   const [msg, setMsg] = useState<{ level: "ok" | "error"; text: string } | null>(null);
 
   // Don't let a late config response clobber what the user already typed.
@@ -164,6 +166,8 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
     setTokens(String(agent.max_tokens));
     setReflectionEnabled(agent.reflection.enabled);
     setReflectionSkillCreation(agent.reflection.skill_creation);
+    setConsolidationEnabled(agent.consolidation?.enabled ?? false);
+    setConsolidationAbstraction(agent.consolidation?.abstraction ?? false);
   }, [agent]);
 
   const saveMode = async (mode: PermissionMode) => {
@@ -200,12 +204,22 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
           min_tool_calls: agent?.reflection.min_tool_calls ?? 3,
           skill_creation: reflectionSkillCreation,
         },
+        consolidation: {
+          enabled: consolidationEnabled,
+          min_memories: agent?.consolidation?.min_memories ?? 20,
+          threshold: agent?.consolidation?.threshold ?? 0.5,
+          batch_size: agent?.consolidation?.batch_size ?? 10,
+          abstraction: consolidationAbstraction,
+          abstraction_min_memories: agent?.consolidation?.abstraction_min_memories ?? 30,
+        },
       });
       config.setAgent(updated);
       setSteps(String(updated.max_steps));
       setTokens(String(updated.max_tokens));
       setReflectionEnabled(updated.reflection.enabled);
       setReflectionSkillCreation(updated.reflection.skill_creation);
+      setConsolidationEnabled(updated.consolidation?.enabled ?? false);
+      setConsolidationAbstraction(updated.consolidation?.abstraction ?? false);
       setMsg({ level: "ok", text: "Limits saved." });
     } catch (e) {
       setMsg({ level: "error", text: errText(e) });
@@ -315,6 +329,38 @@ function GeneralSection({ config }: { config: ReturnType<typeof useSharedConfig>
         <p className="text-xs text-muted-foreground">
           When enabled, the agent reviews its performance after each turn and saves
           lessons to memory. Learned skills are discovered on the next session.
+        </p>
+      </div>
+
+      {/* Memory Consolidation */}
+      <div className="space-y-2">
+        <Label>Memory consolidation</Label>
+        <label className="flex items-center gap-3 text-sm">
+          <Switch
+            checked={consolidationEnabled}
+            onCheckedChange={(v) => {
+              touched.current = true;
+              setConsolidationEnabled(v);
+            }}
+          />
+          <span>Detect and merge near-duplicate memories after each turn</span>
+        </label>
+        {consolidationEnabled && (
+          <label className="flex items-center gap-3 text-sm pl-7">
+            <Switch
+              checked={consolidationAbstraction}
+              onCheckedChange={(v) => {
+                touched.current = true;
+                setConsolidationAbstraction(v);
+              }}
+            />
+            <span>Synthesise higher-level abstraction memories from patterns</span>
+          </label>
+        )}
+        <p className="text-xs text-muted-foreground">
+          When enabled, the agent scans for near-duplicate memories after reflection
+          and reconciles them. Abstraction synthesis identifies cross-cutting patterns
+          and creates higher-level principle memories.
         </p>
       </div>
 

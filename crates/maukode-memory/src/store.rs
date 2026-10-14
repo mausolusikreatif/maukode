@@ -12,12 +12,21 @@ use uuid::Uuid;
 const AUTHORITY_WEIGHT: f64 = 0.5;
 /// Default penalty applied to a memory that another memory supersedes.
 const SUPERSEDE_PENALTY: f64 = 1.0;
+/// Maximum bonus applied for the highest importance (5) in search ranking.
+const IMPORTANCE_WEIGHT: f64 = 0.5;
+/// Maximum bonus applied for very recent memories (<7 days old).
+const RECENCY_MAX_BONUS: f64 = 0.3;
+/// Recency boost decays to zero at this many days.
+const RECENCY_WINDOW_DAYS: i64 = 30;
+/// Fresh memories (within this many days) receive the full recency bonus.
+const RECENCY_FRESH_DAYS: i64 = 7;
 /// Tokens are approximated at four characters each, matching the rest of the agent.
 const CHARS_PER_TOKEN: usize = 4;
 
 /// Native, embedding-free memory store backed by the shared `maukode.db` SQLite file.
 pub struct MemoryStore {
-    conn: tokio::sync::Mutex<Connection>,
+    pub(crate) conn: tokio::sync::Mutex<Connection>,
+    #[allow(dead_code)]
     path: PathBuf,
 }
 
@@ -51,17 +60,20 @@ impl MemoryStore {
     // ---- writes ---------------------------------------------------------------------------
 
     /// Create a new memory. Fails if the title already exists in this scope.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         scope: &Scope,
         taxonomy: &str,
         title: &str,
         content: &str,
+        importance: i64,
         author: Option<&str>,
         source: &str,
     ) -> Result<WriteResult> {
         validate_title(title)?;
         validate_taxonomy(taxonomy)?;
+        let importance = importance.clamp(1, 5);
 
         let scope_key = scope.as_key();
         let now = Utc::now();
@@ -80,8 +92,8 @@ impl MemoryStore {
         }
 
         conn.execute(
-            "INSERT INTO memories (id, scope, taxonomy, title, content, version, author, source, created_at, updated_at, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, NULL)",
+            "INSERT INTO memories (id, scope, taxonomy, title, content, version, author, source, importance, created_at, updated_at, deleted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, NULL)",
             params![
                 &id,
                 scope_key,
@@ -90,6 +102,7 @@ impl MemoryStore {
                 content,
                 author,
                 source,
+                importance,
                 now.to_rfc3339(),
                 now.to_rfc3339(),
             ],
@@ -108,6 +121,7 @@ impl MemoryStore {
             version: 1,
             author: author.map(str::to_string),
             source: source.to_string(),
+            importance,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -117,6 +131,7 @@ impl MemoryStore {
     }
 
     /// Update an existing memory. When `base_version` is set, a mismatch is a conflict.
+    /// `importance` is optional; when `Some`, it updates the 1-5 importance score.
     #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
@@ -125,6 +140,7 @@ impl MemoryStore {
         taxonomy: Option<&str>,
         title: Option<&str>,
         content: Option<&str>,
+        importance: Option<i64>,
         base_version: Option<i64>,
         author: Option<&str>,
     ) -> Result<WriteResult> {
@@ -147,6 +163,7 @@ impl MemoryStore {
         let new_title = title.unwrap_or(&current.title);
         let new_taxonomy = taxonomy.unwrap_or(&current.taxonomy);
         let new_content = content.unwrap_or(&current.content);
+        let new_importance = importance.unwrap_or(current.importance).clamp(1, 5);
         validate_title(new_title)?;
         validate_taxonomy(new_taxonomy)?;
 
@@ -165,14 +182,15 @@ impl MemoryStore {
 
         let next_version = current.version + 1;
         conn.execute(
-            "UPDATE memories SET taxonomy = ?1, title = ?2, content = ?3, version = ?4, author = ?5, updated_at = ?6
-             WHERE scope = ?7 AND id = ?8",
+            "UPDATE memories SET taxonomy = ?1, title = ?2, content = ?3, version = ?4, author = ?5, importance = ?6, updated_at = ?7
+             WHERE scope = ?8 AND id = ?9",
             params![
                 new_taxonomy,
                 new_title,
                 new_content,
                 next_version,
                 author,
+                new_importance,
                 now.to_rfc3339(),
                 scope_key,
                 id,
@@ -210,7 +228,7 @@ impl MemoryStore {
         let conn = self.conn.lock().await;
         let scope_key = scope.as_key();
         conn.query_row(
-            "SELECT id, scope, taxonomy, title, content, version, author, source, created_at, updated_at, deleted_at
+            "SELECT id, scope, taxonomy, title, content, version, author, source, importance, created_at, updated_at, deleted_at
              FROM memories WHERE scope = ?1 AND title = ?2 COLLATE NOCASE AND deleted_at IS NULL",
             params![scope_key, title],
             row_to_memory,
@@ -219,8 +237,8 @@ impl MemoryStore {
         .map_err(Into::into)
     }
 
-    /// Keyword search blending FTS5 relevance with inbound authority and a supersede penalty,
-    /// truncated to `token_budget` approximate tokens.
+    /// Keyword search blending FTS5 relevance with inbound authority, importance weight, a
+    /// recency boost, and a supersede penalty, truncated to `token_budget` approximate tokens.
     pub async fn search(
         &self,
         scope: &Scope,
@@ -242,7 +260,8 @@ impl MemoryStore {
                        WHERE e.scope = m.scope AND e.dst_id = m.id
                          AND e.rel IN ('relates', 'depends-on')) AS authority,
                     EXISTS(SELECT 1 FROM memory_edges e
-                       WHERE e.scope = m.scope AND e.dst_id = m.id AND e.rel = 'supersedes') AS superseded
+                       WHERE e.scope = m.scope AND e.dst_id = m.id AND e.rel = 'supersedes') AS superseded,
+                    m.importance, m.created_at
              FROM memories_fts
              JOIN memories m ON m.rowid = memories_fts.rowid
              WHERE memories_fts MATCH ?1 AND m.scope = ?2 AND m.deleted_at IS NULL",
@@ -266,14 +285,24 @@ impl MemoryStore {
             let rank: f64 = row.get(4)?;
             let authority: i64 = row.get(5)?;
             let superseded: i64 = row.get(6)?;
-            Ok((id, title, taxonomy, content, rank, authority, superseded))
+            let importance: i64 = row.get(7)?;
+            let created_at: String = row.get(8)?;
+            Ok((
+                id, title, taxonomy, content, rank, authority, superseded, importance, created_at,
+            ))
         })?;
 
+        let now = Utc::now();
         let mut scored: Vec<SearchHit> = Vec::new();
         for row in rows {
-            let (id, title, taxonomy, content, rank, authority, superseded) = row?;
+            let (id, title, taxonomy, content, rank, authority, superseded, importance, created_at) =
+                row?;
             let superseded = superseded != 0;
-            let mut score = -rank + AUTHORITY_WEIGHT * authority as f64;
+            // Importance weight: 1-5 maps to 0.0..1.0 bonus.
+            let imp_boost = (importance - 1) as f64 / 4.0 * IMPORTANCE_WEIGHT;
+            // Recency boost: memories newer than 7 days get up to 0.3; decays linearly to 0 at 30d.
+            let recency = recency_boost(&created_at, now);
+            let mut score = -rank + AUTHORITY_WEIGHT * authority as f64 + imp_boost + recency;
             if superseded {
                 score -= SUPERSEDE_PENALTY;
             }
@@ -284,6 +313,7 @@ impl MemoryStore {
                 content,
                 score,
                 superseded,
+                importance,
             });
         }
         scored.sort_by(|a, b| {
@@ -457,6 +487,7 @@ impl MemoryStore {
             None,
             Some(&revision.0),
             Some(&revision.1),
+            None,
             None,
             author,
         )
@@ -821,6 +852,21 @@ fn init_schema(conn: &Connection) -> Result<()> {
         );
         ",
     )?;
+
+    // Lightweight migration: add `importance` column if it doesn't exist (existing DBs).
+    let has_importance: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('memories') WHERE name = 'importance')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !has_importance {
+        conn.execute_batch(
+            "ALTER TABLE memories ADD COLUMN importance INTEGER NOT NULL DEFAULT 3;",
+        )?;
+    }
+
     Ok(())
 }
 
@@ -897,9 +943,9 @@ fn title_overlap(a: &str, b: &str) -> f64 {
 }
 
 fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
-    let created: String = row.get(8)?;
-    let updated: String = row.get(9)?;
-    let deleted: Option<String> = row.get(10)?;
+    let created: String = row.get(9)?;
+    let updated: String = row.get(10)?;
+    let deleted: Option<String> = row.get(11)?;
     Ok(Memory {
         id: row.get(0)?,
         scope: row.get(1)?,
@@ -909,6 +955,7 @@ fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
         version: row.get(5)?,
         author: row.get(6)?,
         source: row.get(7)?,
+        importance: row.get(8)?,
         created_at: parse_ts(&created),
         updated_at: parse_ts(&updated),
         deleted_at: deleted.map(|d| parse_ts(&d)),
@@ -917,7 +964,7 @@ fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
 
 fn load_memory(conn: &Connection, scope: &str, id: &str) -> Result<Option<Memory>> {
     conn.query_row(
-        "SELECT id, scope, taxonomy, title, content, version, author, source, created_at, updated_at, deleted_at
+        "SELECT id, scope, taxonomy, title, content, version, author, source, importance, created_at, updated_at, deleted_at
          FROM memories WHERE scope = ?1 AND id = ?2 AND deleted_at IS NULL",
         params![scope, id],
         row_to_memory,
@@ -1041,10 +1088,29 @@ fn rel_from_str(value: &str) -> LinkRelation {
     LinkRelation::parse(value).unwrap_or(LinkRelation::Relates)
 }
 
-fn parse_ts(value: &str) -> DateTime<Utc> {
+pub(crate) fn parse_ts(value: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_default()
+}
+
+/// Compute a recency boost: full `RECENCY_MAX_BONUS` for memories within `RECENCY_FRESH_DAYS`,
+/// linearly decaying to 0 at `RECENCY_WINDOW_DAYS`, and 0 thereafter.
+fn recency_boost(created_at: &str, now: DateTime<Utc>) -> f64 {
+    let created = match DateTime::parse_from_rfc3339(created_at) {
+        Ok(dt) => dt.with_timezone(&Utc),
+        Err(_) => return 0.0,
+    };
+    let age_days = (now - created).num_days().max(0);
+    if age_days <= RECENCY_FRESH_DAYS {
+        RECENCY_MAX_BONUS
+    } else if age_days >= RECENCY_WINDOW_DAYS {
+        0.0
+    } else {
+        let remaining = (RECENCY_WINDOW_DAYS - age_days) as f64;
+        let window = (RECENCY_WINDOW_DAYS - RECENCY_FRESH_DAYS) as f64;
+        RECENCY_MAX_BONUS * (remaining / window)
+    }
 }
 
 /// Build an FTS5 MATCH expression that is safe for arbitrary user input by quoting each term.

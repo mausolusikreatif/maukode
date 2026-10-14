@@ -5,6 +5,7 @@
 //! existing SQLite database. Retrieval is deterministic FTS5 only — no embeddings, no vector
 //! store. Every read and write is filtered by a [`Scope`], the security boundary.
 
+pub mod consolidation;
 pub mod error;
 pub mod extract;
 pub mod links;
@@ -13,6 +14,9 @@ pub mod scope;
 pub mod store;
 pub mod tools;
 
+pub use consolidation::{
+    ConsolidationAction, ConsolidationReport, ConsolidationSuggestion, DuplicatePair,
+};
 pub use error::{MemoryError, Result};
 pub use extract::{persist_candidates, CandidateMemory, ExtractionReport};
 pub use links::{normalize_target, parse_links, ParsedLink};
@@ -45,6 +49,7 @@ mod integration_tests {
                 "commands",
                 "Build Command",
                 "Run cargo test --workspace for the full suite.",
+                3,
                 Some("tester"),
                 "tool",
             )
@@ -63,7 +68,7 @@ mod integration_tests {
         let a = Scope::project("/tmp/does-not-exist-a");
         let b = Scope::project("/tmp/does-not-exist-b");
         store
-            .create(&a, "overview", "Secret", "only in a", None, "tool")
+            .create(&a, "overview", "Secret", "only in a", 3, None, "tool")
             .await
             .unwrap();
         let results = store.search(&b, "secret", None, None).await.unwrap();
@@ -75,11 +80,11 @@ mod integration_tests {
         let (store, _dir) = store();
         let scope = Scope::global();
         store
-            .create(&scope, "x", "Dup", "one", None, "tool")
+            .create(&scope, "x", "Dup", "one", 3, None, "tool")
             .await
             .unwrap();
         let err = store
-            .create(&scope, "x", "dup", "two", None, "tool")
+            .create(&scope, "x", "dup", "two", 3, None, "tool")
             .await
             .unwrap_err();
         assert!(matches!(err, MemoryError::DuplicateTitle(_)));
@@ -95,6 +100,7 @@ mod integration_tests {
                 "decisions",
                 "Old Plan",
                 "the first plan",
+                3,
                 None,
                 "tool",
             )
@@ -106,6 +112,7 @@ mod integration_tests {
                 "decisions",
                 "New Plan",
                 "replaces [[supersedes::Old Plan]] and depends on [[depends-on::Old Plan]]",
+                3,
                 None,
                 "tool",
             )
@@ -130,6 +137,7 @@ mod integration_tests {
                 "a",
                 "Source",
                 "points at [[Future Doc]]",
+                3,
                 None,
                 "tool",
             )
@@ -139,7 +147,7 @@ mod integration_tests {
         assert_eq!(health.dangling, 1);
 
         store
-            .create(&scope, "a", "Future Doc", "arrives later", None, "tool")
+            .create(&scope, "a", "Future Doc", "arrives later", 3, None, "tool")
             .await
             .unwrap();
         let health = store.edge_health(&scope).await.unwrap();
@@ -152,7 +160,7 @@ mod integration_tests {
         let (store, _dir) = store();
         let scope = Scope::global();
         let created = store
-            .create(&scope, "x", "Doc", "v1", None, "tool")
+            .create(&scope, "x", "Doc", "v1", 3, None, "tool")
             .await
             .unwrap();
         store
@@ -162,6 +170,7 @@ mod integration_tests {
                 None,
                 None,
                 Some("v2"),
+                None,
                 Some(1),
                 None,
             )
@@ -183,7 +192,7 @@ mod integration_tests {
         let (store, _dir) = store();
         let scope = Scope::global();
         let created = store
-            .create(&scope, "x", "Doc", "v1", None, "tool")
+            .create(&scope, "x", "Doc", "v1", 3, None, "tool")
             .await
             .unwrap();
         let err = store
@@ -193,6 +202,7 @@ mod integration_tests {
                 None,
                 None,
                 Some("v2"),
+                None,
                 Some(99),
                 None,
             )
@@ -212,6 +222,7 @@ mod integration_tests {
                     "x",
                     &format!("Doc {i}"),
                     &format!("shared keyword with a lot of extra content number {i}"),
+                    3,
                     None,
                     "tool",
                 )
@@ -234,15 +245,15 @@ mod integration_tests {
         let (store, _dir) = store();
         let scope = Scope::global();
         store
-            .create(&scope, "finance.accounts", "A", "a", None, "tool")
+            .create(&scope, "finance.accounts", "A", "a", 3, None, "tool")
             .await
             .unwrap();
         store
-            .create(&scope, "finance.accounts", "B", "b", None, "tool")
+            .create(&scope, "finance.accounts", "B", "b", 3, None, "tool")
             .await
             .unwrap();
         store
-            .create(&scope, "finance.budget", "C", "c", None, "tool")
+            .create(&scope, "finance.budget", "C", "c", 3, None, "tool")
             .await
             .unwrap();
 
@@ -262,7 +273,7 @@ mod integration_tests {
         let (store, _dir) = store();
         let scope = Scope::global();
         let created = store
-            .create(&scope, "x", "Gone", "temporary", None, "tool")
+            .create(&scope, "x", "Gone", "temporary", 3, None, "tool")
             .await
             .unwrap();
         assert!(store.delete(&scope, &created.memory.id).await.unwrap());
@@ -285,11 +296,13 @@ mod integration_tests {
                 title: "Fact".into(),
                 taxonomy: "x".into(),
                 content: "first".into(),
+                importance: None,
             },
             CandidateMemory {
                 title: "Fact".into(),
                 taxonomy: "x".into(),
                 content: "second".into(),
+                importance: None,
             },
         ];
         let report = persist_candidates(&store, &scope, &candidates, Some("auto"))

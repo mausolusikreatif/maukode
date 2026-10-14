@@ -106,6 +106,7 @@ pub struct SessionRunner {
     checkpoint_manager: Option<Arc<crate::checkpoint::CheckpointManager>>,
     memory: Option<crate::context::MemoryBinding>,
     reflection_config: Option<crate::reflection::ReflectionConfig>,
+    consolidation_config: Option<crate::consolidation::ConsolidationConfig>,
 }
 
 impl SessionRunner {
@@ -127,6 +128,7 @@ impl SessionRunner {
             checkpoint_manager: None,
             memory: None,
             reflection_config: None,
+            consolidation_config: None,
         }
     }
 
@@ -141,6 +143,16 @@ impl SessionRunner {
     /// after each completed turn and extract lessons / propose skills.
     pub fn with_reflection_config(mut self, config: crate::reflection::ReflectionConfig) -> Self {
         self.reflection_config = Some(config);
+        self
+    }
+
+    /// Enable post-turn memory consolidation. When set, the agent will detect and
+    /// reconcile near-duplicate memories after each completed turn.
+    pub fn with_consolidation_config(
+        mut self,
+        config: crate::consolidation::ConsolidationConfig,
+    ) -> Self {
+        self.consolidation_config = Some(config);
         self
     }
 
@@ -802,6 +814,10 @@ impl SessionRunner {
             // Post-turn reflection: the agent evaluates its own performance and extracts
             // lessons / proposes skills. Runs only on clean completion with reflection enabled.
             self.reflect_on_turn(&final_messages).await;
+
+            // Post-turn memory consolidation: detect and reconcile near-duplicate
+            // memories. Runs only on clean completion with consolidation enabled.
+            self.consolidate_memories().await;
         }
 
         Ok(stop)
@@ -835,6 +851,28 @@ impl SessionRunner {
             reflection_config,
         );
         engine.reflect(messages, tool_call_count).await;
+    }
+
+    /// Run the memory consolidation engine, if configured. Detects near-duplicate
+    /// memories and reconciles them via LLM-guided merge/supersede decisions.
+    /// Never fails the turn — all errors are logged internally.
+    async fn consolidate_memories(&self) {
+        let Some(config) = &self.consolidation_config else {
+            return;
+        };
+        if !config.enabled {
+            return;
+        }
+        let Some(binding) = &self.memory else {
+            return;
+        };
+        let engine = crate::consolidation::ConsolidationEngine::new(
+            &self.llm,
+            &self.config.model,
+            &binding.context,
+            config.clone(),
+        );
+        engine.run().await;
     }
 
     /// Persist auto-extracted candidate memories from a finished turn, logging (never failing the

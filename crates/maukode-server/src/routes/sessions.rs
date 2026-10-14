@@ -543,6 +543,11 @@ fn start_turn(
             runner = runner.with_reflection_config(app_config.agent.reflection.clone());
         }
 
+        // Enable post-turn memory consolidation if configured.
+        if app_config.agent.consolidation.enabled {
+            runner = runner.with_consolidation_config(app_config.agent.consolidation.clone());
+        }
+
         if let Ok(cm) = checkpoint_mgr {
             runner = runner.with_checkpoint_manager(cm);
         }

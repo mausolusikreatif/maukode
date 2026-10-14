@@ -11,12 +11,22 @@ use crate::store::MemoryStore;
 use maukode_protocol::Message;
 use serde::{Deserialize, Serialize};
 
-/// A candidate memory proposed by extraction, before it is written.
+/// A candidate memory proposed by extraction, before it is written. `importance` is an optional
+/// 1-5 rating; when unset, the store uses its default (3).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CandidateMemory {
     pub title: String,
     pub taxonomy: String,
     pub content: String,
+    #[serde(default)]
+    pub importance: Option<i64>,
+}
+
+impl CandidateMemory {
+    /// Returns the importance level, defaulting to 3 if unset.
+    pub fn importance(&self) -> i64 {
+        self.importance.unwrap_or(3).clamp(1, 5)
+    }
 }
 
 /// Outcome of running extraction over a turn.
@@ -71,6 +81,7 @@ pub async fn persist_candidates(
                         None,
                         None,
                         Some(&merged),
+                        None,
                         Some(existing.version),
                         author,
                     )
@@ -84,6 +95,7 @@ pub async fn persist_candidates(
                         &candidate.taxonomy,
                         &candidate.title,
                         &candidate.content,
+                        candidate.importance(),
                         author,
                         "auto",
                     )
@@ -115,6 +127,7 @@ pub fn candidates_from_messages(messages: &[Message]) -> Vec<CandidateMemory> {
                             title: title.trim().to_string(),
                             taxonomy: "extracted".to_string(),
                             content: content.trim().to_string(),
+                            importance: None,
                         });
                     }
                 }
