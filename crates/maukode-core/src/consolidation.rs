@@ -14,8 +14,9 @@ use std::sync::Arc;
 
 use maukode_llm::{LLMClient, LLMRequest};
 use maukode_memory::{
-    ConsolidationAction, ConsolidationReport, ConsolidationSuggestion, DuplicatePair, MemoryContext,
+    ConsolidationAction, ConsolidationSuggestion, DuplicatePair, MemoryContext,
 };
+pub use maukode_memory::ConsolidationReport;
 use maukode_protocol::Message;
 use serde::Deserialize;
 use tracing::debug;
@@ -315,7 +316,7 @@ impl<'a> ConsolidationEngine<'a> {
         }
 
         // Any pairs the LLM didn't address are treated as keep-separate.
-        for (i, pair) in pairs.iter().enumerate() {
+        for pair in pairs.iter() {
             if !suggestions
                 .iter()
                 .any(|s| s.pair.older.id == pair.older.id && s.pair.newer.id == pair.newer.id)
