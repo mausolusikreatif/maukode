@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn format_abstraction_prompt_contains_memories() {
         let now = Utc::now();
-        let memories = vec![
+        let memories = [
             maukode_memory::Memory {
                 id: "1".into(),
                 scope: "global".into(),
