@@ -3,29 +3,28 @@
 /**
  * Configuration for the consolidation engine.
  */
-export type ConsolidationConfig = {
-    /**
-     * Whether consolidation runs after reflection.
-     */
-    enabled: boolean,
-    /**
-     * Minimum number of live memories before consolidation is attempted.
-     */
-    min_memories: number,
-    /**
-     * Jaccard similarity threshold for considering two memories duplicates (0.0–1.0).
-     */
-    threshold: number,
-    /**
-     * Maximum number of pairs to send to the LLM in a single batch.
-     */
-    batch_size: number,
-    /**
-     * Whether to synthesise higher-level abstractions after merging (Tier 4).
-     */
-    abstraction: boolean,
-    /**
-     * Minimum number of live memories (post-merge) before abstraction synthesis runs.
-     */
-    abstraction_min_memories: number,
-};
+export type ConsolidationConfig = { 
+/**
+ * Whether consolidation runs after reflection.
+ */
+enabled: boolean, 
+/**
+ * Minimum number of live memories before consolidation is attempted.
+ */
+min_memories: number, 
+/**
+ * Jaccard similarity threshold for considering two memories duplicates (0.0–1.0).
+ */
+threshold: number, 
+/**
+ * Maximum number of pairs to send to the LLM in a single batch.
+ */
+batch_size: number, 
+/**
+ * Whether to synthesise higher-level abstractions after merging (Tier 4).
+ */
+abstraction: boolean, 
+/**
+ * Minimum number of live memories (post-merge) before abstraction synthesis runs.
+ */
+abstraction_min_memories: number, };
