@@ -161,7 +161,7 @@ impl Default for AppConfig {
         let openai_key = std::env::var("OPENAI_API_KEY").ok();
         let llmkita_key = std::env::var("LLMKITA_API_KEY").ok();
 
-        let mut cfg = Self {
+        Self {
             active_provider: "llmkita".to_string(),
             active_model: "auto".to_string(),
             mcp_servers: std::collections::HashMap::new(),
@@ -218,8 +218,7 @@ impl Default for AppConfig {
             ],
             security: SecurityConfig::default(),
             agent: AgentConfig::default(),
-        };
-        cfg
+        }
     }
 }
 
