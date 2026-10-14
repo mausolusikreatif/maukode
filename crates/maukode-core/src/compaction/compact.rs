@@ -242,7 +242,8 @@ impl ConversationCompactor {
         } else {
             for p in user_prompts.iter().take(5) {
                 let preview = if p.len() > 100 {
-                    format!("{}...", &p[..100])
+                    let end = p.floor_char_boundary(100);
+                    format!("{}...", &p[..end])
                 } else {
                     p.clone()
                 };

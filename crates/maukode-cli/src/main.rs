@@ -1112,7 +1112,8 @@ async fn execute_turn(
                         tr.tool_name, tr.tool_call_id
                     );
                     let preview = if tr.content.len() > 300 {
-                        format!("{}... (truncated)", &tr.content[..300])
+                        let end = tr.content.floor_char_boundary(300);
+                        format!("{}... (truncated)", &tr.content[..end])
                     } else {
                         tr.content
                     };

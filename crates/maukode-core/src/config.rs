@@ -219,7 +219,6 @@ impl Default for AppConfig {
             security: SecurityConfig::default(),
             agent: AgentConfig::default(),
         };
-        Self::sync_from_opencode_if_present(&mut cfg);
         cfg
     }
 }
@@ -254,7 +253,6 @@ impl AppConfig {
                             default_model: None,
                         });
                     }
-                    Self::sync_from_opencode_if_present(&mut cfg);
                     // Update keys from env if missing
                     for p in &mut cfg.providers {
                         if p.api_key.is_none() {
@@ -278,78 +276,6 @@ impl AppConfig {
         let default = Self::default();
         let _ = default.save();
         default
-    }
-
-    /// Automatically import/sync configuration from OpenCode config (~/.config/opencode/opencode.json)
-    pub fn sync_from_opencode_if_present(cfg: &mut AppConfig) {
-        let mut candidates = Vec::new();
-        if let Some(home) = dirs::home_dir() {
-            candidates.push(home.join(".config/opencode/opencode.json"));
-            candidates.push(home.join(".opencode/opencode.json"));
-        }
-
-        for path in candidates {
-            if !path.exists() {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) else {
-                continue;
-            };
-
-            // Look for provider.llmkita or other custom providers in opencode
-            if let Some(providers_obj) = val.get("provider").and_then(|p| p.as_object()) {
-                for (key, prov_val) in providers_obj {
-                    if key == "chatgpt" {
-                        continue;
-                    }
-                    let name = prov_val.get("name").and_then(|n| n.as_str()).unwrap_or(key);
-                    let base_url = prov_val
-                        .get("options")
-                        .and_then(|o| o.get("baseURL"))
-                        .and_then(|b| b.as_str());
-                    let api_key = prov_val
-                        .get("options")
-                        .and_then(|o| o.get("apiKey"))
-                        .and_then(|k| k.as_str())
-                        .map(|s| s.to_string());
-
-                    if let Some(base) = base_url {
-                        let provider_cfg = ProviderConfig {
-                            id: key.clone(),
-                            name: name.to_string(),
-                            kind: ProviderKind::OpenAiCompatible,
-                            base_url: base.to_string(),
-                            api_key,
-                            default_model: Some("auto".to_string()),
-                        };
-                        cfg.add_or_update_provider(provider_cfg);
-                    }
-                }
-            }
-
-            // Sync active model if set in OpenCode
-            if cfg.active_provider == "chatgpt" {
-                break;
-            }
-            if let Some(model_str) = val.get("model").and_then(|m| m.as_str()) {
-                let parts: Vec<&str> = model_str.split('/').collect();
-                if parts.len() == 2 {
-                    let prov_id = parts[0];
-                    let model_name = parts[1];
-                    if cfg.get_provider(prov_id).is_some() {
-                        cfg.active_provider = prov_id.to_string();
-                        cfg.active_model = model_name.to_string();
-                    }
-                } else if cfg.get_provider("llmkita").is_some() {
-                    cfg.active_provider = "llmkita".to_string();
-                    cfg.active_model = model_str.to_string();
-                }
-            }
-            break;
-        }
     }
 
     pub fn save(&self) -> Result<()> {
