@@ -5,6 +5,19 @@ Semua perubahan penting untuk proyek ini akan didokumentasikan dalam file ini.
 Format berdasarkan [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-10-14
+
+Patch release. Menghapus OpenCode config sync yang mengoverride pilihan model user.
+
+### Removed
+
+- **OpenCode config sync**: Menghapus `sync_from_opencode_if_present()` sepenuhnya.
+  Fungsi ini sebelumnya membaca `~/.config/opencode/opencode.json` saat setiap startup
+  dan mengoverride `active_model` serta provider `default_model` dengan nilai dari
+  OpenCode (misal `"auto"`), lalu menyimpan ulang config yang sudah ter-overwrite
+  ke disk. MauKode adalah project mandiri dan tidak seharusnya membaca config
+  OpenCode. Env-var API key fallback tetap dipertahankan.
+
 ## [0.3.1] - 2026-10-14
 
 Patch release. 1 PR (#72) sejak v0.3.0.

@@ -35,7 +35,8 @@ impl RepoMapFormatter {
                 }
 
                 let sig = if sym.signature.len() > 80 {
-                    format!("{}...", &sym.signature[..77])
+                    let end = sym.signature.floor_char_boundary(77);
+                    format!("{}...", &sym.signature[..end])
                 } else {
                     sym.signature.clone()
                 };
