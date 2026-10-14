@@ -13,9 +13,7 @@
 use std::sync::Arc;
 
 use maukode_llm::{LLMClient, LLMRequest};
-use maukode_memory::{
-    ConsolidationAction, ConsolidationSuggestion, DuplicatePair, MemoryContext,
-};
+use maukode_memory::{ConsolidationAction, ConsolidationSuggestion, DuplicatePair, MemoryContext};
 pub use maukode_memory::ConsolidationReport;
 use maukode_protocol::Message;
 use serde::Deserialize;
