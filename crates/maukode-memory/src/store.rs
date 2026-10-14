@@ -287,15 +287,7 @@ impl MemoryStore {
             let importance: i64 = row.get(7)?;
             let created_at: String = row.get(8)?;
             Ok((
-                id,
-                title,
-                taxonomy,
-                content,
-                rank,
-                authority,
-                superseded,
-                importance,
-                created_at,
+                id, title, taxonomy, content, rank, authority, superseded, importance, created_at,
             ))
         })?;
 

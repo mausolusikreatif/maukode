@@ -588,7 +588,9 @@ mod tests {
 
     #[test]
     fn extract_json_plain_code_fence() {
-        let input = "```\n[{"index":0}]\n```";
+        let input = r#"```
+[{"index":0}]
+```"#;
         assert_eq!(extract_json(input), r#"[{"index":0}]"#);
     }
 

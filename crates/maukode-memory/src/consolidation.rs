@@ -219,8 +219,7 @@ impl crate::store::MemoryStore {
             } => {
                 // First, append a supersedes link to the newer memory's content so the
                 // edge graph records the relationship after tombstoning.
-                let link_text =
-                    format!("\n\n[consolidated] Superseded by [[{}]].", merged_title);
+                let link_text = format!("\n\n[consolidated] Superseded by [[{}]].", merged_title);
                 self.update(
                     scope,
                     &suggestion.pair.newer.id,
