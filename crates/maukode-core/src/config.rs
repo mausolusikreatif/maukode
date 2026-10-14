@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Agent loop limits applied to every turn started through the server.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct AgentConfig {
     #[serde(default = "default_max_steps")]
@@ -18,6 +18,11 @@ pub struct AgentConfig {
     /// See [`crate::reflection::ReflectionConfig`].
     #[serde(default)]
     pub reflection: crate::reflection::ReflectionConfig,
+    /// Post-turn memory consolidation: detect and reconcile near-duplicate memories,
+    /// and synthesise higher-level abstractions.
+    /// See [`crate::consolidation::ConsolidationConfig`].
+    #[serde(default)]
+    pub consolidation: crate::consolidation::ConsolidationConfig,
 }
 
 fn default_max_steps() -> usize {
@@ -34,6 +39,7 @@ impl Default for AgentConfig {
             max_steps: default_max_steps(),
             max_tokens: default_max_tokens(),
             reflection: crate::reflection::ReflectionConfig::default(),
+            consolidation: crate::consolidation::ConsolidationConfig::default(),
         }
     }
 }

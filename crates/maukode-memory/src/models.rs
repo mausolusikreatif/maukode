@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// A single stored memory.
+/// A single stored memory. Importance is a 1-5 integer (default 3) that weights retrieval
+/// ranking: higher values surface critical lessons, lower values fade marginal ones.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Memory {
     pub id: String,
@@ -12,6 +13,8 @@ pub struct Memory {
     pub version: i64,
     pub author: Option<String>,
     pub source: String,
+    /// 1-5 importance score assigned at write time (default 3 = normal).
+    pub importance: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
@@ -82,7 +85,8 @@ pub struct MemoryEdge {
     pub rel: LinkRelation,
 }
 
-/// A search result row.
+/// A search result row. `score` is the blended BM25 × authority × recency × importance score;
+/// `importance` is the raw 1-5 weight stored with the memory.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchHit {
     pub id: String,
@@ -91,6 +95,8 @@ pub struct SearchHit {
     pub content: String,
     pub score: f64,
     pub superseded: bool,
+    /// 1-5 importance score (default 3).
+    pub importance: i64,
 }
 
 /// Search response including the token-budget truncation accounting.

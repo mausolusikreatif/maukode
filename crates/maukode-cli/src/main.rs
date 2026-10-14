@@ -755,6 +755,11 @@ async fn main() -> anyhow::Result<()> {
         } else {
             runner
         };
+        let runner = if config.agent.consolidation.enabled {
+            runner.with_consolidation_config(config.agent.consolidation.clone())
+        } else {
+            runner
+        };
 
         execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(prompt)).await?;
 
@@ -853,6 +858,9 @@ async fn main() -> anyhow::Result<()> {
         }
         if config.agent.reflection.enabled {
             runner = runner.with_reflection_config(config.agent.reflection.clone());
+        }
+        if config.agent.consolidation.enabled {
+            runner = runner.with_consolidation_config(config.agent.consolidation.clone());
         }
 
         loop {

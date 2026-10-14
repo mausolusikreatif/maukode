@@ -148,6 +148,7 @@ pub struct SetAgentConfigRequest {
     pub max_steps: Option<usize>,
     pub max_tokens: Option<u32>,
     pub reflection: Option<maukode_core::ReflectionConfig>,
+    pub consolidation: Option<maukode_core::ConsolidationConfig>,
 }
 
 pub async fn get_agent_config(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
@@ -177,6 +178,9 @@ pub async fn set_agent_config(
     }
     if let Some(reflection) = payload.reflection {
         agent.reflection = reflection;
+    }
+    if let Some(consolidation) = payload.consolidation {
+        agent.consolidation = consolidation;
     }
     config.agent = agent.clone();
     config

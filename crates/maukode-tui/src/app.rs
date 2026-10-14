@@ -1090,6 +1090,11 @@ impl App {
         } else {
             runner
         };
+        let runner = if self.config.agent.consolidation.enabled {
+            runner.with_consolidation_config(self.config.agent.consolidation.clone())
+        } else {
+            runner
+        };
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let app_event_tx = self.event_tx.clone();
 

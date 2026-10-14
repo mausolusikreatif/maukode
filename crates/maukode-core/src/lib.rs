@@ -4,6 +4,7 @@ pub mod chatgpt_client;
 pub mod checkpoint;
 pub mod compaction;
 pub mod config;
+pub mod consolidation;
 pub mod context;
 pub mod mcp;
 pub mod paths;
@@ -29,6 +30,7 @@ pub use config::{
     AgentConfig, AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig,
     WebSearchConfig,
 };
+pub use consolidation::{ConsolidationConfig, ConsolidationEngine, ConsolidationReport};
 pub use context::{
     context_with_project_memory, memory_auto_extract_enabled, register_memory_tools,
     ContextManager, MemoryBinding,

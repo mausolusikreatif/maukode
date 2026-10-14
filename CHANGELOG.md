@@ -9,6 +9,16 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 Patch release. Menghapus OpenCode config sync yang mengoverride pilihan model user.
 
+### Added
+
+- **Memory Consolidation Tier 4 (Abstraction Synthesis)**: Setelah merge duplikat,
+  engine consolidation sekarang dapat mensintesis memory abstraksi tingkat tinggi
+  dari pola lintas memory dalam taxonomy branch yang sama. Abstraksi baru ditulis
+  dengan `[[Title]]` link balik ke source memories. Dikendalikan oleh
+  `ConsolidationConfig.abstraction` dan `abstraction_min_memories`.
+- **UI Settings Consolidation**: Tambah toggle consolidation dan abstraction di
+  Settings page desktop app.
+
 ### Removed
 
 - **OpenCode config sync**: Menghapus `sync_from_opencode_if_present()` sepenuhnya.

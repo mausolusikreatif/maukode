@@ -408,6 +408,7 @@ fn parse_lesson_line(text: &str) -> Option<CandidateMemory> {
         title,
         content,
         taxonomy,
+        importance: None,
     })
 }
 

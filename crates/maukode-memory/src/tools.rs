@@ -104,9 +104,14 @@ fn render_hits(hits: &[SearchHit]) -> String {
     hits.iter()
         .map(|h| {
             let flag = if h.superseded { " [superseded]" } else { "" };
+            let imp = if h.importance != 3 {
+                format!(" imp:{}/5", h.importance)
+            } else {
+                String::new()
+            };
             format!(
-                "- [{}] {} ({}, score {:.2}){}\n{}",
-                h.id, h.title, h.taxonomy, h.score, flag, h.content
+                "- [{}] {} ({}, score {:.2}{}){}\n{}",
+                h.id, h.title, h.taxonomy, h.score, imp, flag, h.content
             )
         })
         .collect::<Vec<_>>()
@@ -286,6 +291,7 @@ impl Tool for MemoryWriteTool {
                 "title": { "type": "string" },
                 "taxonomy": { "type": "string", "description": "Dot-notation path, e.g. architecture.parsing." },
                 "content": { "type": "string" },
+                "importance": { "type": "integer", "minimum": 1, "maximum": 5, "description": "1-5 importance rating (default 3)." },
                 "scope": { "type": "string", "enum": ["project", "global"], "description": "Defaults to project." }
             },
             "required": ["title", "taxonomy", "content"]
@@ -298,6 +304,10 @@ impl Tool for MemoryWriteTool {
         let title = required_str(&args, "title")?;
         let taxonomy = required_str(&args, "taxonomy")?;
         let content = required_str(&args, "content")?;
+        let importance = args
+            .get("importance")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(3);
         let scope = self.0.scope_for(&args);
         let result = self
             .0
@@ -307,16 +317,18 @@ impl Tool for MemoryWriteTool {
                 taxonomy,
                 title,
                 content,
+                importance,
                 self.0.author.as_deref(),
                 "tool",
             )
             .await
             .map_err(MemoryContext::tool_error)?;
         Ok(format!(
-            "Stored memory '{}' (id {}, version {}, {} link(s)).",
+            "Stored memory '{}' (id {}, version {}, importance {}, {} link(s)).",
             result.memory.title,
             result.memory.id,
             result.memory.version,
+            result.memory.importance,
             result.links.len()
         ))
     }
@@ -382,6 +394,7 @@ impl Tool for MemoryUpdateTool {
                 "title": { "type": "string" },
                 "taxonomy": { "type": "string" },
                 "content": { "type": "string" },
+                "importance": { "type": "integer", "minimum": 1, "maximum": 5, "description": "1-5 importance rating." },
                 "base_version": { "type": "integer" },
                 "scope": { "type": "string", "enum": ["project", "global"] }
             },
@@ -396,6 +409,7 @@ impl Tool for MemoryUpdateTool {
         let title = args.get("title").and_then(|v| v.as_str());
         let taxonomy = args.get("taxonomy").and_then(|v| v.as_str());
         let content = args.get("content").and_then(|v| v.as_str());
+        let importance = args.get("importance").and_then(|v| v.as_i64());
         let base_version = args.get("base_version").and_then(|v| v.as_i64());
         let scope = self.0.scope_for(&args);
         let result = self
@@ -407,6 +421,7 @@ impl Tool for MemoryUpdateTool {
                 taxonomy,
                 title,
                 content,
+                importance,
                 base_version,
                 self.0.author.as_deref(),
             )
