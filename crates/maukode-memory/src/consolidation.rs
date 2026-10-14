@@ -329,6 +329,7 @@ impl crate::store::MemoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemoryStore;
     use chrono::Utc;
 
     #[test]
