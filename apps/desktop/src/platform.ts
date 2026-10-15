@@ -14,23 +14,38 @@ declare global {
 
 /**
  * Where to connect on startup, in priority order: the Tauri shell (which starts/finds the local
- * daemon and owns its token), URL parameters (`?url=...&token=...`, handy for development), then
- * the last connection saved in this browser.
+ * daemon and owns its token), URL parameters (`?url=...&token=...`, handy for development), a
+ * bookmarkable token in the URL fragment (`#token=...`, never sent to the server), the last
+ * connection saved in this browser, and finally the server that served this page (so a browser
+ * hitting the web UI served by maukode-server connects automatically).
  */
 export async function getBootstrap(): Promise<Bootstrap | null> {
   if (window.__TAURI_INTERNALS__) {
     const { invoke } = await import("@tauri-apps/api/core");
     return await invoke<Bootstrap>("daemon_info");
   }
+  // Dev mode: explicit ?url=...&token=...
   const params = new URLSearchParams(window.location.search);
   const url = params.get("url");
   if (url) return { url, token: params.get("token") ?? undefined };
+  // Token from URL fragment (#token=...): bookmarkable for remote/Tailscale access,
+  // and the fragment is never sent to the server (no logs, no server-side history).
+  const hashParams = new URLSearchParams(window.location.hash.slice(1));
+  const hashToken = hashParams.get("token");
+  if (hashToken) {
+    // Strip the fragment from the address bar so the token doesn't linger visibly.
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+    return { url: window.location.origin, token: hashToken };
+  }
+  // Last saved connection.
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? (JSON.parse(saved) as Bootstrap) : null;
+    if (saved) return JSON.parse(saved) as Bootstrap;
   } catch {
-    return null;
+    /* storage unavailable */
   }
+  // When the UI is served by maukode-server itself, default to that server.
+  return { url: window.location.origin, token: undefined };
 }
 
 export function saveBootstrap(b: Bootstrap): void {
@@ -89,6 +104,10 @@ export function forgetBootstrap(): void {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
     /* ignore */
+  }
+  // Also strip a token fragment from the address bar so it doesn't linger.
+  if (window.location.hash.includes("token=")) {
+    history.replaceState(null, "", window.location.pathname + window.location.search);
   }
 }
 
