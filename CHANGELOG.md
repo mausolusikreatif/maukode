@@ -5,7 +5,9 @@ Semua perubahan penting untuk proyek ini akan didokumentasikan dalam file ini.
 Format berdasarkan [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-15
+
+Minor release. Default langkah agent 50 → 2000, perbaikan pengiriman CLI `--max-steps`, dan retry stream llm-kita.
 
 ### Fixed
 
