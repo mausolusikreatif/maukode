@@ -28,7 +28,7 @@ bodies with a 4xx/5xx status.
 | POST | `/providers/active` | `{provider_id}` | |
 | GET | `/models?provider=` | | |
 | POST | `/models/active` | `{model}` | |
-| GET/POST | `/config/agent` | `{max_steps?, max_tokens?}` | `1..=200` / `1..=200000`; persisted; defaults 50 steps / 8192 tokens |
+| GET/POST | `/config/agent` | `{max_steps?, max_tokens?}` | `1..=10000` / `1..=200000`; persisted; defaults 2000 steps / 8192 tokens |
 | GET | `/permissions/mode?session_id=` | | per-session if given |
 | POST | `/permissions/mode` | `{mode, session_id?}` | with `session_id` only that session changes; without, default **and all** sessions change |
 | GET | `/sessions` | `?directory=&all=` | items add `running`, `pending_permission_count`, `project_dir`, `worktree_branch`; header `X-Event-Seq` (see Global feed) |

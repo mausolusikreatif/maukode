@@ -28,7 +28,7 @@ impl Default for RunnerConfig {
             // exact model name, so callers that do not pick a model explicitly inherit the
             // configured default.
             model: crate::AppConfig::load().active_model,
-            max_steps: 50,
+            max_steps: 2000,
             max_tokens: Some(8192),
             temperature: None,
         }

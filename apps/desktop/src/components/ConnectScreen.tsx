@@ -61,6 +61,14 @@ export function ConnectScreen({ initialUrl, initialToken }: { initialUrl?: strin
         <Button data-testid="connect-button" type="submit" disabled={busy}>
           {busy ? "Connecting…" : "Connect"}
         </Button>
+
+        <p className="text-xs text-muted-foreground">
+          Tip: bookmark{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-[0.7rem]">
+            {url.replace(/\/+$/, "")}#token=…
+          </code>{" "}
+          to auto-connect on future visits.
+        </p>
       </form>
     </div>
   );

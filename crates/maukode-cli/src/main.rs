@@ -134,6 +134,13 @@ enum Commands {
 
         #[arg(short = 'd', long, help = "Default root directory for workspaces")]
         dir: Option<PathBuf>,
+
+        #[arg(
+            long,
+            env = "MAUKODE_WEB_DIR",
+            help = "Path to pre-built web UI (Vite dist/) to serve from the server URL"
+        )]
+        web_dir: Option<PathBuf>,
     },
 }
 
@@ -281,6 +288,7 @@ async fn main() -> anyhow::Result<()> {
         bind,
         token,
         dir,
+        web_dir,
     }) = cli.command
     {
         match action {
@@ -347,12 +355,30 @@ async fn main() -> anyhow::Result<()> {
                     "  Default workspace: \x1b[2m{}\x1b[0m",
                     workspace_dir.display()
                 );
+                if web_dir.is_some() {
+                    println!("  Web UI: \x1b[1;34mEnabled\x1b[0m — accessible at the server URL in any browser");
+                } else {
+                    println!("  Web UI: \x1b[2mAuto-detect\x1b[0m (will serve apps/desktop/dist/ if found)");
+                }
+                if let Some(ref t) = token {
+                    let display_addr = if bind_addr.ip().is_unspecified() {
+                        format!("<your-ip>:{}", bind_addr.port())
+                    } else {
+                        bind_addr.to_string()
+                    };
+                    println!(
+                        "  Remote URL: \x1b[1;34mhttp://{}#token={}\x1b[0m  (bookmark this on your phone/Tailscale)",
+                        display_addr,
+                        t
+                    );
+                }
                 println!("══════════════════════════════════════════════════════════════════\n");
 
                 let server_config = maukode_server::ServerConfig {
                     bind_addr,
                     auth_token: token,
                     default_dir: dir.or(Some(cwd)),
+                    web_dir,
                 };
 
                 maukode_server::run_server(server_config).await?;
@@ -408,7 +434,10 @@ async fn main() -> anyhow::Result<()> {
             client.set_active_model(model).await?;
         }
         if let Some(steps) = cli.max_steps {
-            let _ = client.set_agent_config(Some(steps), None, None).await;
+            client
+                .set_agent_config(Some(steps), None, None)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to apply --max-steps {steps}: {e}"))?;
         }
         let is_remote_vps = cli.remote.is_some();
         let label = if is_remote_vps {

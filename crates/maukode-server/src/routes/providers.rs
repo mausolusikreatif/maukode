@@ -162,8 +162,11 @@ pub async fn set_agent_config(
     let mut config = state.config.write().await;
     let mut agent = config.agent.clone();
     if let Some(steps) = payload.max_steps {
-        if !(1..=200).contains(&steps) {
-            return Err((StatusCode::BAD_REQUEST, "max_steps must be 1..=200".into()));
+        if !(1..=10_000).contains(&steps) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "max_steps must be 1..=10000".into(),
+            ));
         }
         agent.max_steps = steps;
     }

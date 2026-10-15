@@ -151,6 +151,9 @@ pub struct ServerState {
     /// without a token on a loopback bind; `run_server` turns it off for other bind addresses.
     pub enforce_local_host: bool,
     pub default_dir: PathBuf,
+    /// Pre-built web UI directory (Vite `dist/`), if configured. When set the
+    /// router serves these static files as a SPA fallback.
+    pub web_dir: Option<PathBuf>,
     /// At most one daemon-owned preview process per session.
     pub previews: Arc<tokio::sync::Mutex<HashMap<SessionId, PreviewProcess>>>,
     /// Shared HTTP client used by the preview reverse proxy for connection pooling.
@@ -192,6 +195,7 @@ impl ServerState {
             enforce_local_host: auth_token.is_none(),
             auth_token,
             default_dir: dir,
+            web_dir: None,
             previews: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             proxy_client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())

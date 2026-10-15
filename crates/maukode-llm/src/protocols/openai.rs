@@ -632,6 +632,16 @@ mod tests {
 
         assert!(LLMError::Stream("EOF while streaming".into()).is_transient());
         assert!(LLMError::Stream("connection reset by peer".into()).is_transient());
+        // reqwest/hyper mid-stream body cuts (e.g. llm-kita gateway closing
+        // the body mid-turn) must retry instead of failing the turn.
+        assert!(LLMError::Stream(
+            "error decoding response body: stream closed before response completed".into()
+        )
+        .is_transient());
+        assert!(LLMError::Stream(
+            "error decoding response body: connection closed before message completed".into()
+        )
+        .is_transient());
         assert!(LLMError::Api {
             status: 503,
             body: String::new()

@@ -20,6 +20,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 /// Hostname part of an authority (`host`, `host:port`, `[v6]:port`), lowercased, without a
@@ -281,6 +282,18 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     } else {
         router
     };
+
+    // If a web UI directory is configured, serve its static files as a SPA
+    // fallback. Any path not matched by the API routes above falls through to
+    // the ServeDir, which serves assets from the directory and falls back to
+    // `index.html` for unknown paths (client-side routing).
+    let router = if let Some(web_dir) = &state.web_dir {
+        let serve_dir = ServeDir::new(web_dir).fallback(ServeFile::new(web_dir.join("index.html")));
+        router.fallback_service(serve_dir)
+    } else {
+        router
+    };
+
     router
         .layer(cors)
         .layer(TraceLayer::new_for_http())

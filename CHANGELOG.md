@@ -5,6 +5,27 @@ Semua perubahan penting untuk proyek ini akan didokumentasikan dalam file ini.
 Format berdasarkan [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **CLI `--max-steps` benar-benar terkirim ke daemon**: `ServerClient::set_agent_config`
+  POST ke path yang salah (`/api/v1/agent/config`, selalu 404) sementara pemanggil
+  di CLI menelan error via `let _ =`, sehingga override selalu gagal diam-diam.
+  Sekarang mengarah ke `/api/v1/config/agent` dan kegagalan diteruskan sebagai
+  error eksplisit (`Failed to apply --max-steps {n}: ...`).
+- **LLM stream body-cut llm-kita di-retry**: `LLMError::is_transient()` sekarang
+  mengenali pesan reqwest/hyper seperti `error decoding response body: stream
+  closed before response completed`, sehingga turn yang terputus di tengah jalan
+  di-resume (maks 4 attempt) alih-alih langsung gagal.
+
+### Changed
+
+- **Default `max_steps` 50 → 2000** (`AgentConfig` dan `RunnerConfig::default`).
+  Batas validasi server `POST /config/agent` naik dari `1..=200` ke `1..=10000`.
+  Config tersimpan yang sudah ada (`config.json`) tetap dihormati dan tidak
+  dimigrasi paksa; setel ulang sekali via `--max-steps`, Settings, atau edit file.
+
 ## [0.3.2] - 2026-10-14
 
 Patch release. Menghapus OpenCode config sync yang mengoverride pilihan model user.
