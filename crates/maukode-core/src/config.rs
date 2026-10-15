@@ -26,7 +26,7 @@ pub struct AgentConfig {
 }
 
 fn default_max_steps() -> usize {
-    50
+    2000
 }
 
 fn default_max_tokens() -> u32 {

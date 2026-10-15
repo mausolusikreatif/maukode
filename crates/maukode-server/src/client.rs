@@ -182,7 +182,7 @@ impl ServerClient {
         });
         let resp = self
             .http
-            .post(format!("{}/api/v1/agent/config", self.base_url))
+            .post(format!("{}/api/v1/config/agent", self.base_url))
             .json(&body)
             .send()
             .await?;

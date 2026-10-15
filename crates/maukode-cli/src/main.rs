@@ -434,7 +434,10 @@ async fn main() -> anyhow::Result<()> {
             client.set_active_model(model).await?;
         }
         if let Some(steps) = cli.max_steps {
-            let _ = client.set_agent_config(Some(steps), None, None).await;
+            client
+                .set_agent_config(Some(steps), None, None)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to apply --max-steps {steps}: {e}"))?;
         }
         let is_remote_vps = cli.remote.is_some();
         let label = if is_remote_vps {

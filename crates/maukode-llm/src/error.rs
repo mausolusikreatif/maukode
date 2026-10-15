@@ -48,6 +48,24 @@ impl LLMError {
                     "gateway timeout",
                     "internal error",
                     "server error",
+                    // reqwest/hyper body-stream cuts surface as
+                    // "error decoding response body: stream closed before
+                    // response completed" (or hyper/h2 variants). None of
+                    // those contain the keywords above, so without these the
+                    // runner fails the turn instead of resuming it.
+                    "decoding",
+                    "response body",
+                    "stream closed",
+                    "closed before",
+                    "connection closed",
+                    "incomplete message",
+                    "message completed",
+                    "truncated",
+                    "hyper",
+                    "h2 stream",
+                    "h2 error",
+                    "http/2",
+                    "protocol error",
                     "429",
                     "500",
                     "502",
