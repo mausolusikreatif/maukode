@@ -25,7 +25,7 @@ function PermissionCard({ request }: { request: PermissionRequest }) {
   return (
     <div
       data-testid="permission-card"
-      className="permission rounded-lg border border-warning/40 bg-warning/5 p-3"
+      className="permission flex flex-col rounded-lg border border-warning/40 bg-warning/5 p-3"
     >
       <div className="perm-head flex items-center justify-between gap-2">
         <strong className="font-mono text-sm text-tool">{request.tool_name}</strong>
@@ -35,11 +35,13 @@ function PermissionCard({ request }: { request: PermissionRequest }) {
       </div>
       <div className="mt-1 text-sm text-muted-foreground">{request.description}</div>
       {request.command && (
-        <pre className="scrollbar-thin mt-2 overflow-x-auto rounded-md bg-background/70 p-2 font-mono text-xs">
+        <pre
+          className="scrollbar-thin mt-2 max-h-[30vh] overflow-x-auto overflow-y-auto rounded-md bg-background/70 p-2 font-mono text-xs"
+        >
           {request.command}
         </pre>
       )}
-      <div className="row mt-3 flex flex-wrap gap-2">
+      <div className="row mt-3 flex shrink-0 flex-wrap gap-2">
         {CHOICES.map((c) => (
           <Button
             key={c.decision}
@@ -66,7 +68,7 @@ export function Prompts({ thread }: { thread: ThreadState }) {
   const send = useApp((s) => s.send);
   const stopped = thread.stop;
   return (
-    <div className="prompts flex flex-col gap-2 px-3 py-2 lg:px-6">
+    <div className="prompts flex max-h-[50vh] shrink-0 flex-col gap-2 overflow-y-auto px-3 py-2 scrollbar-thin lg:max-h-none lg:overflow-visible lg:px-6">
       {thread.pending.map((p) => (
         <PermissionCard key={p.request_id} request={p} />
       ))}
