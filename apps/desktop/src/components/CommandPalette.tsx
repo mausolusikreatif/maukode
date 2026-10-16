@@ -227,7 +227,7 @@ export function CommandPalette() {
           </CommandGroup>
         )}
       </CommandList>
-      <div className="flex items-center gap-4 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-4 border-t border-border px-3 py-2 text-xs text-muted-foreground">
         <span>
           <kbd className="rounded border border-border bg-secondary px-1">↑</kbd>{" "}
           <kbd className="rounded border border-border bg-secondary px-1">↓</kbd> to navigate
@@ -263,7 +263,7 @@ function PaletteRow({ item }: { item: PaletteItem }) {
       <span className="flex shrink-0 items-center gap-2">
         {item.badge && <Badge variant="warning">{item.badge}</Badge>}
         {item.shortcut && (
-          <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+          <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
             {item.shortcut}
           </kbd>
         )}

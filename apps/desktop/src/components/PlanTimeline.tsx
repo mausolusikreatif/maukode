@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, CircleDot, Circle, X } from "lucide-react";
 import type { Plan, StepStatus } from "../api/types";
 import { cn } from "@/lib/utils";
+import { Button } from "./ui/button";
 
 export interface PlanTimelineProps {
   plan: Plan;
@@ -57,7 +58,7 @@ export function PlanTimeline({ plan, className = "" }: PlanTimelineProps) {
         onClick={() => setCollapsed(!collapsed)}
       >
         <div className="plan-title-area flex items-center gap-2">
-          <span className="plan-badge rounded-md bg-tool/15 px-2 py-0.5 text-[11px] font-medium text-tool">
+          <span className="plan-badge rounded-md bg-tool/15 px-2 py-0.5 text-xs font-medium text-tool">
             Plan
           </span>
           <span className="plan-title text-sm font-medium">{plan.title || "Execution Plan"}</span>
@@ -66,9 +67,10 @@ export function PlanTimeline({ plan, className = "" }: PlanTimelineProps) {
           <span className="plan-progress font-mono" data-testid="plan-progress">
             {completed}/{total} completed
           </span>
-          <button
-            type="button"
-            className="plan-toggle-btn text-primary hover:underline"
+          <Button
+            variant="link"
+            size="sm"
+            className="plan-toggle-btn h-auto p-0 text-xs"
             onClick={(e) => {
               e.stopPropagation();
               setCollapsed(!collapsed);
@@ -76,7 +78,7 @@ export function PlanTimeline({ plan, className = "" }: PlanTimelineProps) {
             title={collapsed ? "Expand plan" : "Collapse plan"}
           >
             {collapsed ? "Expand" : "Collapse"}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -99,7 +101,7 @@ export function PlanTimeline({ plan, className = "" }: PlanTimelineProps) {
                 </span>
                 {step.status === "in_progress" && (
                   <span
-                    className="plan-step-tag working rounded-md bg-primary/15 px-2 py-0.5 text-[11px] text-primary"
+                    className="plan-step-tag working rounded-md bg-primary/15 px-2 py-0.5 text-xs text-primary"
                     data-testid="plan-step-status"
                   >
                     Working
@@ -107,7 +109,7 @@ export function PlanTimeline({ plan, className = "" }: PlanTimelineProps) {
                 )}
                 {step.status === "failed" && (
                   <span
-                    className="plan-step-tag failed rounded-md bg-destructive/15 px-2 py-0.5 text-[11px] text-destructive"
+                    className="plan-step-tag failed rounded-md bg-destructive/15 px-2 py-0.5 text-xs text-destructive"
                     data-testid="plan-step-status"
                   >
                     Failed
@@ -123,7 +125,7 @@ export function PlanTimeline({ plan, className = "" }: PlanTimelineProps) {
         <div className="plan-collapsed-current flex items-center gap-2 border-t border-border px-3 py-2">
           <span className="plan-step-icon in_progress text-primary">{getStatusIcon("in_progress")}</span>
           <span className="plan-step-title current-title flex-1 text-sm">{inProgress.title}</span>
-          <span className="plan-step-tag working rounded-md bg-primary/15 px-2 py-0.5 text-[11px] text-primary">
+          <span className="plan-step-tag working rounded-md bg-primary/15 px-2 py-0.5 text-xs text-primary">
             Working
           </span>
         </div>

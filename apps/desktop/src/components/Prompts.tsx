@@ -66,7 +66,7 @@ export function Prompts({ thread }: { thread: ThreadState }) {
   const send = useApp((s) => s.send);
   const stopped = thread.stop;
   return (
-    <div className="prompts flex flex-col gap-2 px-6 py-2">
+    <div className="prompts flex flex-col gap-2 px-3 py-2 lg:px-6">
       {thread.pending.map((p) => (
         <PermissionCard key={p.request_id} request={p} />
       ))}

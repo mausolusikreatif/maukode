@@ -17,6 +17,8 @@ import { baseName } from "../state/format";
 import { useApp } from "../state/store";
 import { cn } from "@/lib/utils";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Skeleton } from "./ui/skeleton";
 
 function ago(iso: string): string {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -53,16 +55,17 @@ function Card({ s, note, tone }: { s: SessionListItem; note?: string; tone?: "wa
   const isAttention = tone === "warn" || tone === "error";
 
   return (
-    <button
+    <Button
+      variant="ghost"
       data-testid="dash-card"
       className={cn(
-        "dash-card group flex min-h-[116px] flex-col gap-2 rounded-xl border bg-card/65 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent/40 hover:shadow-lg hover:shadow-black/10",
+        "dash-card group flex min-h-[116px] flex-col items-start gap-2 rounded-xl border bg-card/65 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent/40 hover:shadow-lg hover:shadow-black/10",
         tone && `dash-card-${tone}`,
         tone,
       )}
       onClick={() => void open(s.id)}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex w-full items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <span
             className={cn(
@@ -96,21 +99,50 @@ function Card({ s, note, tone }: { s: SessionListItem; note?: string; tone?: "wa
       ) : (
         <span className="text-xs text-muted-foreground">{s.provider} · {s.model}</span>
       )}
-      <span className="mt-auto flex items-center gap-1 text-[11px] text-muted-foreground/70">
+      <span className="mt-auto flex items-center gap-1 text-xs text-muted-foreground/70">
         <Clock3 className="size-3" /> {ago(s.updated_at)}
       </span>
       {isAttention && <span className="sr-only">Needs attention</span>}
-    </button>
+    </Button>
   );
 }
 
-function Section({ id, title, count, children }: { id: string; title: string; count: number; children: ReactNode }) {
+function CardSkeleton() {
+  return (
+    <div className="flex min-h-[116px] flex-col gap-2 rounded-xl border border-border/40 bg-card/40 p-4">
+      <div className="flex items-center gap-2">
+        <Skeleton className="size-2 rounded-full" />
+        <Skeleton className="h-4 w-32" />
+      </div>
+      <Skeleton className="h-3 w-48" />
+      <Skeleton className="h-3 w-24" />
+      <div className="mt-auto">
+        <Skeleton className="h-3 w-16" />
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  id,
+  title,
+  count,
+  highlight,
+  children,
+}: {
+  id: string;
+  title: string;
+  count: number;
+  highlight?: boolean;
+  children: ReactNode;
+}) {
   if (count === 0) return null;
   return (
-    <section data-testid={`dash-${id}`} className="dash-section mt-8">
+    <section data-testid={`dash-${id}`} className={cn("dash-section mt-8", highlight && "rounded-xl border border-primary/30 bg-primary/5 p-4")}>
       <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-        <Badge variant="outline" className="badge rounded-full px-2 text-[11px]">
+        {highlight && <span className="size-2 animate-pulse rounded-full bg-primary" />}
+        <h3 className={cn("text-sm font-semibold tracking-tight", highlight && "text-primary")}>{title}</h3>
+        <Badge variant="outline" className="badge rounded-full px-2 text-xs">
           {count}
         </Badge>
       </div>
@@ -121,8 +153,9 @@ function Section({ id, title, count, children }: { id: string; title: string; co
 
 /** What needs attention across every agent, most urgent first. */
 export function Dashboard() {
-  const { sessions, lastStop } = useApp();
+  const { sessions, lastStop, connection } = useApp();
   const openNewSession = useApp((x) => x.openNewSession);
+  const loading = connection === "connecting";
 
   const needsYou = sessions.filter((s) => s.pending_permission_count > 0);
   const running = sessions.filter((s) => s.running && s.pending_permission_count === 0);
@@ -137,27 +170,22 @@ export function Dashboard() {
     .slice(0, 12);
 
   return (
-    <main data-testid="dashboard" className="dashboard dashboard-shell scrollbar-thin flex-1 overflow-y-auto px-6 py-8 lg:px-10">
+    <main data-testid="dashboard" className="dashboard dashboard-shell scrollbar-thin flex-1 overflow-y-auto px-4 py-6 safe-top safe-bottom lg:px-10">
       <div className="dashboard-glow" aria-hidden="true" />
       <header className="relative flex flex-col justify-between gap-5 border-b border-border/60 pb-7 sm:flex-row sm:items-end">
         <div>
           <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-primary">
             <Sparkles className="size-3.5" /> Agent workspace
           </div>
-          <h1 className="text-3xl font-semibold tracking-[-0.03em]">Good to see you.</h1>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Good to see you.</h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground" data-testid="dash-summary">
             {needsYou.length ? `${needsYou.length} agent${needsYou.length === 1 ? " needs" : "s need"} your attention.` : "Your agents are ready when you are."}
             {running.length > 0 && ` ${running.length} currently working.`}
           </p>
         </div>
-        <button
-          type="button"
-          data-testid="dashboard-new-session"
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/15 transition hover:bg-primary/90"
-          onClick={() => openNewSession()}
-        >
+        <Button data-testid="dashboard-new-session" onClick={() => openNewSession()} size="lg">
           <Plus className="size-4" /> New session
-        </button>
+        </Button>
       </header>
 
       <div className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -174,13 +202,22 @@ export function Dashboard() {
           </div>
           <h2 className="text-base font-semibold">Start building with MauKode</h2>
           <p className="mt-2 max-w-sm text-sm text-muted-foreground">Give an agent a repo and a goal. It will plan, make changes, and leave every decision reviewable.</p>
-          <button type="button" className="mt-5 rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-accent" onClick={() => openNewSession()}>
-            Create your first session
-          </button>
+          <Button variant="outline" className="mt-5" onClick={() => openNewSession()}>
+            <Plus className="size-4" /> Create your first session
+          </Button>
         </div>
       )}
 
-      <Section id="needs" title="Needs your attention" count={needsYou.length}>
+      {loading && sessions.length === 0 && (
+        <div className="relative mt-8 space-y-3">
+          <Skeleton className="h-4 w-40" />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}
+          </div>
+        </div>
+      )}
+
+      <Section id="needs" title="Needs your attention" count={needsYou.length} highlight>
         {needsYou.map((s) => <Card key={s.id} s={s} tone="warn" note={`${s.pending_permission_count} approval${s.pending_permission_count === 1 ? "" : "s"} waiting`} />)}
       </Section>
       <Section id="stopped" title="Stopped early" count={stopped.length}>
@@ -189,7 +226,7 @@ export function Dashboard() {
           return <Card key={s.id} s={s} tone={stop.reason === "error" ? "error" : "warn"} note={stop.reason === "error" ? `Failed: ${stop.message ?? "unknown error"}` : (stop.message ?? "Stopped before finishing")} />;
         })}
       </Section>
-      <Section id="running" title="Working now" count={running.length}>
+      <Section id="running" title="Working now" count={running.length} highlight>
         {running.map((s) => <Card key={s.id} s={s} tone="run" note="Agent is working…" />)}
       </Section>
       <Section id="recent" title="Recent sessions" count={recent.length}>

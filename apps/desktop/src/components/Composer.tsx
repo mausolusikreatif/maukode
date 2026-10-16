@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Button } from "./ui/button";
 import {
   buildAutocompleteItems,
   chipIcon,
@@ -49,14 +50,15 @@ function ModeSelect({ sessionId }: { sessionId: string }) {
 
   if (!mode) {
     return (
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        size="sm"
         disabled
         data-testid="perm-mode"
-        className="composer-select perm-mode-select inline-flex h-8 w-auto items-center gap-1 rounded-md border border-border bg-card/60 px-2.5 py-1 text-xs opacity-50"
+        className="composer-select perm-mode-select w-auto"
       >
         <span className="text-muted-foreground">Mode…</span>
-      </button>
+      </Button>
     );
   }
 
@@ -89,7 +91,7 @@ function ModeSelect({ sessionId }: { sessionId: string }) {
   );
 }
 
-export function Composer({ running }: { running: boolean }) {
+export function Composer({ running, isMobile }: { running: boolean; isMobile?: boolean }) {
   const [text, setText] = useState("");
   const [chips, setChips] = useState<ContextChip[]>([]);
   const [autocompleteOpen, setAutocompleteOpen] = useState(false);
@@ -304,7 +306,8 @@ export function Composer({ running }: { running: boolean }) {
     <div
       ref={composerRef}
       className={cn(
-        "composer relative border-t border-border/70 bg-card/40 px-4 py-3",
+        "composer relative border-t border-border/70 bg-card/40 safe-pb",
+        isMobile ? "px-3 py-2" : "px-4 py-3",
         running && "running",
       )}
     >
@@ -325,9 +328,10 @@ export function Composer({ running }: { running: boolean }) {
                 {chip.label}
               </span>
               {chip.detail && <span className="chip-detail text-muted-foreground">{chip.detail}</span>}
-              <button
-                type="button"
-                className="chip-dismiss ml-0.5 rounded-full px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="chip-dismiss ml-0.5 size-4 rounded-full p-0"
                 data-testid="chip-dismiss"
                 aria-label={`Remove ${chip.label}`}
                 onClick={(e) => {
@@ -337,18 +341,19 @@ export function Composer({ running }: { running: boolean }) {
                 title="Remove attachment"
               >
                 ×
-              </button>
+              </Button>
             </span>
           ))}
           {chips.length > 1 && (
-            <button
-              type="button"
-              className="chip-clear text-xs text-primary hover:underline"
+            <Button
+              variant="link"
+              size="sm"
+              className="chip-clear h-auto p-0 text-xs"
               onClick={() => setChips([])}
               title="Clear all attachments"
             >
               Clear all
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -382,8 +387,9 @@ export function Composer({ running }: { running: boolean }) {
                 key={item.id}
                 type="button"
                 data-index={idx}
+                data-testid="autocomplete-item"
                 className={cn(
-                  "autocomplete-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent",
+                  "autocomplete-item flex w-full items-center gap-2 rounded-none px-3 py-1.5 text-left text-sm hover:bg-accent",
                   idx === highlightedIndex && "bg-accent",
                 )}
                 onMouseEnter={() => setHighlightedIndex(idx)}
@@ -457,26 +463,27 @@ export function Composer({ running }: { running: boolean }) {
               handleSteer();
             }
           }}
-          rows={3}
+          rows={isMobile ? 2 : 3}
           className="w-full resize-none rounded-md border border-input bg-background/60 px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring scrollbar-thin"
         />
       </div>
 
       {/* Composer Footer Toolbar */}
-      <div className="composer-footer mt-2 flex items-center justify-between gap-3">
+      <div className="composer-footer mt-2 flex items-center justify-between gap-2">
         <div className="composer-footer-left flex items-center gap-2">
           {/* Attach Button & Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="attach-btn inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
+              <Button
+                variant="outline"
+                size="sm"
+                className="attach-btn touch-target"
                 data-testid="attach-button"
                 title="Add context reference (@file, @folder, @git-diff, @symbol)"
               >
                 <Plus className="size-3" />
                 Attach
-              </button>
+              </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
@@ -517,83 +524,109 @@ export function Composer({ running }: { running: boolean }) {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Environment / Branch Capability Indicator */}
-          <span
-            className="env-indicator inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground"
-            title={`Workspace: ${meta?.projectDir ?? meta?.directory ?? "Local"}${
-              meta?.branch ? ` (branch: ${meta.branch})` : ""
-            }`}
-          >
-            <span className="env-dot size-1.5 rounded-full bg-success" />
-            <GitBranch className="size-3" />
-            <span className="env-label font-mono">{meta?.branch ?? "Local"}</span>
-          </span>
+          {/* Environment / Branch Capability Indicator — desktop only */}
+          {!isMobile && (
+            <span
+              className="env-indicator inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground"
+              title={`Workspace: ${meta?.projectDir ?? meta?.directory ?? "Local"}${
+                meta?.branch ? ` (branch: ${meta.branch})` : ""
+              }`}
+            >
+              <span className="env-dot size-1.5 rounded-full bg-success" />
+              <GitBranch className="size-3" />
+              <span className="env-label font-mono">{meta?.branch ?? "Local"}</span>
+            </span>
+          )}
 
-          {/* Model Selector in Composer Footer */}
-          <ModelSelect
-            sessionId={activeId ?? ""}
-            currentProvider={meta?.provider ?? null}
-            currentModel={meta?.model ?? null}
-            className="composer-model-select"
-          />
+          {/* Model Selector in Composer Footer — desktop only */}
+          {!isMobile && (
+            <ModelSelect
+              sessionId={activeId ?? ""}
+              currentProvider={meta?.provider ?? null}
+              currentModel={meta?.model ?? null}
+              className="composer-model-select"
+            />
+          )}
 
           {/* Mode / Permission Level Selector in Composer Footer */}
           <ModeSelect sessionId={activeId ?? ""} />
         </div>
 
         <div className="composer-footer-right flex items-center gap-2">
-          {/* Token / Context Gauge */}
-          <div
-            className="composer-gauge inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground"
-            data-testid="token-gauge"
-            title={gaugeTooltip}
-          >
-            <span className="gauge-icon">⚡</span>
-            <span className="gauge-tokens font-mono">~{gauge.tokens} tok</span>
-          </div>
+          {/* Token / Context Gauge — desktop only */}
+          {!isMobile && (
+            <div
+              className="composer-gauge inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground"
+              data-testid="token-gauge"
+              title={gaugeTooltip}
+            >
+              <span className="gauge-icon">⚡</span>
+              <span className="gauge-tokens font-mono">~{gauge.tokens} tok</span>
+            </div>
+          )}
 
           {/* Send / Stop / Steer / Queue Buttons */}
           {running ? (
             <div className="composer-actions flex items-center gap-2">
-              <button
-                type="button"
-                data-testid="steer-button"
-                className="steer-btn rounded-md border border-tool/50 px-3 py-1.5 text-xs font-medium text-tool hover:bg-tool/10"
-                disabled={!text.trim() && chips.length === 0}
-                onClick={handleSteer}
-                title="Steer agent immediately with new guidance (Cmd+Enter)"
-              >
-                Steer
-              </button>
-              <button
-                type="button"
-                data-testid="queue-button"
-                className="queue-btn rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent"
-                disabled={!text.trim() && chips.length === 0}
-                onClick={handleQueue}
-                title="Queue message for next turn (Enter)"
-              >
-                Queue
-              </button>
-              <button
-                type="button"
+              {!isMobile && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="steer-button"
+                    className="steer-btn border-tool/50 text-tool hover:bg-tool/10"
+                    disabled={!text.trim() && chips.length === 0}
+                    onClick={handleSteer}
+                    title="Steer agent immediately with new guidance (Cmd+Enter)"
+                  >
+                    Steer
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="queue-button"
+                    className="queue-btn"
+                    disabled={!text.trim() && chips.length === 0}
+                    onClick={handleQueue}
+                    title="Queue message for next turn (Enter)"
+                  >
+                    Queue
+                  </Button>
+                </>
+              )}
+              <Button
+                variant="destructive"
+                size="sm"
                 data-testid="stop-button"
-                className="danger rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
+                className="touch-target"
                 onClick={() => void stop()}
                 title="Interrupt the agent turn"
               >
                 Stop
-              </button>
+              </Button>
+              {isMobile && (text.trim() || chips.length > 0) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="queue-button"
+                  className="queue-btn touch-target"
+                  onClick={handleQueue}
+                  title="Queue message for next turn"
+                >
+                  Queue
+                </Button>
+              )}
             </div>
           ) : (
-            <button
+            <Button
               data-testid="send-button"
-              className="primary rounded-md bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              size="sm"
+              className="primary touch-target"
               disabled={!text.trim() && chips.length === 0}
               onClick={submit}
             >
               Send
-            </button>
+            </Button>
           )}
         </div>
       </div>

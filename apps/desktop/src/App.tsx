@@ -30,6 +30,7 @@ import { baseName } from "./state/format";
 import { useApp } from "./state/store";
 import { titleFor } from "./state/notify";
 import { emptyThread } from "./state/thread";
+import { useIsMobile } from "./hooks/useIsMobile";
 import { cn } from "./lib/utils";
 
 function SessionTitle({ sessionId, title }: { sessionId: string; title: string | null }) {
@@ -70,15 +71,16 @@ function SessionTitle({ sessionId, title }: { sessionId: string; title: string |
   }
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       data-testid="session-title"
-      className="title-text truncate rounded-md px-1 text-left text-sm font-medium hover:bg-accent"
+      className="title-text h-auto truncate justify-start px-1 text-left text-sm font-medium"
       title="Rename session"
       onClick={() => setEditing(true)}
     >
       {title || "Untitled session"}
-    </button>
+    </Button>
   );
 }
 
@@ -98,6 +100,7 @@ function SessionView() {
     toggleReview,
     togglePreview,
   } = useApp();
+  const isMobile = useIsMobile();
   const [deleting, setDeleting] = useState(false);
   const [auditing, setAuditing] = useState(false);
   const view = useApp((s) => s.view);
@@ -123,51 +126,70 @@ function SessionView() {
   return (
     <div className="session-layout flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <main className="session-view flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
-        <header className="session-head flex min-h-[68px] min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-5 py-3 backdrop-blur">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            {!sidebarOpen && (
-              <button
-                type="button"
-                className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+        <header
+          className={cn(
+            "session-head flex min-w-0 items-center justify-between gap-2 border-b border-border/70 bg-background/95 backdrop-blur",
+            isMobile ? "px-3 py-2 safe-top" : "min-h-[68px] flex-wrap gap-3 px-5 py-3",
+          )}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            {(!sidebarOpen || isMobile) && (
+              <Button
+                variant="ghost"
+                size="icon"
                 data-testid="toggle-sidebar-btn"
                 title="Open Sidebar (Ctrl+B)"
+                className="touch-target"
                 onClick={toggleSidebar}
               >
                 <PanelLeft className="size-4" />
-              </button>
+              </Button>
             )}
-            <div className="flex min-w-0 flex-col gap-1">
-              <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                <Folder className="size-3.5 shrink-0" />
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <Folder className="size-3 shrink-0" />
                 <span className="truncate font-medium text-foreground" title={meta?.projectDir ?? meta?.directory}>
                   {baseName(meta?.projectDir ?? meta?.directory ?? "")}
                 </span>
-                {meta?.branch && <><span className="text-border">/</span><span className="flex items-center gap-1 truncate"><GitBranch className="size-3" />{meta.branch}</span></>}
+                {meta?.branch && <><span className="text-border">/</span><span className="flex items-center gap-0.5 truncate"><GitBranch className="size-3" />{meta.branch}</span></>}
               </div>
-              <div className="flex items-center gap-3">
+              {!isMobile && (
+                <div className="flex items-center gap-3">
+                  <SessionTitle sessionId={activeId} title={meta?.title ?? null} />
+                  <ModelSelect sessionId={activeId} currentProvider={meta?.provider ?? null} currentModel={meta?.model ?? null} />
+                </div>
+              )}
+              {isMobile && (
                 <SessionTitle sessionId={activeId} title={meta?.title ?? null} />
-                <ModelSelect sessionId={activeId} currentProvider={meta?.provider ?? null} currentModel={meta?.model ?? null} />
-              </div>
+              )}
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
+          <div className={cn("flex shrink-0 items-center gap-1 text-xs", !isMobile && "flex-wrap gap-2")}>
             <Badge data-testid="run-state" variant={thread.running ? "primary" : "outline"} className={cn("badge font-mono", thread.running && "run")}>
               {thread.running ? "running" : "idle"}
             </Badge>
-            <Button data-testid="toggle-review" variant={review.open ? "default" : "outline"} size="sm" className="h-8" onClick={() => void toggleReview()}>
-              Changes{review.files.length > 0 ? ` (${review.files.length})` : ""}
-            </Button>
+            {!isMobile && (
+              <Button data-testid="toggle-review" variant={review.open ? "default" : "outline"} size="sm" className="h-8" onClick={() => void toggleReview()}>
+                Changes{review.files.length > 0 ? ` (${review.files.length})` : ""}
+              </Button>
+            )}
+            {isMobile && review.files.length > 0 && (
+              <Button data-testid="toggle-review" variant={review.open ? "default" : "outline"} size="sm" className="h-8 px-2" onClick={() => void toggleReview()}>
+                {review.files.length}
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon"
                   aria-label="Session actions"
                   title="Session actions"
                   data-testid="session-actions"
-                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                  className="touch-target"
                 >
                   <MoreHorizontal className="size-4" />
-                </button>
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem data-testid="open-vscode" onClick={() => void handleOpenEditor("code")}>
@@ -187,16 +209,37 @@ function SessionView() {
                 <DropdownMenuItem data-testid="archive-active-session" onClick={() => toggleArchiveSession(activeId)}>
                   <Archive className="size-3.5" /> {isArchived ? "Restore" : "Archive"}
                 </DropdownMenuItem>
+                {isMobile && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => void togglePreview()}>
+                      <Eye className="size-3.5" /> {preview.open ? "Hide preview" : "Preview"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => void toggleReview()}>
+                      <Folder className="size-3.5" /> Changes
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
-            <button data-testid="audit-button" className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground" title="Audit session" onClick={() => setAuditing(true)}><ShieldCheck className="size-4" /></button>
-            <button data-testid="preview-toggle" className={cn("rounded-md p-2 transition-colors", preview.open ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground")} title="Toggle preview" onClick={togglePreview}><Eye className="size-4" /></button>
-            <button data-testid="delete-session" className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Delete session" onClick={() => setDeleting(true)}><Trash2 className="size-4" /></button>
+            {!isMobile && (
+              <Button variant="ghost" size="icon" data-testid="audit-button" className="touch-target" title="Audit session" onClick={() => setAuditing(true)}>
+                <ShieldCheck className="size-4" />
+              </Button>
+            )}
+            {!isMobile && (
+              <Button variant="ghost" size="icon" data-testid="preview-toggle" className={cn("touch-target", preview.open && "bg-primary/15 text-primary")} title="Toggle preview" onClick={togglePreview}>
+                <Eye className="size-4" />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" data-testid="delete-session" className="touch-target hover:bg-destructive/10 hover:text-destructive" title="Delete session" onClick={() => setDeleting(true)}>
+              <Trash2 className="size-4" />
+            </Button>
           </div>
         </header>
-        <Thread thread={thread} />
+        <Thread thread={thread} isMobile={isMobile} />
         <Prompts thread={thread} />
-        <Composer running={thread.running} />
+        <Composer running={thread.running} isMobile={isMobile} />
       </main>
       {review.open && <ReviewPanel running={thread.running} />}
       {preview.open && activeId && <PreviewPanel sessionId={activeId} />}
@@ -229,6 +272,15 @@ export default function App() {
   } = useApp();
   const [boot, setBoot] = useState<Bootstrap | null>(null);
   const [ready, setReady] = useState(false);
+  const isMobile = useIsMobile();
+
+  // Close sidebar on mobile when app becomes ready (avoid initial overlay)
+  useEffect(() => {
+    if (ready && isMobile && sidebarOpen) {
+      toggleSidebar();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, isMobile]);
 
   useEffect(() => {
     void getBootstrap()
