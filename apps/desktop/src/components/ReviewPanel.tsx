@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
+import { X } from "lucide-react";
 import type { FileDiffEntry } from "../api/types";
 import { openInEditor, revealInFileManager } from "../platform";
 import { parseUnifiedDiff } from "../state/diff";
 import { useApp, type ActionResult } from "../state/store";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { useConfirm } from "./ui/confirm";
@@ -12,10 +14,11 @@ const STATUS_LABEL: Record<FileDiffEntry["status"], string> = { added: "A", modi
 
 function FileRow({ file, active, onSelect }: { file: FileDiffEntry; active: boolean; onSelect: () => void }) {
   return (
-    <button
+    <Button
+      variant="ghost"
       data-testid="diff-file"
       className={cn(
-        "diff-file flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
+        "diff-file h-auto w-full justify-start rounded-none px-3 py-1.5 text-left text-xs",
         active ? "active bg-accent" : "hover:bg-accent/50",
       )}
       onClick={onSelect}
@@ -33,7 +36,7 @@ function FileRow({ file, active, onSelect }: { file: FileDiffEntry; active: bool
         {STATUS_LABEL[file.status]}
       </span>
       <span className="path flex-1 truncate">{file.path}</span>
-      <span className="counts shrink-0 font-mono text-[11px]">
+      <span className="counts shrink-0 font-mono text-xs">
         {file.binary ? (
           "binary"
         ) : (
@@ -43,7 +46,7 @@ function FileRow({ file, active, onSelect }: { file: FileDiffEntry; active: bool
           </>
         )}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -136,7 +139,7 @@ function WorktreeSection() {
       <div className="row flex gap-2">
         <Button
           data-testid="commit-button"
-          variant="outline"
+          variant="success"
           size="sm"
           disabled={review.busy || !wt.dirty}
           onClick={() => void commitWorktree(message)}
@@ -145,6 +148,7 @@ function WorktreeSection() {
         </Button>
         <Button
           data-testid="merge-button"
+          variant="secondary"
           size="sm"
           disabled={review.busy || (!wt.dirty && wt.commits_ahead === 0)}
           onClick={() => void mergeWorktree(message)}
@@ -157,9 +161,10 @@ function WorktreeSection() {
 }
 
 export function ReviewPanel({ running }: { running: boolean }) {
-  const { review, meta, selectFile, refreshReview, undoLast } = useApp();
+  const { review, meta, selectFile, refreshReview, undoLast, toggleReview } = useApp();
   const confirm = useConfirm();
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
+  const isMobile = useIsMobile();
 
   const totals = review.files.reduce(
     (t, f) => ({ add: t.add + (f.insertions ?? 0), del: t.del + (f.deletions ?? 0) }),
@@ -195,22 +200,40 @@ export function ReviewPanel({ running }: { running: boolean }) {
   return (
     <aside
       data-testid="review-panel"
-      className="review flex w-96 shrink-0 flex-col border-l border-border bg-card/30"
+      className={cn(
+        "review flex flex-col border-l border-border bg-card/30",
+        isMobile
+          ? "fixed inset-0 z-50 w-full safe-top safe-bottom"
+          : "w-96 shrink-0",
+      )}
     >
-      <header className="review-head flex items-center gap-2 border-b border-border px-3 py-2 text-sm">
+      <header className="review-head flex items-center gap-2 border-b border-border px-3 py-2 text-sm safe-top">
         <strong>Changes</strong>
         <span data-testid="review-summary" className="text-xs text-muted-foreground">
           {review.files.length} file{review.files.length === 1 ? "" : "s"} ·{" "}
           <span className="plus text-success">+{totals.add}</span>{" "}
           <span className="minus text-destructive">−{totals.del}</span>
         </span>
-        <button
-          className="ml-auto text-xs text-primary hover:underline"
+        <Button
+          variant="link"
+          size="sm"
+          className="ml-auto h-auto p-0 text-xs"
           onClick={() => void refreshReview()}
           disabled={review.loading}
         >
           Refresh
-        </button>
+        </Button>
+        {isMobile && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="touch-target"
+            onClick={toggleReview}
+            aria-label="Close changes panel"
+          >
+            <X className="size-4" />
+          </Button>
+        )}
       </header>
 
       {running && (
@@ -244,33 +267,33 @@ export function ReviewPanel({ running }: { running: boolean }) {
               {review.selected}
             </span>
             <div className="diff-file-actions flex items-center gap-1">
-              <button
-                type="button"
+              <Button
+                variant="outline"
+                size="xs"
                 data-testid="file-open-vscode"
-                className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-accent"
                 title={`Open in VS Code (${selectedPath})`}
                 onClick={() => void handleOpen("code")}
               >
                 VS Code
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="outline"
+                size="xs"
                 data-testid="file-open-cursor"
-                className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-accent"
                 title={`Open in Cursor (${selectedPath})`}
                 onClick={() => void handleOpen("cursor")}
               >
                 Cursor
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="outline"
+                size="xs"
                 data-testid="file-reveal-manager"
-                className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-accent"
                 title={`Reveal in File Manager (${selectedPath})`}
                 onClick={() => void handleReveal()}
               >
                 Reveal
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -286,7 +309,7 @@ export function ReviewPanel({ running }: { running: boolean }) {
         <div className="row flex items-center gap-2">
           <Button
             data-testid="undo-button"
-            variant="outline"
+            variant="warning"
             size="sm"
             disabled={review.busy || running || review.checkpoints === 0}
             onClick={() => {

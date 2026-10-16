@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { useApp } from "../state/store";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 
@@ -32,6 +33,7 @@ export function PreviewPanel({ sessionId }: { sessionId: string }) {
   const { preview, startPreview, refreshPreview, stopPreview, togglePreview, client } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeKey, setIframeKey] = useState(0);
+  const isMobile = useIsMobile();
 
   // Auto-refresh the preview status every 3s while starting or running.
   useEffect(() => {
@@ -63,18 +65,21 @@ export function PreviewPanel({ sessionId }: { sessionId: string }) {
     <aside
       data-testid="preview-panel"
       className={cn(
-        "preview-panel flex h-full w-full flex-col overflow-hidden border-l border-border/70 bg-background lg:w-[480px] xl:w-[560px]",
+        "preview-panel panel-enter panel-enter-active flex h-full w-full flex-col overflow-hidden border-l border-border/70 bg-background",
+        isMobile
+          ? "fixed inset-0 z-50 safe-top safe-bottom"
+          : "lg:w-[480px] xl:w-[560px]",
       )}
     >
       {/* Toolbar */}
-      <div className="flex min-h-[44px] items-center justify-between gap-2 border-b border-border/70 bg-background/95 px-3 py-2">
+      <div className="flex min-h-[44px] items-center justify-between gap-2 border-b border-border/70 bg-background/95 px-3 py-2 safe-top">
         <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
           <Eye className="size-3.5" />
           <span>Preview</span>
           {info && (
             <span
               className={cn(
-                "status-badge rounded px-1.5 py-0.5 font-mono text-[10px]",
+                "status-badge rounded px-1.5 py-0.5 font-mono text-xs",
                 info.status === "running" && "bg-success/15 text-success",
                 info.status === "starting" && "bg-warning/15 text-warning",
                 (info.status === "error" || info.status === "failed") &&
@@ -85,49 +90,49 @@ export function PreviewPanel({ sessionId }: { sessionId: string }) {
               {STATUS_LABEL[info.status] ?? info.status}
             </span>
           )}
-          {info?.port && <span className="font-mono text-[10px] text-muted-foreground">:{info.port}</span>}
+          {info?.port && <span className="font-mono text-xs text-muted-foreground">:{info.port}</span>}
         </div>
         <div className="flex items-center gap-1">
           {ready && (
             <>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 title="Reload"
                 data-testid="preview-reload"
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                 onClick={handleReload}
               >
                 <RefreshCw className="size-3.5" />
-              </button>
+              </Button>
               {proxyUrl && (
-                <a
-                  href={proxyUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   title="Open in new tab"
-                  className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  asChild
                 >
-                  <ExternalLink className="size-3.5" />
-                </a>
+                  <a href={proxyUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                </Button>
               )}
             </>
           )}
           {info && info.status !== "stopped" && info.status !== "failed" ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-sm"
               title="Stop"
               data-testid="preview-stop"
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              className="hover:bg-destructive/10 hover:text-destructive"
               onClick={handleStop}
             >
               <Square className="size-3.5" />
-            </button>
+            </Button>
           ) : (
             <Button
-              type="button"
               variant="outline"
               size="sm"
-              className="h-7 px-2 text-xs"
               data-testid="preview-start"
               disabled={preview.loading}
               onClick={handleStart}
@@ -136,22 +141,22 @@ export function PreviewPanel({ sessionId }: { sessionId: string }) {
               Start
             </Button>
           )}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-sm"
             title="Close"
             data-testid="preview-close"
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             onClick={togglePreview}
           >
             <X className="size-3.5" />
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Content */}
       <div className="relative flex-1 overflow-hidden bg-card/50">
         {preview.error && (
-          <div className="absolute inset-x-0 top-0 z-10 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <div className="notice error absolute inset-x-0 top-0 z-10 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {preview.error}
           </div>
         )}

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { AlertTriangle } from "lucide-react";
+import { Button } from "./ui/button";
 
 interface State {
   error: Error | null;
@@ -39,13 +40,9 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
           <pre className="scrollbar-thin mt-3 max-h-40 overflow-auto rounded-md bg-background/70 p-2 font-mono text-xs text-muted-foreground">
             {error.message}
           </pre>
-          <button
-            type="button"
-            className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            onClick={() => window.location.reload()}
-          >
+          <Button className="mt-4" onClick={() => window.location.reload()}>
             Reload
-          </button>
+          </Button>
         </div>
       </div>
     );

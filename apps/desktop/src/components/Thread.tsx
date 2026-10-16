@@ -55,14 +55,9 @@ function CodeBlock({ className, children, ...props }: React.ComponentProps<"code
     <div className="code-block my-2 overflow-hidden rounded-lg border border-border bg-background/70">
       <div className="code-head flex items-center justify-between border-b border-border px-3 py-1 text-xs text-muted-foreground">
         <span className="code-lang font-mono">{match ? match[1] : "text"}</span>
-        <button
-          type="button"
-          className="code-copy-btn hover:text-foreground"
-          onClick={copy}
-          title="Copy code"
-        >
+        <Button variant="ghost" size="xs" className="code-copy-btn touch-target" onClick={copy} title="Copy code">
           {copied ? "Copied!" : "Copy"}
-        </button>
+        </Button>
       </div>
       <pre className="scrollbar-thin overflow-x-auto p-3 font-mono text-xs leading-relaxed">
         <code className={className} {...props}>
@@ -103,7 +98,7 @@ function ToolCard({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
       <div className="tool-body space-y-2 border-t border-border px-3 py-2">
         {item.args && (
           <div className="tool-section">
-            <span className="tool-sec-label text-[11px] uppercase tracking-wide text-muted-foreground">Input</span>
+            <span className="tool-sec-label text-xs uppercase tracking-wide text-muted-foreground">Input</span>
             <pre className="args scrollbar-thin mt-1 overflow-x-auto rounded-md bg-background/70 p-2 font-mono text-xs">
               {prettyArgs(item.args)}
             </pre>
@@ -112,12 +107,12 @@ function ToolCard({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
         {item.result !== undefined && (
           <div className="tool-section">
             <div className="tool-sec-head flex items-center justify-between">
-              <span className="tool-sec-label text-[11px] uppercase tracking-wide text-muted-foreground">
+              <span className="tool-sec-label text-xs uppercase tracking-wide text-muted-foreground">
                 Output
               </span>
-              <button type="button" className="tool-copy-btn text-xs text-primary hover:underline" onClick={copyOutput}>
+              <Button variant="link" size="xs" className="tool-copy-btn" onClick={copyOutput}>
                 {copied ? "Copied" : "Copy output"}
-              </button>
+              </Button>
             </div>
             <pre className="result scrollbar-thin mt-1 overflow-x-auto rounded-md bg-background/70 p-2 font-mono text-xs">
               {item.result}
@@ -167,15 +162,16 @@ function SubagentCard({
         <div className="subagent-actions flex items-center gap-2">
           <span className="subagent-tokens text-xs text-muted-foreground">{item.tokensUsed} tokens</span>
           {onInspectTrace && (
-            <button
-              type="button"
+            <Button
+              variant="link"
+              size="xs"
               data-testid="inspect-subagent-trace"
-              className="subagent-inspect-btn text-xs text-primary hover:underline"
+              className="subagent-inspect-btn touch-target"
               onClick={() => onInspectTrace(item.subagentId)}
               title="Inspect Subagent Trace"
             >
               Inspect trace →
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -192,7 +188,7 @@ function SubagentCard({
         </div>
       ) : item.summary ? (
         <div className="subagent-summary mt-2 rounded-md bg-background/60 p-2">
-          <div className="subagent-summary-label text-[11px] uppercase tracking-wide text-muted-foreground">
+          <div className="subagent-summary-label text-xs uppercase tracking-wide text-muted-foreground">
             Summary
           </div>
           <div className="subagent-summary-content mt-1 text-sm">{item.summary}</div>
@@ -212,7 +208,7 @@ function SubagentTraceDrawer({ subagent, onClose }: { subagent: SubagentDetail; 
       onClick={onClose}
     >
       <div
-        className="subagent-drawer scrollbar-thin h-full w-[32rem] max-w-[90vw] overflow-y-auto border-l border-border bg-popover p-4 shadow-2xl"
+        className="subagent-drawer scrollbar-thin h-full w-full max-w-[32rem] overflow-y-auto border-l border-border bg-popover p-4 shadow-2xl safe-top safe-bottom"
         data-testid="subagent-drawer"
         onClick={(e) => e.stopPropagation()}
       >
@@ -224,24 +220,25 @@ function SubagentTraceDrawer({ subagent, onClose }: { subagent: SubagentDetail; 
               {badge.label}
             </Badge>
           </div>
-          <button
-            type="button"
-            className="subagent-drawer-close rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="subagent-drawer-close"
             data-testid="close-subagent-drawer"
             onClick={onClose}
             title="Close inspector"
           >
             <X className="size-4" />
-          </button>
+          </Button>
         </div>
 
         <div className="subagent-drawer-meta mt-4 grid grid-cols-2 gap-3">
           <div className="subagent-drawer-meta-item rounded-md border border-border bg-card/40 p-2">
-            <span className="meta-label text-[11px] uppercase tracking-wide text-muted-foreground">Goal</span>
+            <span className="meta-label text-xs uppercase tracking-wide text-muted-foreground">Goal</span>
             <div className="meta-val mt-1 text-sm">{subagent.goal}</div>
           </div>
           <div className="subagent-drawer-meta-item rounded-md border border-border bg-card/40 p-2">
-            <span className="meta-label text-[11px] uppercase tracking-wide text-muted-foreground">Tokens</span>
+            <span className="meta-label text-xs uppercase tracking-wide text-muted-foreground">Tokens</span>
             <div className="meta-val mt-1 text-sm">{subagent.tokensUsed} tokens consumed</div>
           </div>
         </div>
@@ -268,11 +265,11 @@ function SubagentTraceDrawer({ subagent, onClose }: { subagent: SubagentDetail; 
               <div className="step-content min-w-0 flex-1 rounded-md border border-border bg-card/40 p-2">
                 <div className="step-header flex items-center justify-between gap-2">
                   <span className="step-action truncate text-sm">{entry.action}</span>
-                  <span className="step-time shrink-0 font-mono text-[11px] text-muted-foreground">
+                  <span className="step-time shrink-0 font-mono text-xs text-muted-foreground">
                     {entry.timestamp}
                   </span>
                 </div>
-                <div className="step-tokens mt-1 text-[11px] text-muted-foreground">{entry.tokensUsed} tokens</div>
+                <div className="step-tokens mt-1 text-xs text-muted-foreground">{entry.tokensUsed} tokens</div>
               </div>
             </div>
           ))}
@@ -328,7 +325,7 @@ function Item({
   }
 }
 
-export function Thread({ thread }: { thread: ThreadState }) {
+export function Thread({ thread, isMobile }: { thread: ThreadState; isMobile?: boolean }) {
   const { meta, loadOlder, loadingOlder } = useApp();
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -352,7 +349,10 @@ export function Thread({ thread }: { thread: ThreadState }) {
   return (
     <div
       ref={scroller}
-      className="thread scrollbar-thin flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-4"
+      className={cn(
+        "thread scrollbar-thin flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto",
+        isMobile ? "px-3 py-3" : "px-6 py-4",
+      )}
       data-testid="thread"
       onScroll={(e) => {
         const el = e.currentTarget;

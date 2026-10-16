@@ -10,6 +10,7 @@ import {
   Search,
   Settings2,
   Trash2,
+  X,
 } from "lucide-react";
 import { baseName, shortAgo } from "../state/format";
 import {
@@ -19,6 +20,7 @@ import {
   type SessionStatusFilter,
 } from "../state/sessionFilters";
 import { useApp } from "../state/store";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { cn } from "@/lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -62,6 +64,8 @@ export function Sidebar() {
   } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
+  const toggleSidebar = useApp((s) => s.toggleSidebar);
 
   const toggle = (key: string) =>
     setCollapsed((c) => {
@@ -113,28 +117,47 @@ export function Sidebar() {
   const needsYou = counts.needs_you;
   const running = counts.running;
 
-  return (
-    <aside className="sidebar flex w-[288px] shrink-0 flex-col gap-2 border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground shadow-[4px_0_24px_-20px_rgba(0,0,0,0.8)]">
+  // On mobile, close sidebar when navigating
+  const handleOpenSession = (id: string) => {
+    void openSession(id);
+    if (isMobile) toggleSidebar();
+  };
+
+  const handleGoHome = () => {
+    goHome();
+    if (isMobile) toggleSidebar();
+  };
+
+  const handleOpenSettings = () => {
+    openSettings();
+    if (isMobile) toggleSidebar();
+  };
+
+  const sidebar = (
+    <aside
+      className={cn(
+        "sidebar flex flex-col gap-2 border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground shadow-[4px_0_24px_-20px_rgba(0,0,0,0.8)]",
+        isMobile
+          ? "fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[320px] safe-top safe-bottom"
+          : "w-[288px] shrink-0",
+      )}
+    >
       <div className="sidebar-head flex items-center justify-between px-2 py-1">
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-left transition hover:bg-sidebar-accent"
-          title="Workspace menu"
-        >
+        <Button variant="ghost" size="sm" className="flex h-auto items-center gap-2 rounded-lg px-1.5 py-1" title="Workspace menu">
           <span className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">M</span>
           <span className="text-sm font-semibold tracking-tight">MauKode</span>
           <ChevronDown className="size-3.5 text-muted-foreground" />
-        </button>
+        </Button>
         <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            className="rounded-md p-1.5 text-muted-foreground transition hover:bg-sidebar-accent hover:text-foreground"
+          <Button
+            variant="ghost"
+            size="icon-sm"
             title="Keyboard shortcuts (?)"
             data-testid="btn-shortcuts"
             onClick={toggleShortcuts}
           >
             <CircleHelp className="size-4" />
-          </button>
+          </Button>
           <span
             data-testid="connection"
             className={cn(
@@ -153,11 +176,11 @@ export function Sidebar() {
         <Button data-testid="new-session" size="sm" className="h-9 w-full justify-start gap-2 rounded-lg px-3 shadow-sm" onClick={() => openNewSession(null)}>
           <Plus className="size-4" />
           <span>New session</span>
-          <kbd className="ml-auto rounded border border-primary-foreground/20 px-1.5 py-0.5 text-[10px] font-normal opacity-70">⌘ N</kbd>
+          <kbd className="ml-auto rounded border border-primary-foreground/20 px-1.5 py-0.5 text-xs font-normal opacity-70">⌘ N</kbd>
         </Button>
       </div>
 
-      <div className="summary flex items-center gap-2 px-2 pt-2 text-[11px] text-muted-foreground" data-testid="summary">
+      <div className="summary flex items-center gap-2 px-2 pt-2 text-xs text-muted-foreground" data-testid="summary">
         <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-primary" />{running} running</span>
         <span className="text-border">·</span>
         <span className={cn(needsYou > 0 && "text-warning")}>{needsYou} need you</span>
@@ -169,7 +192,7 @@ export function Sidebar() {
           variant={!activeId && view === "home" ? "secondary" : "ghost"}
           size="sm"
           className="h-8 w-full justify-start gap-2 rounded-md px-2.5 text-xs"
-          onClick={goHome}
+          onClick={handleGoHome}
         >
           <House className="size-3.5" /> Overview
         </Button>
@@ -178,7 +201,7 @@ export function Sidebar() {
           variant={!activeId && view === "settings" ? "secondary" : "ghost"}
           size="sm"
           className="h-8 w-full justify-start gap-2 rounded-md px-2.5 text-xs"
-          onClick={openSettings}
+          onClick={handleOpenSettings}
         >
           <Settings2 className="size-3.5" /> Settings
         </Button>
@@ -186,10 +209,15 @@ export function Sidebar() {
 
       <div className="my-3 h-px bg-sidebar-border" />
       <div className="flex items-center justify-between px-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Sessions</span>
-        <button type="button" className="rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" title="Search sessions" onClick={() => document.querySelector<HTMLInputElement>("[data-testid='session-search']")?.focus()}>
+        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Sessions</span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title="Search sessions"
+          onClick={() => document.querySelector<HTMLInputElement>("[data-testid='session-search']")?.focus()}
+        >
           <Search className="size-3.5" />
-        </button>
+        </Button>
       </div>
 
       <div className="sidebar-search relative">
@@ -203,15 +231,16 @@ export function Sidebar() {
           onChange={(e) => setSessionSearchQuery(e.target.value)}
         />
         {sessionSearchQuery && (
-          <button
-            type="button"
-            className="search-clear absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="search-clear absolute right-1 top-1/2 -translate-y-1/2"
             title="Clear search"
             aria-label="Clear search"
             onClick={() => setSessionSearchQuery("")}
           >
-            ×
-          </button>
+            <X className="size-3.5" />
+          </Button>
         )}
       </div>
 
@@ -221,13 +250,14 @@ export function Sidebar() {
           const count = counts[f.id];
           const isSelected = sessionStatusFilter === f.id;
           return (
-            <button
+            <Button
               key={f.id}
+              variant="ghost"
               role="tab"
               data-testid={f.id === "needs_you" ? "filter-needs-you" : `filter-${f.id}`}
               aria-selected={isSelected}
               className={cn(
-                "filter-chip inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                "filter-chip inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors",
                 isSelected
                   ? "active border-primary/40 bg-primary/15 text-primary"
                   : "border-border text-muted-foreground hover:bg-sidebar-accent",
@@ -246,7 +276,7 @@ export function Sidebar() {
                   {count}
                 </span>
               )}
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -258,8 +288,10 @@ export function Sidebar() {
           return (
             <section key={project} className="project">
               <div className="project-head group flex items-center gap-1 px-1" title={project}>
-                <button
-                  className="project-toggle flex flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs hover:bg-sidebar-accent"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="project-toggle h-auto flex-1 justify-start gap-1 px-1 py-1 text-left text-xs hover:bg-sidebar-accent"
                   onClick={() => toggle(project)}
                   aria-expanded={!closed}
                 >
@@ -270,15 +302,17 @@ export function Sidebar() {
                   <span className="project-name truncate font-medium">{baseName(project)}</span>
                   {closed && attention && <span className="dot warn size-1.5 rounded-full bg-warning" />}
                   <span className="count ml-auto font-mono text-muted-foreground">{items.length}</span>
-                </button>
-                <button
-                  className="project-add rounded-md px-1.5 py-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover:opacity-100"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="project-add opacity-0 transition-opacity group-hover:opacity-100"
                   title={`New session in ${baseName(project)}`}
                   aria-label={`New session in ${baseName(project)}`}
                   onClick={() => openNewSession(project)}
                 >
                   <Plus className="size-3.5" />
-                </button>
+                </Button>
               </div>
 
               {!closed &&
@@ -301,13 +335,14 @@ export function Sidebar() {
                         });
                       }}
                     >
-                      <button
+                      <Button
+                        variant="ghost"
                         data-testid="session-item"
                         className={cn(
-                          "session flex min-w-0 flex-1 flex-col gap-0.5 px-2 py-1.5 text-left text-sm",
+                          "session flex min-w-0 flex-1 flex-col gap-0.5 rounded-none px-2 py-1.5 text-left text-sm",
                           s.id === activeId && "active text-sidebar-accent-foreground",
                         )}
-                        onClick={() => void openSession(s.id)}
+                        onClick={() => handleOpenSession(s.id)}
                       >
                         <span className="title flex items-center gap-1 truncate">
                           {isPinned && (
@@ -317,7 +352,7 @@ export function Sidebar() {
                           )}
                           {s.title || "New session"}
                         </span>
-                        <span className="session-meta flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="session-meta flex items-center gap-2 text-xs text-muted-foreground">
                           {s.pending_permission_count > 0 ? (
                             <Badge variant="warning" data-testid="needs-approval" className="badge warn">
                               {s.pending_permission_count} approval
@@ -335,14 +370,15 @@ export function Sidebar() {
                             </span>
                           )}
                         </span>
-                      </button>
+                      </Button>
 
                       <div className="session-actions flex items-center gap-0.5 pr-1 opacity-0 transition-opacity group-hover/row:opacity-100">
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
                           data-testid="pin-session"
                           className={cn(
-                            "session-action-btn rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground",
+                            "session-action-btn",
                             isPinned && "pinned text-primary",
                           )}
                           title={isPinned ? "Unpin session" : "Pin session"}
@@ -353,11 +389,12 @@ export function Sidebar() {
                           }}
                         >
                           <Pin className="size-3.5" fill={isPinned ? "currentColor" : "none"} />
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
                           data-testid="archive-session"
-                          className="session-action-btn rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                          className="session-action-btn"
                           title={isArchived ? "Restore session" : "Archive session"}
                           aria-label={isArchived ? "Restore session" : "Archive session"}
                           onClick={(e) => {
@@ -366,7 +403,7 @@ export function Sidebar() {
                           }}
                         >
                           {isArchived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   );
@@ -388,25 +425,26 @@ export function Sidebar() {
               sessions{sessionSearchQuery ? ` matching “${sessionSearchQuery}”` : ""}.
             </p>
             {(sessionSearchQuery || sessionStatusFilter !== "all") && (
-              <button
-                type="button"
-                className="mt-1 text-xs text-primary hover:underline"
+              <Button
+                variant="link"
+                size="sm"
+                className="mt-1 h-auto p-0 text-xs"
                 onClick={() => {
                   setSessionSearchQuery("");
                   setSessionStatusFilter("all");
                 }}
               >
                 Reset filters
-              </button>
+              </Button>
             )}
           </div>
         )}
       </nav>
 
       <div className="sidebar-foot mt-auto border-t border-sidebar-border pt-2">
-        <button type="button" className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" onClick={toggleShortcuts}>
-          <CircleHelp className="size-3.5" /> Help & shortcuts <kbd className="ml-auto text-[10px] opacity-60">?</kbd>
-        </button>
+        <Button variant="ghost" size="sm" className="flex w-full justify-start gap-2 rounded-lg px-2 py-2 text-xs" onClick={toggleShortcuts}>
+          <CircleHelp className="size-3.5" /> Help & shortcuts <kbd className="ml-auto text-xs opacity-60">?</kbd>
+        </Button>
       </div>
 
       {contextMenu && (
@@ -415,10 +453,11 @@ export function Sidebar() {
           style={{ top: contextMenu.y, left: contextMenu.x }}
           role="menu"
         >
-          <button
+          <Button
+            variant="ghost"
             role="menuitem"
             data-testid="context-menu-pin"
-            className="context-menu-item relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-accent focus:bg-accent focus:text-accent-foreground"
+            className="context-menu-item flex w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm"
             onClick={() => {
               togglePinSession(contextMenu.sessionId);
               setContextMenu(null);
@@ -426,11 +465,12 @@ export function Sidebar() {
           >
             <Pin className="size-4 shrink-0" fill={pinnedSet.has(contextMenu.sessionId) ? "currentColor" : "none"} />
             <span>{pinnedSet.has(contextMenu.sessionId) ? "Unpin session" : "Pin to top"}</span>
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
             role="menuitem"
             data-testid="context-menu-archive"
-            className="context-menu-item relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-accent focus:bg-accent focus:text-accent-foreground"
+            className="context-menu-item flex w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm"
             onClick={() => {
               toggleArchiveSession(contextMenu.sessionId);
               setContextMenu(null);
@@ -442,12 +482,13 @@ export function Sidebar() {
               <Archive className="size-4 shrink-0" />
             )}
             <span>{archivedSet.has(contextMenu.sessionId) ? "Restore session" : "Archive session"}</span>
-          </button>
+          </Button>
           <div className="context-divider -mx-1 my-1 h-px bg-border" />
-          <button
+          <Button
+            variant="ghost"
             role="menuitem"
             data-testid="context-menu-delete"
-            className="context-menu-item danger relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-left text-destructive outline-none transition-colors hover:bg-destructive/10 focus:bg-destructive/10"
+            className="context-menu-item danger flex w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
             onClick={() => {
               const id = contextMenu.sessionId;
               setContextMenu(null);
@@ -456,11 +497,27 @@ export function Sidebar() {
           >
             <Trash2 className="size-4 shrink-0" />
             <span>Delete session…</span>
-          </button>
+          </Button>
         </div>
       )}
 
       {deletingId && <DeleteDialog sessionId={deletingId} onClose={() => setDeletingId(null)} />}
     </aside>
   );
+
+  // On mobile: overlay with backdrop; on desktop: inline sidebar
+  if (isMobile) {
+    return (
+      <>
+        {/* Backdrop */}
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+          onClick={toggleSidebar}
+        />
+        {sidebar}
+      </>
+    );
+  }
+
+  return sidebar;
 }

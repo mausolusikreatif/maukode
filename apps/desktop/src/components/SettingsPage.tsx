@@ -537,9 +537,11 @@ function ProvidersSection() {
               <Button data-testid="edit-provider" variant="outline" size="sm" onClick={() => setEditing(p.id)}>Edit</Button>
             )}
             {p.id !== providers.active_provider && (
-              <button
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs text-destructive hover:text-destructive"
                 data-testid="delete-provider"
-                className="text-xs text-destructive hover:underline"
                 onClick={() => {
                   void (async () => {
                     const ok = await confirm({
@@ -553,7 +555,7 @@ function ProvidersSection() {
                 }}
               >
                 Remove
-              </button>
+              </Button>
             )}
           </div>
           {editing === p.id && (
@@ -673,7 +675,7 @@ function ChatGptSection() {
           {status.accounts.map((a) => (
             <li key={a.client_id} className="flex items-center gap-2">
               {a.email} {a.active ? <Badge variant="primary" className="badge run">active</Badge> : (
-                <button className="text-primary hover:underline" onClick={async () => { await requireClient(client).chatgptUseAccount(a.client_id); await refresh(); }}>Use</button>
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={async () => { await requireClient(client).chatgptUseAccount(a.client_id); await refresh(); }}>Use</Button>
               )}
             </li>
           ))}
@@ -703,9 +705,11 @@ function ChatGptSection() {
           {signedIn ? "Add another account" : login.phase === "failed" ? "Try again" : "Sign in with ChatGPT"}
         </Button>
         {signedIn && (
-          <button
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs text-destructive hover:text-destructive"
             data-testid="chatgpt-signout"
-            className="text-xs text-destructive hover:underline"
             onClick={async () => {
               const ok = await confirm({
                 title: "Sign out of ChatGPT?",
@@ -723,7 +727,7 @@ function ChatGptSection() {
             }}
           >
             Sign out
-          </button>
+          </Button>
         )}
       </div>
     </Section>
@@ -830,8 +834,8 @@ function PluginsSection() {
             {skills?.map((s) => (
               <li key={s.name}>
                 <strong className="text-foreground">{s.name}</strong>
-                {s.is_built_in && <Badge variant="default" className="ml-1 text-[10px]">built-in</Badge>}
-                {s.run_as_subagent && <Badge variant="default" className="ml-1 text-[10px]">subagent</Badge>}
+                {s.is_built_in && <Badge variant="default" className="ml-1 text-xs">built-in</Badge>}
+                {s.run_as_subagent && <Badge variant="default" className="ml-1 text-xs">subagent</Badge>}
                 {s.description && <> — {s.description}</>}
               </li>
             ))}
@@ -924,7 +928,7 @@ function ConnectionSection() {
 export function SettingsPage() {
   const config = useSharedConfig();
   return (
-    <main data-testid="settings" className="settings scrollbar-thin flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
+    <main data-testid="settings" className="settings scrollbar-thin flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 safe-top safe-bottom lg:px-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
       </div>

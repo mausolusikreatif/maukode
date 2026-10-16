@@ -110,20 +110,21 @@ export function NewSessionDialog({ onClose, initialDir }: { onClose: () => void;
               <span className="text-xs text-muted-foreground">Recent</span>
               <div className="repository-list flex flex-wrap gap-1.5">
                 {repositories.map((path) => (
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     className={cn(
-                      "rounded-md border px-2 py-0.5 text-xs",
-                      directory === path
-                        ? "selected border-primary/40 bg-primary/15 text-primary"
-                        : "border-border hover:bg-accent",
+                      "h-auto py-0.5 text-xs",
+                      directory === path && "border-primary/40 bg-primary/15 text-primary",
+                      directory !== path && "text-muted-foreground",
                     )}
                     key={path}
                     title={path}
                     onClick={() => setDirectory(path)}
                   >
                     {repositoryName(path)}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>

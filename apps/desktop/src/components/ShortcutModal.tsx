@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useApp } from "../state/store";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
+import { Button } from "./ui/button";
 import { primaryMod } from "../platform";
 
 export function ShortcutModal() {
@@ -115,14 +116,9 @@ export function ShortcutModal() {
         </section>
 
         <div className="shortcut-modal-footer mt-4 flex justify-end">
-          <button
-            type="button"
-            className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            data-testid="close-shortcuts"
-            onClick={closeShortcuts}
-          >
+          <Button data-testid="close-shortcuts" onClick={closeShortcuts}>
             Close
-          </button>
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -131,7 +127,7 @@ export function ShortcutModal() {
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+    <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-xs text-foreground">
       {children}
     </kbd>
   );
