@@ -7,6 +7,7 @@ import type {
   GlobalEvent,
   LLMEvent,
   PermissionDecision,
+  PermissionRequest,
   PreviewInfo,
   ProvidersListResponse,
   SessionDetailResponse,
@@ -107,6 +108,8 @@ interface AppState {
   connection: Connection;
   connectionError: string | null;
   sessions: SessionListItem[];
+  /** Permission requests waiting on the user, across every session. */
+  inbox: PermissionRequest[];
   providers: ProvidersListResponse | null;
   activeId: string | null;
   meta: SessionMeta | null;
@@ -146,6 +149,8 @@ interface AppState {
   clearQueue: () => Promise<void>;
   stop: () => Promise<void>;
   respond: (requestId: string, decision: PermissionDecision) => Promise<void>;
+  /** Answer a permission request in any session, not only the open one. */
+  respondTo: (sessionId: string, requestId: string, decision: PermissionDecision) => Promise<void>;
   loadOlder: () => Promise<void>;
 
   toggleReview: () => Promise<void>;
@@ -212,6 +217,22 @@ export const useApp = create<AppState>((set, get) => {
     refreshTimer = setTimeout(() => void get().refreshSessions(), 150);
   };
 
+  /** Load the requests already waiting (e.g. after connecting or reconnecting). */
+  const hydrateInbox = async () => {
+    const { client, sessions } = get();
+    if (!client) return;
+    const waiting = sessions.filter((x) => x.pending_permission_count > 0);
+    const lists = await Promise.all(
+      waiting.map((x) =>
+        client
+          .getSession(x.id, 1)
+          .then((d) => d.pending_permissions)
+          .catch(() => [] as PermissionRequest[]),
+      ),
+    );
+    if (get().client === client) set({ inbox: lists.flat() });
+  };
+
   const onGlobal = (e: GlobalEvent) => {
     const st = get();
     if (st.notificationsOn) {
@@ -229,27 +250,36 @@ export const useApp = create<AppState>((set, get) => {
       }
     }
     switch (e.type) {
-      case "session_created":
       case "session_deleted":
+        set((s) => ({ inbox: s.inbox.filter((r) => r.session_id !== e.session_id) }));
+        refreshSoon();
+        break;
+      case "session_created":
       case "session_updated":
         refreshSoon();
         break;
       case "turn_started":
         patchSession(e.session_id, (x) => ({ ...x, running: true }));
+        refreshSoon();
         set((s) => {
           const { [e.session_id]: _gone, ...rest } = s.lastStop;
           return { lastStop: rest };
         });
         break;
       case "turn_finished":
+        set((s) => ({ inbox: s.inbox.filter((r) => r.session_id !== e.session_id) }));
         patchSession(e.session_id, (x) => ({ ...x, running: false, pending_permission_count: 0 }));
         set((s) => ({ lastStop: { ...s.lastStop, [e.session_id]: { reason: e.reason, message: e.message } } }));
         refreshSoon();
         break;
       case "permission_requested":
+        set((s) => ({
+          inbox: [...s.inbox.filter((r) => r.request_id !== e.request.request_id), e.request],
+        }));
         patchSession(e.session_id, (x) => ({ ...x, pending_permission_count: x.pending_permission_count + 1 }));
         break;
       case "permission_resolved":
+        set((s) => ({ inbox: s.inbox.filter((r) => r.request_id !== e.request_id) }));
         patchSession(e.session_id, (x) => ({
           ...x,
           pending_permission_count: Math.max(0, x.pending_permission_count - 1),
@@ -310,6 +340,7 @@ export const useApp = create<AppState>((set, get) => {
     connection: "disconnected",
     connectionError: null,
     sessions: [],
+    inbox: [],
     providers: null,
     activeId: null,
     meta: null,
@@ -429,8 +460,9 @@ export const useApp = create<AppState>((set, get) => {
         if (!(await client.health())) throw new Error(`No MauKode server answered at ${url}`);
         const { sessions, eventSeq } = await client.listSessions(true);
         const providers = await client.providers();
-        set({ client, sessions, providers, connection: "online" });
+        set({ client, sessions, providers, connection: "online", inbox: [] });
         saveBootstrap({ url: client.baseUrl, token });
+        void hydrateInbox();
 
         const ctrl = new AbortController();
         globalAbort = ctrl;
@@ -439,7 +471,10 @@ export const useApp = create<AppState>((set, get) => {
             since: eventSeq,
             signal: ctrl.signal,
             onEvent: (e) => onGlobal(e),
-            onStatus: (st) => set({ connection: st === "connected" ? "online" : "reconnecting" }),
+            onStatus: (st) => {
+              set({ connection: st === "connected" ? "online" : "reconnecting" });
+              if (st === "connected") void get().refreshSessions().then(hydrateInbox);
+            },
           })
           .catch((e) => {
             // 401/404 are not retryable: the token or server is wrong.
@@ -455,7 +490,7 @@ export const useApp = create<AppState>((set, get) => {
       globalAbort?.abort();
       sessionAbort?.abort();
       globalAbort = sessionAbort = null;
-      set({ client: null, connection: "disconnected", sessions: [], activeId: null, meta: null, threads: {}, lastStop: {}, view: "home" });
+      set({ client: null, connection: "disconnected", sessions: [], inbox: [], activeId: null, meta: null, threads: {}, lastStop: {}, view: "home" });
     },
 
     refreshSessions: async () => {
@@ -622,6 +657,20 @@ export const useApp = create<AppState>((set, get) => {
       if (!client || !activeId) return;
       patchThread(activeId, (t) => resolvePermission(t, requestId));
       await client.respondPermission(activeId, requestId, decision).catch(() => undefined);
+    },
+
+    respondTo: async (sessionId, requestId, decision) => {
+      const { client } = get();
+      if (!client) return;
+      set((s) => ({ inbox: s.inbox.filter((r) => r.request_id !== requestId) }));
+      patchThread(sessionId, (t) => resolvePermission(t, requestId));
+      try {
+        await client.respondPermission(sessionId, requestId, decision);
+      } catch {
+        // The request may already have been answered elsewhere; resync what is really pending.
+        await get().refreshSessions();
+        await hydrateInbox();
+      }
     },
 
     loadOlder: async () => {

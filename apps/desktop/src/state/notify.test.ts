@@ -5,7 +5,8 @@ import { noticeFor, titleFor, type NotifyContext } from "./notify";
 const session = (id: string, over: Partial<SessionListItem> = {}): SessionListItem => ({
   id, directory: "/p", title: `Task ${id}`, message_count: 1, provider: "p", model: "m",
   updated_at: "2026-01-01T00:00:00Z", project_dir: null, worktree_branch: null,
-  running: false, pending_permission_count: 0, ...over,
+  running: false, pending_permission_count: 0,
+  turn_started_at: null, plan_done: 0, plan_total: 0, last_activity: null, ...over,
 });
 
 const ctx = (over: Partial<NotifyContext> = {}): NotifyContext => ({

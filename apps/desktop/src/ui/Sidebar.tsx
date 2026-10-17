@@ -10,11 +10,13 @@ function stateOf(s: SessionListItem): { cls: string; label: string } {
   return { cls: "", label: shortAgo(s.updated_at) };
 }
 
-export function Sidebar({ open, onClose, theme, onTheme }: {
-  open: boolean;
-  onClose: () => void;
-  theme: string;
-  onTheme: () => void;
+export type Tab = "overview" | "sessions" | "new" | "settings";
+
+export function Sidebar({ tab, onGo, onOpened }: {
+  tab: Tab;
+  onGo: (tab: Tab) => void;
+  /** Called after a session is opened from the list. */
+  onOpened: () => void;
 }) {
   const sessions = useApp((s) => s.sessions);
   const activeId = useApp((s) => s.activeId);
@@ -22,7 +24,8 @@ export function Sidebar({ open, onClose, theme, onTheme }: {
   const query = useApp((s) => s.sessionSearchQuery);
   const pinned = useApp((s) => s.pinnedSessionIds);
   const connection = useApp((s) => s.connection);
-  const { setSessionSearchQuery, openSession, goHome, togglePinSession, deleteSession, disconnect } = useApp.getState();
+  const inboxCount = useApp((s) => s.inbox.length);
+  const { setSessionSearchQuery, openSession, togglePinSession, deleteSession } = useApp.getState();
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const groups = useMemo(() => {
@@ -34,8 +37,7 @@ export function Sidebar({ open, onClose, theme, onTheme }: {
 
   return (
     <>
-      <div className={`scrim ${open ? "open" : ""}`} onClick={onClose} />
-      <aside className={`side ${open ? "open" : ""}`} aria-label="Sesi">
+      <aside className="side" aria-label="Sesi">
         <div className="side-head">
           <div className="brand">
             <span className="brand-name">MauKode</span>
@@ -44,7 +46,13 @@ export function Sidebar({ open, onClose, theme, onTheme }: {
               {online ? "terhubung" : connection === "reconnecting" ? "menyambung ulang" : "terputus"}
             </span>
           </div>
-          <button className="btn send" onClick={() => { goHome(); onClose(); }}>Sesi baru</button>
+          <button className="btn send" onClick={() => onGo("new")}>Sesi baru</button>
+          <div className="side-nav">
+            <button className="btn quiet small" aria-current={tab === "overview"} onClick={() => onGo("overview")}>
+              Ringkasan{inboxCount > 0 ? ` (${inboxCount})` : ""}
+            </button>
+            <button className="btn quiet small" aria-current={tab === "settings"} onClick={() => onGo("settings")}>Pengaturan</button>
+          </div>
           <input
             className="field" placeholder="Cari sesi" value={query} aria-label="Cari sesi"
             onChange={(e) => setSessionSearchQuery(e.target.value)}
@@ -66,7 +74,7 @@ export function Sidebar({ open, onClose, theme, onTheme }: {
                   <div key={s.id}>
                     <button
                       className="sess" aria-current={s.id === activeId}
-                      onClick={() => { void openSession(s.id); onClose(); }}
+                      onClick={() => { void openSession(s.id); onOpened(); }}
                     >
                       <span className={`dot ${st.cls}`} />
                       <span style={{ minWidth: 0 }}>
@@ -99,10 +107,6 @@ export function Sidebar({ open, onClose, theme, onTheme }: {
             </section>
           ))}
         </nav>
-        <div className="side-foot">
-          <button className="btn quiet small" onClick={onTheme}>Tema: {theme === "system" ? "otomatis" : theme === "light" ? "terang" : "gelap"}</button>
-          <button className="btn quiet small" onClick={() => disconnect()}>Putus</button>
-        </div>
       </aside>
     </>
   );

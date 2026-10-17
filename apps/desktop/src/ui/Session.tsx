@@ -27,8 +27,8 @@ function ModelPicker({ id, provider, model }: { id: string; provider: string | n
   );
 }
 
-export function Session({ onMenu, reviewOpen, onToggleReview }: {
-  onMenu: () => void;
+export function Session({ onBack, reviewOpen, onToggleReview }: {
+  onBack: () => void;
   reviewOpen: boolean;
   onToggleReview: () => void;
 }) {
@@ -45,7 +45,7 @@ export function Session({ onMenu, reviewOpen, onToggleReview }: {
   return (
     <>
       <header className="head">
-        <button className="btn menu-btn" onClick={onMenu} aria-label="Buka daftar sesi">Sesi</button>
+        <button className="btn back-narrow" onClick={onBack} aria-label="Kembali ke daftar">Kembali</button>
         <div className="head-title">
           <div className="t trunc">{meta?.title || item?.title || "Tanpa judul"}</div>
           <div className="small muted trunc">
