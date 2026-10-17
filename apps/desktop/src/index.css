@@ -1,12 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* ── Font loading ────────────────────────────────────────────────────
- * JetBrains Mono carries identity for a developer tool: it reads as
- * "terminal-native" and differentiates from generic SaaS dashboards.
- * Inter is a capable body sans. Both self-hosted via Google Fonts CDN.
- */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+/* Fonts (Inter + JetBrains Mono) load from <link> in index.html. An @import here is dropped
+ * by the Tailwind build because it follows inlined imports, so the fonts never loaded. */
 
 @custom-variant dark (&:is(.dark *));
 
@@ -274,7 +270,19 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     letter-spacing: -0.01em;
+    border-left: 2px solid var(--primary);
+    background: color-mix(in srgb, var(--primary) 5%, var(--card));
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    padding: var(--space-2) var(--space-3);
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
+  .msg.user::before {
+    content: "> ";
+    color: var(--primary);
+    font-weight: 600;
+  }
+  .msg.assistant { line-height: 1.65; }
 
   /* ── Sidebar section label ────────────────────────────────────────
    * Replaces the template "ALL-CAPS tracking-wide eyebrow" with a
