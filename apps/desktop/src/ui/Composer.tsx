@@ -25,6 +25,7 @@ export function Composer({ thread }: { thread: ThreadState }) {
   const loadedFor = useRef<string | null>(null);
   const activeRef = useRef(activeId);
   activeRef.current = activeId;
+  const [mapState, setMapState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [query, setQuery] = useState<string | null>(null);
   const [pick, setPick] = useState(0);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -39,6 +40,7 @@ export function Composer({ thread }: { thread: ThreadState }) {
 
   useEffect(() => {
     setCodebase(NO_CODEBASE);
+    setMapState("idle");
     loadedFor.current = null;
   }, [activeId]);
 
@@ -47,23 +49,32 @@ export function Composer({ thread }: { thread: ThreadState }) {
     if (query === null || !client || !activeId || loadedFor.current === activeId) return;
     loadedFor.current = activeId;
     const id = activeId;
-    client
-      .codebaseMap(id, 1000)
-      .then((r) => {
-        if (r?.map && activeRef.current === id) setCodebase(parseRepoMap(r.map));
-      })
-      .catch(() => { loadedFor.current = null; });
+    setMapState("loading");
+    // Huge folders (e.g. a home directory) can take a minute to scan: give up waiting after 12s.
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 12000));
+    void Promise.race([client.codebaseMap(id, 1000).catch(() => null), timeout]).then((r) => {
+      if (activeRef.current !== id) return;
+      const parsed = r?.map ? parseRepoMap(r.map) : NO_CODEBASE;
+      setCodebase(parsed);
+      setMapState(parsed.files.length > 0 ? "ready" : "failed");
+    });
   }, [query, client, activeId]);
 
   const items = useMemo<AutocompleteItem[]>(() => {
     if (query === null) return [];
-    return buildAutocompleteItems({
+    const found = buildAutocompleteItems({
       query,
       mode: "all",
       codebase,
       changedFiles: changed.map((f) => ({ path: f.path, status: f.status })),
       diffCount: changed.length,
     }).filter((i) => i.kind !== "action");
+    const q = query.trim();
+    // Always allow the typed path as-is, so @ works even when no file list is available.
+    if (q && !found.some((i) => i.value === q)) {
+      found.push({ id: `manual-${q}`, kind: "file", value: q, label: `@${q}`, description: "Pakai path ini apa adanya", icon: "📄" });
+    }
+    return found;
   }, [query, codebase, changed]);
 
   const tokens = estimateTokens(text, chips);
@@ -126,7 +137,9 @@ export function Composer({ thread }: { thread: ThreadState }) {
       <div className="mention-wrap">
         {query !== null && (
           <ul className="mention" role="listbox" aria-label="Rujukan konteks">
-            {items.length === 0 && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>Tidak ada file, folder, atau simbol yang cocok.</li>}
+            {mapState === "loading" && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>Memuat daftar file proyek…</li>}
+            {mapState === "failed" && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>Daftar file tidak tersedia untuk folder ini (kosong atau terlalu besar). Ketik path lengkapnya setelah @.</li>}
+            {mapState === "ready" && items.length === 0 && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>Tidak ada file, folder, atau simbol yang cocok.</li>}
             {items.map((it, i) => (
               <li key={it.id} role="option" aria-selected={i === pick}>
                 <button
