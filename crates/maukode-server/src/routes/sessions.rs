@@ -67,6 +67,13 @@ pub struct SessionListItem {
     pub summary: maukode_core::SessionSummary,
     pub running: bool,
     pub pending_permission_count: usize,
+    /// RFC 3339 time the running turn began; `None` while idle.
+    pub turn_started_at: Option<String>,
+    /// Completed / total steps of the agent's active plan (both 0 when there is no plan).
+    pub plan_done: usize,
+    pub plan_total: usize,
+    /// The agent's most recent tool call, e.g. `bash cargo test`.
+    pub last_activity: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,10 +228,16 @@ pub async fn list_sessions(
     let mut items = Vec::with_capacity(summaries.len());
     for summary in summaries {
         let id = summary.id;
+        let activity = state.activity_for(id).await;
+        let (plan_done, plan_total) = activity.plan_progress();
         items.push(SessionListItem {
             summary,
             running: state.is_running(id).await,
             pending_permission_count: state.pending_permission_count(id).await,
+            turn_started_at: activity.turn_started_at,
+            plan_done,
+            plan_total,
+            last_activity: activity.last_activity,
         });
     }
 
@@ -552,6 +565,7 @@ fn start_turn(
             runner = runner.with_checkpoint_manager(cm);
         }
 
+        state.mark_turn_started(id).await;
         state.emit(GlobalEvent::TurnStarted { session_id: id });
 
         tokio::spawn(async move {
@@ -613,6 +627,7 @@ fn start_turn(
             // Free the turn slot first so the next prompt can proceed, then persist final state.
             state.clear_active_turn(id).await;
             state.clear_pending_permissions(id).await;
+            state.mark_turn_finished(id).await;
             persist_session(&state, id, &session_arc, &provider_id, &model).await;
             state.emit(GlobalEvent::TurnFinished {
                 session_id: id,
