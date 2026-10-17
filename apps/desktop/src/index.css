@@ -258,3 +258,10 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Permission dock: secondary choices and key hints */
+.dock .acts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.dock .acts2 .btn { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 0.15rem; padding: 0.5rem 0.7rem; white-space: normal; text-align: left; font-size: 12px; }
+@media (max-width: 560px) { .dock .acts2 { grid-template-columns: 1fr; } }
+kbd { font: inherit; font-size: 10.5px; padding: 0 0.35em; margin-left: 0.4em; border: 1px solid currentColor; border-radius: 3px; opacity: 0.6; }
+@media (pointer: coarse) { kbd { display: none; } }
