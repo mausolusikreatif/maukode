@@ -98,7 +98,7 @@ function ToolCard({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
       <div className="tool-body space-y-2 border-t border-border px-3 py-2">
         {item.args && (
           <div className="tool-section">
-            <span className="tool-sec-label text-xs uppercase tracking-wide text-muted-foreground">Input</span>
+            <span className="tool-sec-label sidebar-section-label">Input</span>
             <pre className="args scrollbar-thin mt-1 overflow-x-auto rounded-md bg-background/70 p-2 font-mono text-xs">
               {prettyArgs(item.args)}
             </pre>
@@ -107,7 +107,7 @@ function ToolCard({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
         {item.result !== undefined && (
           <div className="tool-section">
             <div className="tool-sec-head flex items-center justify-between">
-              <span className="tool-sec-label text-xs uppercase tracking-wide text-muted-foreground">
+              <span className="tool-sec-label sidebar-section-label">
                 Output
               </span>
               <Button variant="link" size="xs" className="tool-copy-btn" onClick={copyOutput}>
@@ -188,7 +188,7 @@ function SubagentCard({
         </div>
       ) : item.summary ? (
         <div className="subagent-summary mt-2 rounded-md bg-background/60 p-2">
-          <div className="subagent-summary-label text-xs uppercase tracking-wide text-muted-foreground">
+          <div className="subagent-summary-label sidebar-section-label">
             Summary
           </div>
           <div className="subagent-summary-content mt-1 text-sm">{item.summary}</div>
@@ -234,11 +234,11 @@ function SubagentTraceDrawer({ subagent, onClose }: { subagent: SubagentDetail; 
 
         <div className="subagent-drawer-meta mt-4 grid grid-cols-2 gap-3">
           <div className="subagent-drawer-meta-item rounded-md border border-border bg-card/40 p-2">
-            <span className="meta-label text-xs uppercase tracking-wide text-muted-foreground">Goal</span>
+            <span className="meta-label sidebar-section-label">Goal</span>
             <div className="meta-val mt-1 text-sm">{subagent.goal}</div>
           </div>
           <div className="subagent-drawer-meta-item rounded-md border border-border bg-card/40 p-2">
-            <span className="meta-label text-xs uppercase tracking-wide text-muted-foreground">Tokens</span>
+            <span className="meta-label sidebar-section-label">Tokens</span>
             <div className="meta-val mt-1 text-sm">{subagent.tokensUsed} tokens consumed</div>
           </div>
         </div>
@@ -251,7 +251,7 @@ function SubagentTraceDrawer({ subagent, onClose }: { subagent: SubagentDetail; 
         )}
 
         <div className="subagent-drawer-timeline-head mt-5">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <h4 className="sidebar-section-label">
             Execution Trace ({subagent.trace.length} steps)
           </h4>
         </div>
@@ -291,7 +291,7 @@ function Item({
   switch (item.kind) {
     case "user":
       return (
-        <div data-testid="user-msg" className="msg user ml-auto max-w-[80%] rounded-2xl rounded-br-sm bg-secondary px-4 py-2 text-sm">
+        <div data-testid="user-msg" className="msg user ml-auto max-w-[80%] rounded-lg bg-secondary px-4 py-2.5 text-sm font-mono text-xs leading-relaxed">
           {item.text}
         </div>
       );
@@ -406,7 +406,7 @@ export function Thread({ thread, isMobile }: { thread: ThreadState; isMobile?: b
       {thread.running && thread.pending.length === 0 && (
         <div className="working flex items-center gap-2 text-sm text-muted-foreground" data-testid="working">
           <span className="size-1.5 animate-pulse rounded-full bg-primary" />
-          Working…
+          Thinking…
         </div>
       )}
       {activeSubagentId && thread.subagents[activeSubagentId] && (

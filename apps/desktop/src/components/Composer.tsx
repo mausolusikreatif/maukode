@@ -307,13 +307,13 @@ export function Composer({ running, isMobile }: { running: boolean; isMobile?: b
       ref={composerRef}
       className={cn(
         "composer relative border-t border-border/70 bg-card/40 safe-pb",
-        isMobile ? "px-3 py-2" : "px-4 py-3",
+        isMobile ? "px-3 py-2.5" : "px-5 py-3.5",
         running && "running",
       )}
     >
       {/* Attached Context Chips */}
       {chips.length > 0 && (
-        <div className="composer-chips mb-2 flex flex-wrap items-center gap-1.5" data-testid="composer-chips">
+        <div className="composer-chips mb-2.5 flex flex-wrap items-center gap-1.5" data-testid="composer-chips">
           {chips.map((chip) => (
             <span
               key={chip.id}
@@ -464,13 +464,13 @@ export function Composer({ running, isMobile }: { running: boolean; isMobile?: b
             }
           }}
           rows={isMobile ? 2 : 3}
-          className="w-full resize-none rounded-md border border-input bg-background/60 px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring scrollbar-thin"
+          className="w-full resize-none rounded-md border border-input bg-background/60 px-3.5 py-2.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring scrollbar-thin"
         />
       </div>
 
       {/* Composer Footer Toolbar */}
-      <div className="composer-footer mt-2 flex items-center justify-between gap-2">
-        <div className="composer-footer-left flex items-center gap-2">
+      <div className="composer-footer mt-3 flex items-center justify-between gap-3">
+        <div className="composer-footer-left flex items-center gap-2.5">
           {/* Attach Button & Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -527,7 +527,7 @@ export function Composer({ running, isMobile }: { running: boolean; isMobile?: b
           {/* Environment / Branch Capability Indicator — desktop only */}
           {!isMobile && (
             <span
-              className="env-indicator inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground"
+              className="env-indicator inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground"
               title={`Workspace: ${meta?.projectDir ?? meta?.directory ?? "Local"}${
                 meta?.branch ? ` (branch: ${meta.branch})` : ""
               }`}
@@ -552,11 +552,11 @@ export function Composer({ running, isMobile }: { running: boolean; isMobile?: b
           <ModeSelect sessionId={activeId ?? ""} />
         </div>
 
-        <div className="composer-footer-right flex items-center gap-2">
+        <div className="composer-footer-right flex items-center gap-2.5">
           {/* Token / Context Gauge — desktop only */}
           {!isMobile && (
             <div
-              className="composer-gauge inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground"
+              className="composer-gauge inline-flex h-8 items-center gap-1 rounded-md bg-secondary px-2.5 text-xs text-muted-foreground"
               data-testid="token-gauge"
               title={gaugeTooltip}
             >
