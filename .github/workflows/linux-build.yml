@@ -1,8 +1,7 @@
 name: Linux build
 
-# Produces a downloadable tarball (daemon + desktop app) for x86_64 Linux. Built on Ubuntu 22.04
-# so it runs on distros with a newer glibc (Arch, Omarchy, ...). The release binary is smoke-tested
-# under Xvfb before it is uploaded.
+# Produces a downloadable tarball (daemon + web UI) for x86_64 Linux. Built on Ubuntu 22.04
+# so it runs on distros with a newer glibc (Arch, Omarchy, ...).
 on:
   workflow_dispatch:
   push:
@@ -29,35 +28,20 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
-      - name: Install system libraries
-        timeout-minutes: 12
-        run: |
-          for attempt in 1 2 3; do
-            sudo timeout 240 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update &&
-            sudo timeout 420 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
-              libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev \
-              librsvg2-dev xvfb xauth imagemagick x11-utils libgl1-mesa-dri && exit 0
-            echo "apt attempt $attempt failed; retrying"; sleep 5
-          done
-          exit 1
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-            apps/desktop/src-tauri/target
-          key: linux-release-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.lock') }}
+          key: linux-release-${{ hashFiles('Cargo.lock') }}
       - name: Build UI
         working-directory: apps/desktop
         run: |
           npm ci
           npm run build
-      - name: Build daemon and desktop app (release)
-        run: |
-          cargo build --release --locked -p maukode-cli
-          cd apps/desktop/src-tauri
-          cargo build --release --locked --features custom-protocol
+      - name: Build daemon (release)
+        run: cargo build --release --locked -p maukode-cli
       - name: Stage
         run: |
           set -euo pipefail
@@ -65,20 +49,12 @@ jobs:
           D="maukode-linux-x86_64-$V"
           mkdir -p "$D"
           cp target/release/maukode "$D/"
-          cp apps/desktop/src-tauri/target/release/maukode-desktop "$D/"
-          cp apps/desktop/src-tauri/icons/128x128.png "$D/maukode.png"
-          cp packaging/linux/{install.sh,maukode-desktop.desktop,README.txt} "$D/"
-          strip "$D/maukode" "$D/maukode-desktop"
+          cp -r apps/desktop/dist "$D/web"
+          cp packaging/linux/{install.sh,README.txt} "$D/"
+          strip "$D/maukode"
           echo "D=$D" >> "$GITHUB_ENV"
-          echo "max glibc needed:"; objdump -T "$D/maukode-desktop" "$D/maukode" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
-          echo "shared libs:"; ldd "$D/maukode-desktop" | awk '{print $1}' | sort | head -50
-          ! ldd "$D/maukode-desktop" "$D/maukode" | grep "not found"
-      - name: Smoke test the release app
-        working-directory: apps/desktop
-        run: |
-          SMOKE_RELEASE=1 SMOKE_APP="$GITHUB_WORKSPACE/$D/maukode-desktop" \
-          MAUKODE_BIN="$GITHUB_WORKSPACE/$D/maukode" \
-          SMOKE_SCREENSHOT="$PWD/release-shell.png" bash scripts/tauri-smoke.sh
+          echo "max glibc needed:"; objdump -T "$D/maukode" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+          ! ldd "$D/maukode" | grep "not found"
       - name: Package
         run: |
           tar czf "$D.tar.gz" "$D"
@@ -90,7 +66,6 @@ jobs:
           path: |
             maukode-linux-x86_64-*.tar.gz
             maukode-linux-x86_64-*.tar.gz.sha256
-            apps/desktop/release-shell.png
           if-no-files-found: error
       # ── Publish GitHub Release when triggered by a tag push ──────────────
       # On `workflow_dispatch` or branch pushes we only upload artifacts (above).

@@ -6,24 +6,13 @@ export interface Bootstrap {
 
 const STORAGE_KEY = "maukode.connection";
 
-declare global {
-  interface Window {
-    __TAURI_INTERNALS__?: unknown;
-  }
-}
-
 /**
- * Where to connect on startup, in priority order: the Tauri shell (which starts/finds the local
- * daemon and owns its token), URL parameters (`?url=...&token=...`, handy for development), a
+ * Where to connect on startup, in priority order: URL parameters (`?url=...&token=...`, handy for development), a
  * bookmarkable token in the URL fragment (`#token=...`, never sent to the server), the last
  * connection saved in this browser, and finally the server that served this page (so a browser
  * hitting the web UI served by maukode-server connects automatically).
  */
 export async function getBootstrap(): Promise<Bootstrap | null> {
-  if (window.__TAURI_INTERNALS__) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<Bootstrap>("daemon_info");
-  }
   // Dev mode: explicit ?url=...&token=...
   const params = new URLSearchParams(window.location.search);
   const url = params.get("url");
@@ -49,29 +38,11 @@ export async function getBootstrap(): Promise<Bootstrap | null> {
 }
 
 export function saveBootstrap(b: Bootstrap): void {
-  // The Tauri shell keeps the token itself; only remember browser-mode connections.
-  if (window.__TAURI_INTERNALS__) return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(b));
   } catch {
     /* storage unavailable (private mode): the user just re-enters it next time */
   }
-}
-
-export async function pickDirectory(defaultPath?: string): Promise<string | null> {
-  if (typeof window === "undefined" || !(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return null;
-  const { open } = await import("@tauri-apps/plugin-dialog");
-  const selected = await open({
-    directory: true,
-    multiple: false,
-    defaultPath: defaultPath || undefined,
-    title: "Choose a project repository",
-  });
-  return typeof selected === "string" ? selected : null;
-}
-
-export function isDesktop(): boolean {
-  return typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 }
 
 /** True when running on macOS/iOS, where the primary shortcut modifier is Command. */
@@ -111,16 +82,8 @@ export function forgetBootstrap(): void {
   }
 }
 
-/** Focus the application window, unminimizing and bringing it to the front if running as desktop app. */
+/** Bring this browser tab to the front where the browser allows it. */
 export async function focusWindow(): Promise<void> {
-  if (isDesktop()) {
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("focus_window");
-    } catch {
-      /* ignore */
-    }
-  }
   if (typeof window !== "undefined" && typeof window.focus === "function") {
     window.focus();
   }
@@ -133,95 +96,18 @@ export interface NativeNotificationOptions {
   onClick?: () => void;
 }
 
-/**
- * Dispatch a notification across native desktop and web.
- * Dispatches to OS notifications where supported and sets up click handling to focus window.
- */
+/** Show a web notification when permission has been granted. */
 export function showNotification(options: NativeNotificationOptions): void {
-  // Native desktop notification dispatch if running inside Tauri
-  if (isDesktop()) {
-    void (async () => {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("send_notification", {
-          title: options.title,
-          body: options.body,
-        });
-      } catch {
-        /* ignore */
-      }
-    })();
-  }
-
-  // Web Notification API (supported in browsers and WebViews with permission)
-  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-    try {
-      const note = new Notification(options.title, { body: options.body });
-      if (options.onClick) {
-        note.onclick = () => {
-          void focusWindow();
-          options.onClick?.();
-        };
-      }
-    } catch {
-      /* ignore */
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    const note = new Notification(options.title, { body: options.body });
+    if (options.onClick) {
+      note.onclick = () => {
+        void focusWindow();
+        options.onClick?.();
+      };
     }
+  } catch {
+    /* ignore */
   }
 }
-
-/**
- * Open a file or repository directory in an external code editor (VS Code or Cursor).
- */
-export async function openInEditor(
-  path: string,
-  editor: "code" | "cursor" = "code"
-): Promise<{ success: boolean; error?: string }> {
-  if (isDesktop()) {
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("open_in_editor", { path, editor });
-      return { success: true };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
-    }
-  }
-
-  // Browser fallback: attempt custom URL protocol scheme
-  if (typeof window !== "undefined" && typeof window.open === "function") {
-    try {
-      const protocol = editor === "cursor" ? "cursor" : "vscode";
-      window.open(`${protocol}://file/${encodeURI(path)}`);
-      return { success: true };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
-    }
-  }
-
-  return { success: false, error: "Window environment is not available" };
-}
-
-/**
- * Reveal a file or directory in the operating system's native file manager.
- */
-export async function revealInFileManager(
-  path: string
-): Promise<{ success: boolean; error?: string }> {
-  if (isDesktop()) {
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("reveal_in_file_manager", { path });
-      return { success: true };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
-    }
-  }
-
-  return {
-    success: false,
-    error: "Revealing in file manager is only available in the desktop application.",
-  };
-}
-
