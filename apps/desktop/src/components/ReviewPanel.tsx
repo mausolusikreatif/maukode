@@ -207,7 +207,7 @@ export function ReviewPanel({ running }: { running: boolean }) {
           : "w-96 shrink-0",
       )}
     >
-      <header className="review-head flex items-center gap-2 border-b border-border px-3 py-2 text-sm safe-top">
+      <header className="review-head flex items-center gap-2 border-b border-border px-4 py-2.5 text-sm safe-top">
         <strong>Changes</strong>
         <span data-testid="review-summary" className="text-xs text-muted-foreground">
           {review.files.length} file{review.files.length === 1 ? "" : "s"} ·{" "}

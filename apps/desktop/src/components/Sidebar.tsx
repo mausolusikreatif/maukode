@@ -186,7 +186,7 @@ export function Sidebar() {
         <span className={cn(needsYou > 0 && "text-warning")}>{needsYou} need you</span>
       </div>
 
-      <nav className="mt-2 space-y-0.5 px-1" aria-label="Main navigation">
+      <nav className="mt-2.5 space-y-1 px-1" aria-label="Main navigation">
         <Button
           data-testid="nav-overview"
           variant={!activeId && view === "home" ? "secondary" : "ghost"}
@@ -209,7 +209,7 @@ export function Sidebar() {
 
       <div className="my-3 h-px bg-sidebar-border" />
       <div className="flex items-center justify-between px-2">
-        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Sessions</span>
+        <span className="sidebar-section-label">Sessions</span>
         <Button
           variant="ghost"
           size="icon-sm"

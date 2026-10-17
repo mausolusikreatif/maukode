@@ -8,8 +8,8 @@ import { Button } from "./ui/button";
 
 const CHOICES: { decision: PermissionDecision; label: string; testid: string; primary?: boolean }[] = [
   { decision: "allow_once", label: "Allow once", testid: "perm-allow-once", primary: true },
-  { decision: "allow_session", label: "Allow for session", testid: "perm-allow-session" },
-  { decision: "allow_private", label: "Run, hide result from AI", testid: "perm-allow-private" },
+  { decision: "allow_session", label: "Allow for this session", testid: "perm-allow-session" },
+  { decision: "allow_private", label: "Allow, hide output from agent", testid: "perm-allow-private" },
   { decision: "deny", label: "Deny", testid: "perm-deny" },
 ];
 
@@ -68,7 +68,7 @@ export function Prompts({ thread }: { thread: ThreadState }) {
   const send = useApp((s) => s.send);
   const stopped = thread.stop;
   return (
-    <div className="prompts flex max-h-[50vh] shrink-0 flex-col gap-2 overflow-y-auto px-3 py-2 scrollbar-thin lg:max-h-none lg:overflow-visible lg:px-6">
+    <div className="prompts flex max-h-[50vh] shrink-0 flex-col gap-2 overflow-y-auto px-3 py-2.5 scrollbar-thin lg:max-h-none lg:overflow-visible lg:px-5">
       {thread.pending.map((p) => (
         <PermissionCard key={p.request_id} request={p} />
       ))}
@@ -93,8 +93,9 @@ export function Prompts({ thread }: { thread: ThreadState }) {
           className="notice warn row flex items-center justify-between gap-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning"
         >
           <span>
-            {stopped.reason === "max_steps" ? "Stopped at the step limit." : "Cut off by the output limit."} The task is
-            probably unfinished.
+            {stopped.reason === "max_steps"
+              ? "Reached the step limit."
+              : "Hit the output length limit."} The task may be unfinished — you can resume it.
           </span>
           <Button data-testid="continue-button" size="sm" onClick={() => void send("continue")}>
             Continue

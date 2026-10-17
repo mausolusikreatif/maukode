@@ -12,15 +12,20 @@ export function ConnectScreen({ initialUrl, initialToken }: { initialUrl?: strin
   const busy = connection === "connecting";
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-background p-4 safe-top safe-bottom">
-      <div className="w-full max-w-sm space-y-6 rounded-xl border border-border bg-card p-8 shadow-lg safe-left safe-right">
+    <div className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-background p-4 safe-top safe-bottom">
+      {/* Ambient glow — the one bold element: a soft mint halo behind the card */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-20 left-1/2 size-[32rem] -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]"
+      />
+      <div className="relative w-full max-w-sm space-y-6 rounded-xl border border-border/60 bg-card/80 p-8 shadow-xl backdrop-blur-sm safe-left safe-right">
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="flex size-14 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
             <Terminal className="size-7 text-primary" />
           </div>
           <div className="space-y-1">
             <h1 className="text-xl font-semibold tracking-tight">MauKode</h1>
-            <p className="text-sm text-muted-foreground">Agentic AI coding assistant</p>
+            <p className="font-mono text-xs text-muted-foreground">agentic coding assistant</p>
           </div>
         </div>
 

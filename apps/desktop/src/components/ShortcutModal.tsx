@@ -20,7 +20,7 @@ export function ShortcutModal() {
         </div>
 
         <section className="shortcut-section mt-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Navigation &amp; Window</h3>
+          <h3 className="mb-2 sidebar-section-label">Navigation &amp; Window</h3>
           <table className="shortcut-table w-full text-sm">
             <tbody>
               <tr className="border-b border-border/50">
@@ -58,7 +58,7 @@ export function ShortcutModal() {
         </section>
 
         <section className="shortcut-section mt-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session &amp; Composer</h3>
+          <h3 className="mb-2 sidebar-section-label">Session &amp; Composer</h3>
           <table className="shortcut-table w-full text-sm">
             <tbody>
               <tr className="border-b border-border/50">
@@ -96,7 +96,7 @@ export function ShortcutModal() {
         </section>
 
         <section className="shortcut-section mt-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Native Tools &amp; Files</h3>
+          <h3 className="mb-2 sidebar-section-label">Native Tools &amp; Files</h3>
           <table className="shortcut-table w-full text-sm">
             <tbody>
               <tr className="border-b border-border/50">

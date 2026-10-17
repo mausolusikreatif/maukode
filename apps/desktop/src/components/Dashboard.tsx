@@ -42,7 +42,7 @@ function Stat({
   return (
     <div className={cn("stat-card rounded-xl border p-4", `stat-card-${tone}`)}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">{label}</span>
+        <span className="sidebar-section-label">{label}</span>
         <Icon className="size-4 text-muted-foreground" />
       </div>
       <strong className="mt-3 block text-2xl font-semibold tracking-tight">{value}</strong>
@@ -174,8 +174,8 @@ export function Dashboard() {
       <div className="dashboard-glow" aria-hidden="true" />
       <header className="relative flex flex-col justify-between gap-5 border-b border-border/60 pb-7 sm:flex-row sm:items-end">
         <div>
-          <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-primary">
-            <Sparkles className="size-3.5" /> Agent workspace
+          <div className="mb-3 flex items-center gap-2 font-mono text-xs font-medium text-primary">
+            <Sparkles className="size-3.5" /> agent workspace
           </div>
           <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Good to see you.</h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground" data-testid="dash-summary">

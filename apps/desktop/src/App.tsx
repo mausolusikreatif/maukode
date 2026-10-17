@@ -129,7 +129,7 @@ function SessionView() {
         <header
           className={cn(
             "session-head flex min-w-0 items-center justify-between gap-2 border-b border-border/70 bg-background/95 backdrop-blur",
-            isMobile ? "px-3 py-2 safe-top" : "min-h-[68px] flex-wrap gap-3 px-5 py-3",
+            isMobile ? "px-3 py-2.5 safe-top" : "min-h-[68px] flex-wrap gap-3 px-5 py-3.5",
           )}
         >
           <div className="flex min-w-0 flex-1 items-center gap-2">
