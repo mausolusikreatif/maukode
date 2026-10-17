@@ -291,7 +291,7 @@ function Item({
   switch (item.kind) {
     case "user":
       return (
-        <div data-testid="user-msg" className="msg user ml-auto max-w-[80%] rounded-lg bg-secondary px-4 py-2.5 text-sm font-mono text-xs leading-relaxed">
+        <div data-testid="user-msg" className="msg user leading-relaxed">
           {item.text}
         </div>
       );
