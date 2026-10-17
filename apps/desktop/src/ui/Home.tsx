@@ -31,9 +31,10 @@ export function Home() {
   };
 
   return (
+    <>
+    <header className="head"><div className="head-title"><div className="t">Sesi baru</div></div></header>
     <div className="home">
       <form className="home-in" onSubmit={(e) => { e.preventDefault(); void start(); }}>
-        <h1 className="strong" style={{ fontSize: 20, margin: 0 }}>Sesi baru</h1>
         <p className="muted" style={{ margin: 0 }}>
           Pilih folder proyek tempat agent bekerja. Kosongkan untuk memakai folder bawaan server.
         </p>
@@ -66,5 +67,6 @@ export function Home() {
         </button>
       </form>
     </div>
+    </>
   );
 }

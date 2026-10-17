@@ -38,14 +38,14 @@ export function Sidebar({ tab, onGo, onOpened }: {
   return (
     <>
       <aside className="side" aria-label="Sesi">
+        <div className="head">
+          <div className="head-title"><div className="t">MauKode</div></div>
+          <span className="small muted" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span className={`dot ${online ? "on" : ""}`} />
+            {online ? "terhubung" : connection === "reconnecting" ? "menyambung ulang" : "terputus"}
+          </span>
+        </div>
         <div className="side-head">
-          <div className="brand">
-            <span className="brand-name">MauKode</span>
-            <span className="small muted" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span className={`dot ${online ? "on" : ""}`} />
-              {online ? "terhubung" : connection === "reconnecting" ? "menyambung ulang" : "terputus"}
-            </span>
-          </div>
           <button className="btn send" onClick={() => onGo("new")}>Sesi baru</button>
           <div className="side-nav">
             <button className="btn quiet small" aria-current={tab === "overview"} onClick={() => onGo("overview")}>

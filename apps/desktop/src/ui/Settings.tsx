@@ -227,7 +227,7 @@ function Model() {
           <div key={p.id} className="prow">
             <div style={{ minWidth: 0 }}>
               <div className="strong trunc">{p.name}{p.id === data.active_provider ? " (aktif)" : ""}</div>
-              <div className="small muted trunc">{KIND_LABEL[p.kind]}{p.kind !== "chat_gpt" ? `, kunci ${p.has_api_key ? "tersimpan" : "belum ada"}` : ""}</div>
+              <div className="small muted">{KIND_LABEL[p.kind]}{p.kind !== "chat_gpt" ? `, kunci ${p.has_api_key ? "tersimpan" : "belum ada"}` : ""}</div>
             </div>
             <div className="pacts">
               {p.id !== data.active_provider && (
@@ -441,28 +441,33 @@ export function Settings({ theme, onTheme, section, onSection, onBack }: {
   const meta = SECTIONS.find((s) => s.id === current);
 
   return (
-    <div className="settings">
-      <nav className={`slist ${current ? "hide-narrow" : ""}`} aria-label="Bagian pengaturan">
-        <h1 className="strong" style={{ fontSize: 20, margin: "0 0 0.5rem" }}>Pengaturan</h1>
-        {SECTIONS.map((s) => (
-          <button key={s.id} className="sitem" aria-current={s.id === current} onClick={() => onSection(s.id)}>
-            <span className="strong">{s.label}</span>
-            <span className="small muted">{s.hint}</span>
-          </button>
-        ))}
-      </nav>
-      {current && meta && (
-        <div className="sbody">
-          <button className="btn quiet back-narrow" onClick={onBack}>Kembali</button>
-          <h2 className="strong" style={{ fontSize: 17, margin: 0 }}>{meta.label}</h2>
-          {current === "koneksi" && <Koneksi />}
-          {current === "model" && <Model />}
-          {current === "izin" && <Izin />}
-          {current === "agent" && <Agent />}
-          {current === "ekstensi" && <Ekstensi />}
-          {current === "tampilan" && <Tampilan theme={theme} onTheme={onTheme} />}
+    <>
+      <header className="head">
+        {current && <button className="btn back-narrow" onClick={onBack}>Kembali</button>}
+        <div className="head-title">
+          <div className="t">{current && meta ? meta.label : "Pengaturan"}</div>
         </div>
-      )}
-    </div>
+      </header>
+      <div className="settings">
+        <nav className={`slist ${current ? "hide-narrow" : ""}`} aria-label="Bagian pengaturan">
+          {SECTIONS.map((s) => (
+            <button key={s.id} className="orow" aria-current={s.id === current} onClick={() => onSection(s.id)}>
+              <span className="strong">{s.label}</span>
+              <span className="small muted">{s.hint}</span>
+            </button>
+          ))}
+        </nav>
+        {current && meta && (
+          <div className="sbody">
+            {current === "koneksi" && <Koneksi />}
+            {current === "model" && <Model />}
+            {current === "izin" && <Izin />}
+            {current === "agent" && <Agent />}
+            {current === "ekstensi" && <Ekstensi />}
+            {current === "tampilan" && <Tampilan theme={theme} onTheme={onTheme} />}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

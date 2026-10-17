@@ -111,9 +111,10 @@ export function Overview({ onNew }: { onNew: () => void }) {
     .slice(0, 8);
 
   return (
-    <div className="home">
+    <>
+      <header className="head"><div className="head-title"><div className="t">Ringkasan</div></div></header>
+      <div className="home">
       <div className="home-in wide">
-        <h1 className="strong" style={{ fontSize: 20, margin: 0 }}>Ringkasan</h1>
 
         {projects.length > 1 && (
           <div className="chips" role="group" aria-label="Filter proyek">
@@ -160,6 +161,7 @@ export function Overview({ onNew }: { onNew: () => void }) {
           )}
         </section>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
