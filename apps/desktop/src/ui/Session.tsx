@@ -6,6 +6,38 @@ import { Thread } from "./Thread";
 import { Dock } from "./Dock";
 import { Composer } from "./Composer";
 
+function TitleEditor({ id, title }: { id: string; title: string }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(title);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    try {
+      await useApp.getState().renameSession(id, value);
+      setEditing(false);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  if (!editing) {
+    return (
+      <button className="title-btn t trunc" title="Ubah nama sesi" onClick={() => { setValue(title); setEditing(true); }}>
+        {title || "Tanpa judul"}
+      </button>
+    );
+  }
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); void save(); }} style={{ display: "grid", gap: 2 }}>
+      <input
+        className="field" style={{ minHeight: "1.9rem" }} autoFocus value={value} aria-label="Nama sesi"
+        onChange={(e) => setValue(e.target.value)} onBlur={() => !error && setEditing(false)}
+        onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
+      />
+      {error && <span className="small" style={{ color: "var(--red)" }}>{error}</span>}
+    </form>
+  );
+}
+
 function ModelPicker({ id, provider, model }: { id: string; provider: string | null; model: string | null }) {
   const client = useApp((s) => s.client);
   const [models, setModels] = useState<string[]>([]);
@@ -47,7 +79,7 @@ export function Session({ onBack, reviewOpen, onToggleReview }: {
       <header className="head">
         <button className="btn back-narrow" onClick={onBack} aria-label="Kembali ke daftar">Kembali</button>
         <div className="head-title">
-          <div className="t trunc">{meta?.title || item?.title || "Tanpa judul"}</div>
+          <TitleEditor key={activeId} id={activeId} title={meta?.title || item?.title || ""} />
           <div className="small muted trunc">
             {meta ? baseName(meta.directory) : ""}{meta?.branch ? ` / ${meta.branch.replace(/^maukode\//, "")}` : ""}
           </div>
