@@ -140,7 +140,7 @@ export function Overview({ onNew }: { onNew: () => void }) {
           {running.length === 0 ? (
             <p className="muted small">Tidak ada agent yang bekerja sekarang.</p>
           ) : (
-            <div className="stack">{running.map((s) => <Row key={s.id} s={s} />)}</div>
+            <div className="list">{running.map((s) => <Row key={s.id} s={s} />)}</div>
           )}
         </section>
 
@@ -152,7 +152,7 @@ export function Overview({ onNew }: { onNew: () => void }) {
               <button className="btn send" style={{ justifySelf: "start" }} onClick={onNew}>Mulai sesi baru</button>
             </div>
           ) : (
-            <div className="stack">
+            <div className="list">
               {recent.map((s) => (
                 <Row key={s.id} s={s} note={lastStop[s.id] ? `${STOP_LABEL[lastStop[s.id].reason]}, ${shortAgo(s.updated_at)}` : undefined} />
               ))}

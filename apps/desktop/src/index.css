@@ -83,6 +83,12 @@
   ::selection { background: color-mix(in srgb, var(--cobalt) 30%, transparent); }
 }
 
+/*
+ * Surfaces: lists are flat rows separated by hairlines, never boxed cards. A border marks only
+ * what you type into (fields) or must decide (permission cards). A bar on the left edge marks
+ * state: amber = waiting on you, ink = selected.
+ */
+
 /* ── Shell ─────────────────────────────────────────────────────── */
 .app { display: grid; grid-template-columns: 19rem minmax(0, 1fr); height: 100dvh; }
 .app.with-review { grid-template-columns: 19rem minmax(0, 1fr) minmax(24rem, 34rem); }
@@ -207,7 +213,7 @@
 .think > summary { cursor: pointer; color: var(--ink-2); font-size: 12px; list-style: none; }
 .think > summary::-webkit-details-marker { display: none; }
 .think .prose { color: var(--ink-2); font-size: 12px; margin-top: 0.4rem; }
-.plan { border: 1px solid var(--line); border-radius: 4px; padding: 0.6rem 0.8rem; display: grid; gap: 0.2rem; }
+.plan { border-left: 2px solid var(--line); padding: 0.1rem 0 0.1rem 0.8rem; display: grid; gap: 0.2rem; }
 .plan .step { display: grid; grid-template-columns: 1.4rem 1fr; }
 .plan .step[data-s="completed"] { color: var(--ink-2); text-decoration: line-through; }
 .plan .step[data-s="in_progress"] { font-weight: 700; }
@@ -297,10 +303,12 @@ kbd { font: inherit; font-size: 10.5px; padding: 0 0.35em; margin-left: 0.4em; b
 .more > summary { cursor: pointer; color: var(--ink-2); font-size: 12px; }
 .more .acts2 { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
 .orow {
-  display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.25rem; width: 100%; text-align: left; padding: 0.65rem 0.8rem;
-  border: 1px solid var(--line); border-radius: 4px; background: transparent;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.25rem; width: 100%; text-align: left;
+  padding: 0.7rem 0.5rem; margin: 0 -0.5rem; width: calc(100% + 1rem); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent;
 }
-.orow:hover { border-color: var(--ink); }
+.orow:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.list { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--line); }
+.list > * { min-width: 0; }
 .orow-top { display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline; }
 .prog { display: block; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .prog > span { display: block; height: 100%; background: var(--cobalt); }
