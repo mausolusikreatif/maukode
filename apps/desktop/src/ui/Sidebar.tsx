@@ -46,7 +46,7 @@ export function Sidebar({ tab, onGo, onOpened }: {
           </span>
         </div>
         <div className="side-head">
-          <button className="btn send" onClick={() => onGo("new")}>Sesi baru</button>
+          <button className="btn send desk-only" onClick={() => onGo("new")}>Sesi baru</button>
           <div className="side-nav">
             <button className="btn quiet small" aria-current={tab === "overview"} onClick={() => onGo("overview")}>
               Ringkasan{inboxCount > 0 ? ` (${inboxCount})` : ""}
@@ -66,7 +66,17 @@ export function Sidebar({ tab, onGo, onOpened }: {
           )}
           {groups.map(([project, items]) => (
             <section key={project}>
-              <div className="group-name trunc" title={project}>{baseName(project)}</div>
+              <div className="group-head">
+                <span className="group-name trunc" title={project}>{baseName(project) || "Tanpa proyek"}</span>
+                {project && (
+                  <button
+                    className="btn quiet small" aria-label={`Sesi baru di ${baseName(project)}`}
+                    onClick={() => { useApp.getState().openNewSession(project); onGo("new"); }}
+                  >
+                    + Baru
+                  </button>
+                )}
+              </div>
               {items.map((s) => {
                 const st = stateOf(s);
                 const isPinned = pinned.includes(s.id);

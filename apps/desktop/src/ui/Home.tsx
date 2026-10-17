@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../state/store";
 import { baseName } from "../state/format";
 import { loadRecentRepositories, recentRepositories, rememberRepository } from "../state/repositories";
@@ -8,7 +8,10 @@ export function Home() {
   const sessions = useApp((s) => s.sessions);
   const createSession = useApp((s) => s.createSession);
   const recents = useMemo(() => recentRepositories(loadRecentRepositories(), sessions), [sessions]);
-  const [dir, setDir] = useState(recents[0] ?? "");
+  const presetDir = useApp((s) => s.newSessionInitialDir);
+  const [dir, setDir] = useState(presetDir ?? recents[0] ?? "");
+  // A folder chosen from a project's "+ Baru" applies to this visit only.
+  useEffect(() => () => useApp.getState().closeNewSession(), []);
   const [worktree, setWorktree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
