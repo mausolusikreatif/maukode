@@ -13,7 +13,7 @@ import type {
 } from "../api/types";
 import type { ProviderKind } from "../api/generated/ProviderKind";
 
-type Section = "koneksi" | "model" | "izin" | "agent" | "ekstensi" | "tampilan";
+export type Section = "koneksi" | "model" | "izin" | "agent" | "ekstensi" | "tampilan";
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "koneksi", label: "Koneksi", hint: "Server, notifikasi" },
   { id: "model", label: "Model dan provider", hint: "Provider aktif, kunci API, ChatGPT" },
@@ -427,8 +427,14 @@ function Tampilan({ theme, onTheme }: { theme: string; onTheme: () => void }) {
   );
 }
 
-export function Settings({ theme, onTheme }: { theme: string; onTheme: () => void }) {
-  const [section, setSection] = useState<Section | null>(null);
+export function Settings({ theme, onTheme, section, onSection, onBack }: {
+  theme: string;
+  onTheme: () => void;
+  section: Section | null;
+  onSection: (s: Section | null) => void;
+  /** Go to the previous page (the section list on narrow screens). */
+  onBack: () => void;
+}) {
   // Wide screens show the list and a section side by side, so always have one selected there.
   const wide = typeof window !== "undefined" && window.matchMedia("(min-width: 861px)").matches;
   const current: Section | null = section ?? (wide ? "koneksi" : null);
@@ -439,7 +445,7 @@ export function Settings({ theme, onTheme }: { theme: string; onTheme: () => voi
       <nav className={`slist ${current ? "hide-narrow" : ""}`} aria-label="Bagian pengaturan">
         <h1 className="strong" style={{ fontSize: 20, margin: "0 0 0.5rem" }}>Pengaturan</h1>
         {SECTIONS.map((s) => (
-          <button key={s.id} className="sitem" aria-current={s.id === current} onClick={() => setSection(s.id)}>
+          <button key={s.id} className="sitem" aria-current={s.id === current} onClick={() => onSection(s.id)}>
             <span className="strong">{s.label}</span>
             <span className="small muted">{s.hint}</span>
           </button>
@@ -447,7 +453,7 @@ export function Settings({ theme, onTheme }: { theme: string; onTheme: () => voi
       </nav>
       {current && meta && (
         <div className="sbody">
-          <button className="btn quiet back-narrow" onClick={() => setSection(null)}>Kembali</button>
+          <button className="btn quiet back-narrow" onClick={onBack}>Kembali</button>
           <h2 className="strong" style={{ fontSize: 17, margin: 0 }}>{meta.label}</h2>
           {current === "koneksi" && <Koneksi />}
           {current === "model" && <Model />}
