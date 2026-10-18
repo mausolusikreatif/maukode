@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=MauKode
-Comment=Manage coding agents
-Exec=maukode-desktop
-Icon=maukode
-Categories=Development;
-StartupWMClass=maukode-desktop
-Terminal=false

@@ -10,8 +10,6 @@ members = [
     "crates/maukode-server",
 ]
 resolver = "2"
-# The Tauri shell needs system WebView libraries; it is built separately (see apps/desktop).
-exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.4.0"

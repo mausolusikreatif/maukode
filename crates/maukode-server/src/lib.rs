@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod client;
 pub mod daemon;
 pub mod middleware;

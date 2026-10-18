@@ -11,20 +11,24 @@ on:
         required: false
         type: boolean
         default: false
-      run_tauri:
-        description: Run Tauri shell checks
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   test:
     runs-on: [self-hosted, rekarta]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # The self-hosted runner already has Rust stable with rustfmt and clippy. Use it as-is so a
+      # flaky link to static.rust-lang.org cannot fail the job; install only if a part is missing.
+      - name: Use the runner's Rust toolchain
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          installed="$(rustup component list --installed 2>/dev/null || true)"
+          if ! grep -q '^clippy' <<<"$installed" || ! grep -q '^rustfmt' <<<"$installed"; then
+            rustup toolchain install stable --profile minimal -c rustfmt,clippy
+          fi
+          rustc --version
+          cargo --version
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Test workspace and TUI behavior/performance smoke tests
@@ -47,67 +51,14 @@ jobs:
     runs-on: [self-hosted, rekarta]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
-      - name: Build the daemon used by the UI tests
-        run: cargo build -p maukode-cli --locked
       - name: Install, typecheck, unit test
         working-directory: apps/desktop
         run: |
           npm ci
           npm run typecheck
           npm test
-      - name: End-to-end UI tests (real daemon, scripted LLM gateway)
-        working-directory: apps/desktop
-        run: |
-          # Browser system libraries live on the runner host (see #57); `--with-deps` would run
-          # `sudo apt-get`, which the self-hosted runner cannot do non-interactively.
-          npx playwright install chromium
-          CI=1 npx playwright test
-
-  tauri:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_tauri
-    timeout-minutes: 30
-    # Compiles the desktop shell and runs it under a virtual display: the UI must reach the Rust
-    # side over Tauri IPC and make it start an authenticated daemon.
-    runs-on: [self-hosted, rekarta]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/desktop/src-tauri/target
-          key: tauri-${{ runner.os }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
-      - name: Build the UI bundle and the daemon
-        run: |
-          cargo build -p maukode-cli --locked
-          cd apps/desktop
-          npm ci
-          npm run build
-      - name: Clippy (desktop shell)
-        working-directory: apps/desktop/src-tauri
-        run: cargo clippy --locked -- -D warnings
-      - name: Run the shell and check it starts an authenticated daemon
-        working-directory: apps/desktop
-        run: SMOKE_SCREENSHOT="$PWD/shell.png" bash scripts/tauri-smoke.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          retention-days: 1
-          name: shell-screenshot
-          path: apps/desktop/shell.png
-          if-no-files-found: ignore

@@ -1,3 +1,4 @@
+use crate::activity::SessionActivity;
 use anyhow::Result;
 use maukode_core::CheckpointManager;
 use maukode_core::{AppConfig, PermissionManager, Session, SqliteSessionStore};
@@ -133,6 +134,8 @@ pub struct ServerState {
     pub sessions: Arc<RwLock<HashMap<SessionId, Arc<RwLock<Session>>>>>,
     pub channels: Arc<RwLock<HashMap<SessionId, Arc<SessionChannel>>>>,
     pub pending_permissions: Arc<RwLock<HashMap<SessionId, HashMap<String, PermissionRequest>>>>,
+    /// Live progress per session (turn start, plan progress, last tool) for dashboards.
+    pub activity: Arc<RwLock<HashMap<SessionId, SessionActivity>>>,
     pub session_permissions: Arc<RwLock<HashMap<SessionId, Arc<PermissionManager>>>>,
     pub active_turns: Arc<RwLock<HashMap<SessionId, CancellationToken>>>,
     /// Session-level queues for prompts waiting while an agent turn is active.
@@ -183,6 +186,7 @@ impl ServerState {
             login: tokio::sync::Mutex::new(None),
             channels: Arc::new(RwLock::new(HashMap::new())),
             pending_permissions: Arc::new(RwLock::new(HashMap::new())),
+            activity: Arc::new(RwLock::new(HashMap::new())),
             session_permissions: Arc::new(RwLock::new(HashMap::new())),
             active_turns: Arc::new(RwLock::new(HashMap::new())),
             queued_prompts: Arc::new(RwLock::new(HashMap::new())),
@@ -275,6 +279,12 @@ impl ServerState {
     /// Publish a runner event to subscribers, tracking pending permission prompts so that
     /// clients that (re)connect mid-turn can still answer them.
     pub async fn publish_event(&self, id: SessionId, event: LLMEvent) {
+        self.activity
+            .write()
+            .await
+            .entry(id)
+            .or_default()
+            .observe(&event);
         if let LLMEvent::PermissionRequest(req) = &event {
             self.pending_permissions
                 .write()
@@ -331,6 +341,31 @@ impl ServerState {
             .await
             .get(&id)
             .map_or(0, |m| m.len())
+    }
+
+    /// Record that a turn began, for the dashboard's elapsed-time display.
+    pub async fn mark_turn_started(&self, id: SessionId) {
+        self.activity
+            .write()
+            .await
+            .entry(id)
+            .or_default()
+            .start_turn(chrono::Utc::now().to_rfc3339());
+    }
+
+    pub async fn mark_turn_finished(&self, id: SessionId) {
+        if let Some(a) = self.activity.write().await.get_mut(&id) {
+            a.finish_turn();
+        }
+    }
+
+    pub async fn activity_for(&self, id: SessionId) -> SessionActivity {
+        self.activity
+            .read()
+            .await
+            .get(&id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub async fn is_running(&self, id: SessionId) -> bool {
@@ -417,6 +452,7 @@ impl ServerState {
         self.pending_permissions.write().await.remove(&id);
         self.session_permissions.write().await.remove(&id);
         self.queued_prompts.write().await.remove(&id);
+        self.activity.write().await.remove(&id);
         if let Some(mut preview) = self.previews.lock().await.remove(&id) {
             let _ = preview.child.kill().await;
         }

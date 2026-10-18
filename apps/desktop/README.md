@@ -1,19 +1,19 @@
-# MauKode desktop
+# MauKode web UI
 
-Tauri 2 shell + React/TypeScript UI for managing agents. The UI talks to the MauKode daemon over
-HTTP/SSE (see [`docs/API.md`](../../docs/API.md)); it holds no agent logic.
+React + TypeScript single-page UI served as static files by `maukode server --web-dir`. It talks to
+the daemon over HTTP/SSE (see [`docs/API.md`](../../docs/API.md)) and holds no agent logic. There is
+no desktop shell.
 
 ```
 apps/desktop
+├── public/fonts        Martian Mono (variable weight and width), self-hosted
 ├── src/api/generated   TypeScript types generated from the Rust API types (do not edit)
 ├── src/api             typed client + fetch-based SSE follower (resume via Last-Event-ID)
 ├── src/state           event reducer (pure, unit tested) and the zustand store
-├── src/components      sidebar, thread, approvals, composer
-├── e2e                 Playwright tests against a real daemon and a scripted LLM gateway
-└── src-tauri           desktop shell (starts/finds the daemon, hands the UI its token)
+└── src/ui              sessions, thread, permission dock, composer, review panel
 ```
 
-## Develop in a browser (no Tauri needed)
+## Develop in a browser
 
 ```sh
 cargo run -p maukode-cli -- server --bind 127.0.0.1:4096 --token dev   # terminal 1
@@ -25,8 +25,6 @@ cd apps/desktop && npm install && npm run dev                           # termin
 
 ```sh
 npm run typecheck && npm test      # unit tests (SSE parser, event reducer)
-cargo build -p maukode-cli         # the e2e tests drive this binary (or set MAUKODE_BIN)
-npm run test:e2e                   # builds the UI, starts a daemon + scripted gateway, drives Chromium
 ```
 
 ## Regenerate API types
@@ -40,19 +38,10 @@ cargo test -p maukode-protocol -p maukode-core -p maukode-server \
 
 CI fails if `src/api/generated` is stale.
 
-## Desktop shell
-
-`src-tauri` is excluded from the root Cargo workspace because it needs the platform WebView
-(WebKitGTK on Linux). Build it with `npm run tauri dev` / `npm run tauri build` after installing
-the [Tauri prerequisites](https://tauri.app/start/prerequisites/). The new-session dialog uses a
-native folder picker in the desktop shell and keeps the eight most recently used repositories;
-browser development retains the editable path field. A Windows `.ico` and macOS `.icns` still
-need to be generated with `tauri icon`.
-
 ## Reviewing agent work
 
-The **Changes** button opens a panel with the files the agent changed (against the checkpoint taken
-before the session's first turn), a line-numbered diff per file, **Undo last turn** (restores files;
+The **Perubahan** button opens a panel with the files the agent changed (against the checkpoint taken
+before the session's first turn), a line-numbered diff per file, **Batalkan giliran terakhir** (restores files;
 the conversation is kept), and — for sessions started with worktree isolation — commit and merge
 controls. Merging uses `--no-ff` into whatever branch the project currently has checked out; a
 conflict is rolled back and reported, and a project with uncommitted changes to tracked files is

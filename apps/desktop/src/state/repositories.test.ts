@@ -14,6 +14,10 @@ const session = (directory: string, project_dir: string | null = null): SessionL
   worktree_branch: null,
   running: false,
   pending_permission_count: 0,
+  turn_started_at: null,
+  plan_done: 0,
+  plan_total: 0,
+  last_activity: null,
 });
 
 describe("recentRepositories", () => {
