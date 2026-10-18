@@ -22,7 +22,10 @@ import type {
   PreviewRequest,
   ProviderConfig,
   ProvidersListResponse,
+  ExecutionSettings,
+  ExecutionStatus,
   SecuritySettings,
+  SetExecutionRequest,
   SessionDetailResponse,
   SessionListItem,
   SetAgentConfigRequest,
@@ -190,6 +193,16 @@ export class ApiClient {
   }
   setSandboxMode(mode: "off" | "path_jail" | "bubblewrap" | "auto") {
     return this.request<void>("PUT", "/api/v1/config/security/sandbox", { sandbox_mode: mode });
+  }
+  execution() {
+    return this.request<ExecutionSettings>("GET", "/api/v1/config/execution");
+  }
+  setExecution(req: SetExecutionRequest) {
+    return this.request<ExecutionSettings>("PUT", "/api/v1/config/execution", req);
+  }
+  /** Asks the lawang daemon what it can run; reaches out over the network, so call on demand. */
+  executionStatus() {
+    return this.request<ExecutionStatus>("GET", "/api/v1/config/execution/status");
   }
   mcp() {
     return this.request<McpListResponse>("GET", "/api/v1/mcp");

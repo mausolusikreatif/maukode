@@ -6,6 +6,7 @@ import type {
   FileDiffResponse,
   GlobalEvent,
   LLMEvent,
+  ExecutionSettings,
   PermissionDecision,
   PermissionRequest,
   PreviewInfo,
@@ -111,6 +112,8 @@ interface AppState {
   /** Permission requests waiting on the user, across every session. */
   inbox: PermissionRequest[];
   providers: ProvidersListResponse | null;
+  /** Where commands run (host or a lawang cell); labels sessions. `null` until loaded. */
+  execution: ExecutionSettings | null;
   activeId: string | null;
   meta: SessionMeta | null;
   threads: Record<string, ThreadState>;
@@ -137,6 +140,7 @@ interface AppState {
   connect: (url: string, token?: string) => Promise<void>;
   disconnect: () => void;
   refreshSessions: () => Promise<void>;
+  refreshExecution: () => Promise<void>;
   openSession: (id: string) => Promise<void>;
   closeSession: () => void;
   createSession: (req: CreateSessionRequest) => Promise<void>;
@@ -337,6 +341,7 @@ export const useApp = create<AppState>((set, get) => {
 
   return {
     client: null,
+    execution: null,
     connection: "disconnected",
     connectionError: null,
     sessions: [],
@@ -463,6 +468,8 @@ export const useApp = create<AppState>((set, get) => {
         set({ client, sessions, providers, connection: "online", inbox: [] });
         saveBootstrap({ url: client.baseUrl, token });
         void hydrateInbox();
+        // Not fatal: an older server has no such setting, and the label simply stays hidden.
+        void get().refreshExecution();
 
         const ctrl = new AbortController();
         globalAbort = ctrl;
@@ -491,6 +498,16 @@ export const useApp = create<AppState>((set, get) => {
       sessionAbort?.abort();
       globalAbort = sessionAbort = null;
       set({ client: null, connection: "disconnected", sessions: [], inbox: [], activeId: null, meta: null, threads: {}, lastStop: {}, view: "home" });
+    },
+
+    refreshExecution: async () => {
+      const client = get().client;
+      if (!client) return;
+      try {
+        set({ execution: await client.execution() });
+      } catch {
+        set({ execution: null });
+      }
     },
 
     refreshSessions: async () => {

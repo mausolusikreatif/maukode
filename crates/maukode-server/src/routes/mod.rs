@@ -246,6 +246,14 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/api/v1/config/security/sandbox",
             axum::routing::put(settings::set_sandbox_mode),
         )
+        .route(
+            "/api/v1/config/execution",
+            get(settings::get_execution).put(settings::set_execution),
+        )
+        .route(
+            "/api/v1/config/execution/status",
+            get(settings::execution_status),
+        )
         .route("/api/v1/mcp", get(settings::list_mcp))
         .route(
             "/api/v1/auth/chatgpt",

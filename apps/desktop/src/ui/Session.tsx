@@ -6,6 +6,21 @@ import { Thread } from "./Thread";
 import { Dock } from "./Dock";
 import { Composer } from "./Composer";
 
+const EXEC_LABEL: Record<string, { text: string; hint: string }> = {
+  host: { text: "Host", hint: "Perintah berjalan langsung di mesin ini" },
+  process: { text: "Proses terisolasi", hint: "Perintah berjalan di sel lawang (bubblewrap), kernel sama dengan host" },
+  sandbox: { text: "Sandbox", hint: "Perintah berjalan di sel lawang dengan kernel gVisor" },
+  vm: { text: "VM", hint: "Perintah berjalan di mesin virtual dengan kernel sendiri" },
+};
+
+/** Where this session's commands run. Hidden until the server has answered. */
+function ExecTag() {
+  const label = useApp((s) => s.execution?.label);
+  if (!label) return null;
+  const info = EXEC_LABEL[label] ?? { text: label, hint: "" };
+  return <span className={`exec ${label === "host" ? "" : "isolated"}`} title={info.hint}>{info.text}</span>;
+}
+
 function TitleEditor({ id, title }: { id: string; title: string }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(title);
@@ -82,6 +97,7 @@ export function Session({ onBack, reviewOpen, onToggleReview }: {
           <TitleEditor key={activeId} id={activeId} title={meta?.title || item?.title || ""} />
           <div className="small muted trunc">
             {meta ? baseName(meta.directory) : ""}{meta?.branch ? ` / ${meta.branch.replace(/^maukode\//, "")}` : ""}
+            {" "}<ExecTag />
           </div>
         </div>
         <span className={`dot ${state}`} title={state === "hold" ? "menunggu izin" : state === "run" ? "berjalan" : "siap"} />

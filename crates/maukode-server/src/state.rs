@@ -127,6 +127,15 @@ pub struct LoginSlot {
     pub task: tokio::task::JoinHandle<()>,
 }
 
+/// The lawang backend of each session, with the settings it was built from.
+pub type SessionBackends = HashMap<
+    SessionId,
+    (
+        maukode_core::ExecutionConfig,
+        Arc<dyn maukode_tools::ExecBackend>,
+    ),
+>;
+
 pub struct ServerState {
     pub login: tokio::sync::Mutex<Option<LoginSlot>>,
     pub config: Arc<RwLock<AppConfig>>,
@@ -161,6 +170,10 @@ pub struct ServerState {
     pub previews: Arc<tokio::sync::Mutex<HashMap<SessionId, PreviewProcess>>>,
     /// Shared HTTP client used by the preview reverse proxy for connection pooling.
     pub proxy_client: reqwest::Client,
+    /// The lawang backend of each session that runs commands in a cell, with the settings it was
+    /// built from. It is kept across turns (it remembers whether the cell exists and whether a
+    /// VM holds changes the host does not have yet) and rebuilt when the settings change.
+    pub exec_backends: Arc<RwLock<SessionBackends>>,
 }
 
 impl ServerState {
@@ -204,7 +217,51 @@ impl ServerState {
             proxy_client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
+            exec_backends: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// The backend a session's commands run through when it is not the host: `None` for the host
+    /// (the caller then keeps its usual registry), a cached or fresh lawang backend otherwise.
+    pub async fn exec_backend_for(
+        &self,
+        id: SessionId,
+        directory: &std::path::Path,
+        execution: &maukode_core::ExecutionConfig,
+    ) -> Option<Arc<dyn maukode_tools::ExecBackend>> {
+        if execution.backend != maukode_core::ExecutionBackendKind::Lawang {
+            return None;
+        }
+        let mut backends = self.exec_backends.write().await;
+        if let Some((built_from, backend)) = backends.get(&id) {
+            if built_from == execution {
+                return Some(Arc::clone(backend));
+            }
+        }
+        let backend: Arc<dyn maukode_tools::ExecBackend> =
+            Arc::new(maukode_tools::LawangBackend::new(
+                execution.lawang.clone(),
+                maukode_tools::cell_id_for(&id.to_string()),
+                directory,
+            ));
+        backends.insert(id, (execution.clone(), Arc::clone(&backend)));
+        Some(backend)
+    }
+
+    /// Remove a deleted session's cell from the lawang daemon, if it ever had one.
+    pub async fn destroy_exec_cell(&self, id: SessionId) {
+        let settings = match self.exec_backends.write().await.remove(&id) {
+            Some((built_from, _)) => Some(built_from.lawang),
+            None => {
+                let config = self.config.read().await;
+                (config.execution.backend == maukode_core::ExecutionBackendKind::Lawang)
+                    .then(|| config.execution.lawang.clone())
+            }
+        };
+        if let Some(settings) = settings {
+            maukode_tools::destroy_cell(&settings, &maukode_tools::cell_id_for(&id.to_string()))
+                .await;
+        }
     }
 
     pub async fn get_or_load_session(&self, id: SessionId) -> Result<Option<Arc<RwLock<Session>>>> {

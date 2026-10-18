@@ -27,8 +27,8 @@ pub use compaction::{
     CompactionResult, ContextPruner, ContextUsage, ConversationCompactor, TokenEstimator,
 };
 pub use config::{
-    AgentConfig, AppConfig, McpServerConfig, ProviderConfig, ProviderKind, SecurityConfig,
-    WebSearchConfig,
+    AgentConfig, AppConfig, ExecutionBackendKind, ExecutionConfig, McpServerConfig, ProviderConfig,
+    ProviderKind, SecurityConfig, WebSearchConfig,
 };
 pub use consolidation::{ConsolidationConfig, ConsolidationEngine, ConsolidationReport};
 pub use context::{

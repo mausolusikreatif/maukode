@@ -3,6 +3,8 @@ import { useApp } from "../state/store";
 import type {
   AgentConfig,
   ChatGptStatus,
+  ExecutionSettings,
+  ExecutionStatus,
   McpListResponse,
   PermissionMode,
   PluginManifest,
@@ -13,11 +15,12 @@ import type {
 } from "../api/types";
 import type { ProviderKind } from "../api/generated/ProviderKind";
 
-export type Section = "koneksi" | "model" | "izin" | "agent" | "ekstensi" | "tampilan";
+export type Section = "koneksi" | "model" | "izin" | "eksekusi" | "agent" | "ekstensi" | "tampilan";
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "koneksi", label: "Koneksi", hint: "Server, notifikasi" },
   { id: "model", label: "Model dan provider", hint: "Provider aktif, kunci API, ChatGPT" },
   { id: "izin", label: "Izin dan keamanan", hint: "Mode izin, sandbox" },
+  { id: "eksekusi", label: "Eksekusi", hint: "Host, sandbox, VM" },
   { id: "agent", label: "Agent", hint: "Batas langkah dan token, memori" },
   { id: "ekstensi", label: "Ekstensi", hint: "MCP, plugin, skill" },
   { id: "tampilan", label: "Tampilan", hint: "Tema" },
@@ -309,6 +312,162 @@ function Izin() {
   );
 }
 
+// ── Eksekusi ─────────────────────────────────────────────────────
+type Isolation = "process" | "sandbox" | "vm";
+const ISOLATION: { id: Isolation; runtime: string; label: string; desc: string }[] = [
+  { id: "process", runtime: "bwrap", label: "Proses terisolasi", desc: "Namespace di kernel host (bubblewrap). Cepat, tetapi kernelnya sama dengan host." },
+  { id: "sandbox", runtime: "gvisor", label: "Sandbox", desc: "Kernel pengguna gVisor di antara perintah dan host." },
+  { id: "vm", runtime: "firecracker", label: "VM", desc: "Mesin virtual dengan kernel sendiri (Firecracker). Butuh image dan KVM." },
+];
+
+function Eksekusi() {
+  const client = useApp((s) => s.client);
+  const refreshExecution = useApp((s) => s.refreshExecution);
+  const cfg = useLoad<ExecutionSettings>(() => client!.execution());
+  const act = useAction();
+  const [backend, setBackend] = useState<"host" | "lawang">("host");
+  const [url, setUrl] = useState("");
+  const [token, setToken] = useState("");
+  const [clearToken, setClearToken] = useState(false);
+  const [isolation, setIsolation] = useState<Isolation>("process");
+  const [image, setImage] = useState("");
+  const [memory, setMemory] = useState("");
+  const [status, setStatus] = useState<ExecutionStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const check = useCallback(async () => {
+    setChecking(true);
+    try {
+      setStatus(await client!.executionStatus());
+    } catch (e) {
+      setStatus({ reachable: false, error: errText(e), runtimes: [] });
+    } finally {
+      setChecking(false);
+    }
+  }, [client]);
+
+  // Fill the form from what the server has, and look at the daemon when it is the one in use.
+  useEffect(() => {
+    const d = cfg.data;
+    if (!d) return;
+    setBackend(d.backend === "lawang" ? "lawang" : "host");
+    setUrl(d.lawang.url);
+    setIsolation((d.lawang.isolation as Isolation) ?? "process");
+    setImage(d.lawang.image ?? "");
+    setMemory(d.lawang.memory_mb ? String(d.lawang.memory_mb) : "");
+    setToken("");
+    setClearToken(false);
+    if (d.backend === "lawang") void check();
+  }, [cfg.data, check]);
+
+  const d = cfg.data;
+  const runtimeOf = (id: Isolation) => status?.runtimes.find((r) => r.id === ISOLATION.find((i) => i.id === id)!.runtime);
+  const needsImage = backend === "lawang" && isolation === "vm" && !image.trim();
+  const save = () =>
+    act.run(async () => {
+      await client!.setExecution({
+        backend,
+        lawang: {
+          url: url.trim(),
+          token: clearToken ? "" : token ? token : null,
+          isolation,
+          image: image.trim() || null,
+          memory_mb: memory.trim() ? Number(memory) : null,
+        },
+      });
+      await refreshExecution();
+      cfg.reload();
+    });
+
+  return (
+    <>
+      <Block title="Tempat perintah dijalankan">
+        <Err error={cfg.error} />
+        <p className="muted small" style={{ margin: 0 }}>
+          Berlaku untuk perintah bash di semua sesi, mulai giliran berikutnya. File proyek tetap ada di folder proyek.
+        </p>
+        <label className="checkrow">
+          <input type="radio" name="backend" checked={backend === "host"} disabled={!d || act.busy} onChange={() => setBackend("host")} />
+          <span>Host<span className="muted small" style={{ display: "block" }}>Langsung di mesin ini, dengan sandbox dari bagian Izin dan keamanan.</span></span>
+        </label>
+        <label className="checkrow">
+          <input type="radio" name="backend" checked={backend === "lawang"} disabled={!d || act.busy} onChange={() => setBackend("lawang")} />
+          <span>Lawang<span className="muted small" style={{ display: "block" }}>Di dalam sel terisolasi milik daemon lawang: proses, sandbox, atau VM.</span></span>
+        </label>
+      </Block>
+
+      {backend === "lawang" && (
+        <>
+          <Block title="Daemon lawang">
+            <label className="numrow"><span>Alamat</span>
+              <input className="field wide" aria-label="Alamat daemon lawang" value={url} spellCheck={false} onChange={(e) => setUrl(e.target.value)} placeholder="http://127.0.0.1:7777" /></label>
+            <label className="numrow"><span>Token</span>
+              <input className="field wide" type="password" aria-label="Token daemon lawang" autoComplete="off" value={token}
+                disabled={clearToken}
+                placeholder={d?.lawang.token_set ? "tersimpan" : "tanpa token"}
+                onChange={(e) => setToken(e.target.value)} /></label>
+            {d?.lawang.token_set && !clearToken && (
+              <p className="muted small" style={{ margin: 0 }}>Biarkan kosong untuk memakai token yang tersimpan.</p>
+            )}
+            {d?.lawang.token_set && (
+              <label className="checkrow"><input type="checkbox" checked={clearToken} onChange={(e) => setClearToken(e.target.checked)} />
+                <span>Hapus token yang tersimpan</span></label>
+            )}
+            <div className="row-actions">
+              <button className="btn" disabled={checking || !d} onClick={() => void check()}>{checking ? "Memeriksa..." : "Periksa daemon"}</button>
+            </div>
+            {status && status.reachable === false && <div className="notice error">{status.error}</div>}
+            {status && status.reachable === true && <div className="notice ok">Daemon menjawab.</div>}
+            <p className="muted small" style={{ margin: 0 }}>Pemeriksaan memakai pengaturan yang sudah disimpan.</p>
+          </Block>
+
+          <Block title="Isolasi">
+            {ISOLATION.map((o) => {
+              const rt = runtimeOf(o.id);
+              const missing = status?.reachable === true && rt && !rt.available;
+              return (
+                <label key={o.id} className="checkrow">
+                  <input type="radio" name="isolation" checked={isolation === o.id} disabled={act.busy || !!missing} onChange={() => setIsolation(o.id)} />
+                  <span>
+                    {o.label}
+                    <span className="muted small" style={{ display: "block" }}>
+                      {missing ? `Tidak tersedia di mesin daemon: ${rt!.reason ?? "alasan tidak diketahui"}` : o.desc}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+            <label className="numrow"><span>Image</span>
+              <input className="field wide" aria-label="Image sel" value={image} spellCheck={false}
+                onChange={(e) => setImage(e.target.value)} placeholder={isolation === "vm" ? "alpine:3.20 atau /path/folder" : "opsional"} /></label>
+            <p className="muted small" style={{ margin: 0 }}>
+              Nama image (alpine:3.20) yang diunduh daemon, atau path folder image yang sudah diekstrak. {isolation === "vm" ? "VM wajib memakai image." : "Tanpa image, sel memakai pustaka host."}
+            </p>
+            <label className="numrow"><span>Memori (MiB)</span>
+              <input className="field" type="number" min={1} inputMode="numeric" aria-label="Batas memori sel" value={memory} onChange={(e) => setMemory(e.target.value)} placeholder="tanpa batas" /></label>
+            {needsImage && <div className="notice">VM butuh image sebelum bisa disimpan.</div>}
+            {isolation === "vm" && (
+              <div className="notice">
+                Di VM, folder proyek disalin ke dalam VM dan dikembalikan saat dibutuhkan. File yang Anda buat di editor saat sesi berjalan tidak dihapus,
+                tetapi perubahan Anda atas file yang sama di luar maukode bisa tertimpa oleh versi dari VM.
+              </div>
+            )}
+          </Block>
+        </>
+      )}
+
+      <Block title="Simpan">
+        <button className="btn ink" style={{ justifySelf: "start" }} disabled={!d || act.busy || needsImage} onClick={() => void save()}>Simpan</button>
+        {act.note}
+        {d && d.problems.length > 0 && d.backend === "lawang" && <div className="notice error">{d.problems.join("; ")}</div>}
+        <p className="muted small" style={{ margin: 0 }}>
+          Server MCP tetap berjalan di host. Jika daemon tidak bisa dihubungi, perintah gagal dengan penjelasan dan tidak pernah dijalankan di host.
+        </p>
+      </Block>
+    </>
+  );
+}
+
 // ── Agent ────────────────────────────────────────────────────────
 function Num({ label, value, onChange, min = 0, step = 1 }: { label: string; value: number; onChange: (n: number) => void; min?: number; step?: number }) {
   return (
@@ -462,6 +621,7 @@ export function Settings({ theme, onTheme, section, onSection, onBack }: {
             {current === "koneksi" && <Koneksi />}
             {current === "model" && <Model />}
             {current === "izin" && <Izin />}
+            {current === "eksekusi" && <Eksekusi />}
             {current === "agent" && <Agent />}
             {current === "ekstensi" && <Ekstensi />}
             {current === "tampilan" && <Tampilan theme={theme} onTheme={onTheme} />}

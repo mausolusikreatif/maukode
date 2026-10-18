@@ -221,6 +221,7 @@
 .plan .step[data-s="in_progress"] { font-weight: 700; }
 .plan .step[data-s="failed"] { color: var(--red); }
 .notice { padding: 0.5rem 0.75rem; border-left: 3px solid var(--hold); background: color-mix(in srgb, var(--hold) 10%, transparent); font-size: 12px; overflow-wrap: anywhere; }
+.notice.ok { border-color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
 .notice.error { border-color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
 .empty { margin: auto; max-width: 30rem; padding: 2rem 1rem; display: grid; gap: 0.75rem; }
 
@@ -360,3 +361,9 @@ kbd { font: inherit; font-size: 10.5px; padding: 0 0.35em; margin-left: 0.4em; b
 .mention-item[data-active="true"], .mention-item:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); box-shadow: inset 3px 0 0 var(--ink); }
 .title-btn { display: block; max-width: 100%; border: 0; background: transparent; padding: 0; text-align: left; font-weight: 700; font-stretch: 108%; }
 .title-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Where a session's commands run: plain text, accented only when they are isolated. */
+.exec { margin-left: 0.35rem; color: var(--ink-2); }
+.exec.isolated { color: var(--cobalt); font-weight: 600; }
+.field.wide { width: min(22rem, 100%); text-align: left; }
+.row-actions { display: flex; gap: 0.5rem; }
