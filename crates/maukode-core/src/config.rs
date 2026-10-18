@@ -1,7 +1,7 @@
 use crate::permission::PermissionMode;
 use anyhow::Result;
 use maukode_llm::{AnthropicClient, LLMClient, OpenAIClient};
-use maukode_tools::SandboxMode;
+use maukode_tools::{LawangSettings, SandboxMode};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -146,6 +146,62 @@ impl Default for WebSearchConfig {
     }
 }
 
+/// Where the bash tool's commands run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionBackendKind {
+    /// As local processes (with the sandbox mode under `security`).
+    #[default]
+    Host,
+    /// In a cell of a lawang daemon: bubblewrap, gVisor or a Firecracker VM.
+    Lawang,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionConfig {
+    #[serde(default)]
+    pub backend: ExecutionBackendKind,
+    #[serde(default)]
+    pub lawang: LawangSettings,
+}
+
+impl ExecutionConfig {
+    /// What the UI labels a session: `host`, or the isolation level of the lawang cell.
+    pub fn label(&self) -> &'static str {
+        match self.backend {
+            ExecutionBackendKind::Host => "host",
+            ExecutionBackendKind::Lawang => self.lawang.isolation.as_str(),
+        }
+    }
+
+    /// Reasons these settings cannot work, found without contacting the daemon.
+    pub fn problems(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if self.backend != ExecutionBackendKind::Lawang {
+            return problems;
+        }
+        let url = self.lawang.url.trim();
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            problems.push("the lawang URL must start with http:// or https://".to_string());
+        }
+        let has_image = self
+            .lawang
+            .image
+            .as_deref()
+            .is_some_and(|i| !i.trim().is_empty());
+        if self.lawang.isolation == maukode_tools::CellIsolation::Vm && !has_image {
+            problems.push(
+                "a VM has its own kernel and no host libraries, so it needs an image (for example alpine:3.20)"
+                    .to_string(),
+            );
+        }
+        if self.lawang.memory_mb == Some(0) {
+            problems.push("the memory limit must be at least 1 MiB".to_string());
+        }
+        problems
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub active_provider: String,
@@ -159,6 +215,8 @@ pub struct AppConfig {
     pub web_search: WebSearchConfig,
     #[serde(default)]
     pub agent: AgentConfig,
+    #[serde(default)]
+    pub execution: ExecutionConfig,
 }
 
 impl Default for AppConfig {
@@ -172,6 +230,7 @@ impl Default for AppConfig {
             active_model: "auto".to_string(),
             mcp_servers: std::collections::HashMap::new(),
             web_search: WebSearchConfig::default(),
+            execution: ExecutionConfig::default(),
             providers: vec![
                 ProviderConfig {
                     id: "llmkita".to_string(),
@@ -590,5 +649,84 @@ impl AppConfig {
             registry.register_alias("fetch_url", "fetch_web_content");
             registry.register_alias("read_url", "fetch_web_content");
         }
+    }
+}
+
+#[cfg(test)]
+mod execution_tests {
+    use super::*;
+    use maukode_tools::CellIsolation;
+
+    fn lawang(isolation: CellIsolation, image: Option<&str>) -> ExecutionConfig {
+        ExecutionConfig {
+            backend: ExecutionBackendKind::Lawang,
+            lawang: LawangSettings {
+                isolation,
+                image: image.map(String::from),
+                ..LawangSettings::default()
+            },
+        }
+    }
+
+    #[test]
+    fn a_config_file_from_before_this_feature_still_runs_commands_on_the_host() {
+        let old = r#"{"active_provider":"x","active_model":"y","providers":[]}"#;
+        let config: AppConfig = serde_json::from_str(old).unwrap();
+        assert_eq!(config.execution.backend, ExecutionBackendKind::Host);
+        assert_eq!(config.execution.label(), "host");
+        assert!(config.execution.problems().is_empty());
+    }
+
+    #[test]
+    fn the_label_names_the_isolation_level_of_a_lawang_cell() {
+        assert_eq!(ExecutionConfig::default().label(), "host");
+        assert_eq!(lawang(CellIsolation::Process, None).label(), "process");
+        assert_eq!(lawang(CellIsolation::Sandbox, None).label(), "sandbox");
+        assert_eq!(lawang(CellIsolation::Vm, Some("alpine:3.20")).label(), "vm");
+    }
+
+    #[test]
+    fn a_vm_without_an_image_is_a_problem_but_the_other_levels_are_not() {
+        assert!(lawang(CellIsolation::Process, None).problems().is_empty());
+        assert!(lawang(CellIsolation::Sandbox, None).problems().is_empty());
+        let vm = lawang(CellIsolation::Vm, None).problems();
+        assert_eq!(vm.len(), 1);
+        assert!(vm[0].contains("needs an image"), "{vm:?}");
+        assert!(
+            lawang(CellIsolation::Vm, Some("   ")).problems().len() == 1,
+            "blank is no image"
+        );
+        assert!(lawang(CellIsolation::Vm, Some("alpine:3.20"))
+            .problems()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_bad_url_or_memory_limit_is_reported_and_the_host_is_never_a_problem() {
+        let mut c = lawang(CellIsolation::Process, None);
+        c.lawang.url = "unix:/run/lawangd.sock".into();
+        c.lawang.memory_mb = Some(0);
+        let problems = c.problems();
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        // Settings that would not work do not matter while commands run on the host.
+        c.backend = ExecutionBackendKind::Host;
+        assert!(c.problems().is_empty());
+    }
+
+    #[test]
+    fn the_execution_section_round_trips_and_the_token_is_not_printed() {
+        let mut c = lawang(CellIsolation::Sandbox, Some("alpine:3.20"));
+        c.lawang.token = Some("s3cret-token".into());
+        let json = serde_json::to_string(&c).unwrap();
+        let back: ExecutionConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, c);
+        assert!(
+            json.contains(r#""backend":"lawang""#) && json.contains(r#""isolation":"sandbox""#),
+            "{json}"
+        );
+        assert!(
+            !format!("{c:?}").contains("s3cret-token"),
+            "Debug output must redact the token"
+        );
     }
 }

@@ -30,6 +30,9 @@ pub struct SubagentTool {
     profiles: Arc<RwLock<HashMap<String, SubagentProfile>>>,
     mcp_manager: Option<Arc<crate::McpManager>>,
     app_config: Option<Arc<RwLock<crate::AppConfig>>>,
+    /// Where the parent session runs its commands. A subagent must use the same place: otherwise a
+    /// "mutating" subagent would run `bash` on the host even though the session is sandboxed.
+    exec_backend: Option<Arc<dyn maukode_tools::ExecBackend>>,
 }
 
 impl SubagentTool {
@@ -55,7 +58,14 @@ impl SubagentTool {
             profiles: Arc::new(RwLock::new(initial_profiles)),
             mcp_manager: None,
             app_config: None,
+            exec_backend: None,
         }
+    }
+
+    /// Run the subagent's commands through the same backend as the parent session.
+    pub fn with_exec_backend(mut self, backend: Arc<dyn maukode_tools::ExecBackend>) -> Self {
+        self.exec_backend = Some(backend);
+        self
     }
 
     pub fn with_mcp_manager(mut self, mcp: Arc<crate::McpManager>) -> Self {
@@ -162,13 +172,29 @@ impl Tool for SubagentTool {
             });
         }
 
-        let mut child_tools = match profile.tool_mode {
-            SubagentToolMode::ReadOnly => maukode_tools::create_readonly_registry_with_jail(
-                &self.directory,
-                self.jail.clone(),
-            ),
-            SubagentToolMode::WorkspaceMutating => {
+        let mut child_tools = match (profile.tool_mode, &self.exec_backend) {
+            (SubagentToolMode::ReadOnly, None) => {
+                maukode_tools::create_readonly_registry_with_jail(
+                    &self.directory,
+                    self.jail.clone(),
+                )
+            }
+            (SubagentToolMode::ReadOnly, Some(backend)) => {
+                maukode_tools::create_readonly_registry_with_backend(
+                    &self.directory,
+                    self.jail.clone(),
+                    Arc::clone(backend),
+                )
+            }
+            (SubagentToolMode::WorkspaceMutating, None) => {
                 maukode_tools::create_default_registry_with_jail(&self.directory, self.jail.clone())
+            }
+            (SubagentToolMode::WorkspaceMutating, Some(backend)) => {
+                maukode_tools::create_registry_with_backend(
+                    &self.directory,
+                    self.jail.clone(),
+                    Arc::clone(backend),
+                )
             }
         };
 

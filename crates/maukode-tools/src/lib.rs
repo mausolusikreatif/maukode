@@ -1,4 +1,5 @@
 pub mod bash;
+pub mod exec;
 pub mod file;
 pub mod grep;
 pub mod registry;
@@ -7,6 +8,10 @@ pub mod tool;
 pub mod web;
 
 pub use bash::BashTool;
+pub use exec::{
+    cell_id_for, destroy_cell, format_output, CellIsolation, ExecBackend, ExecOutput, ExecRequest,
+    HostBackend, LawangBackend, LawangSettings, SyncedTool,
+};
 pub use file::{EditFileTool, GlobTool, ReadFileTool, WriteFileTool};
 pub use grep::GrepTool;
 pub use registry::ToolRegistry;
@@ -55,6 +60,63 @@ pub fn create_default_registry_with_jail(cwd: impl Into<PathBuf>, jail: PathJail
     registry.register_alias("fetch_url", "fetch_web_content");
     registry.register_alias("read_url", "fetch_web_content");
     registry
+}
+
+/// The default tools with `bash` running through `backend`, and the file tools wrapped so the
+/// backend can keep its own copy of the project in step with the host's.
+pub fn create_registry_with_backend(
+    cwd: impl Into<PathBuf>,
+    jail: PathJail,
+    backend: Arc<dyn ExecBackend>,
+) -> ToolRegistry {
+    let cwd = cwd.into();
+    let mut registry = create_default_registry_with_jail(cwd.clone(), jail.clone());
+    registry.unregister("bash");
+    registry.register(Arc::new(BashTool::with_backend(
+        cwd,
+        jail.clone(),
+        backend.clone(),
+    )));
+    wrap_file_tools(
+        &mut registry,
+        &jail,
+        &backend,
+        &[("write_file", true), ("edit_file", true)],
+    );
+    registry
+}
+
+/// The read-only tools, wrapped for a backend that has its own copy of the project.
+pub fn create_readonly_registry_with_backend(
+    cwd: impl Into<PathBuf>,
+    jail: PathJail,
+    backend: Arc<dyn ExecBackend>,
+) -> ToolRegistry {
+    let mut registry = create_readonly_registry_with_jail(cwd, jail.clone());
+    wrap_file_tools(&mut registry, &jail, &backend, &[]);
+    registry
+}
+
+/// Put `SyncedTool` around the file tools. Names in `writes` push the file they changed.
+fn wrap_file_tools(
+    registry: &mut ToolRegistry,
+    jail: &PathJail,
+    backend: &Arc<dyn ExecBackend>,
+    writes: &[(&str, bool)],
+) {
+    for name in ["read_file", "glob", "grep", "write_file", "edit_file"] {
+        let Some(tool) = registry.get(name) else {
+            continue;
+        };
+        let writes = writes.iter().any(|(n, w)| *n == name && *w);
+        registry.unregister(name);
+        registry.register(Arc::new(SyncedTool::new(
+            tool,
+            backend.clone(),
+            jail.clone(),
+            writes,
+        )));
+    }
 }
 
 pub fn create_readonly_registry(cwd: impl Into<PathBuf>) -> ToolRegistry {

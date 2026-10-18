@@ -5,6 +5,30 @@ Semua perubahan penting untuk proyek ini akan didokumentasikan dalam file ini.
 Format berdasarkan [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Tempat perintah dijalankan bisa dipilih (`ExecBackend`)**: tool `bash` tidak lagi selalu
+  menjalankan proses lokal. Pengaturan baru `execution` memilih **Host** (seperti biasa) atau
+  **Lawang**: sel terisolasi milik daemon lawang (program terpisah, dipakai
+  lewat HTTP) dengan tingkat `process` (bubblewrap), `sandbox` (gVisor) atau `vm` (Firecracker).
+  Konfigurasi lama tanpa bagian `execution` tetap berjalan di host.
+  - Satu sel per sesi, dibuat saat perintah pertama dan dihapus bersama sesinya. Folder proyek
+    dipasang ke sel di `/work`; untuk VM, folder disalin masuk dan dibawa pulang. Tool file
+    (`read_file`, `grep`, `glob`, `write_file`, `edit_file`) tetap bekerja di folder host dan
+    dibungkus `SyncedTool` supaya perubahan di kedua sisi saling terlihat. File yang hanya ada di
+    host tidak pernah dihapus oleh sinkronisasi.
+  - Subagen menjalankan perintah di tempat yang sama dengan sesi induknya.
+  - Daemon tidak bisa dihubungi, token salah, atau konfigurasi rusak (misalnya VM tanpa image)
+    membuat perintah gagal dengan penjelasan. **Perintah tidak pernah jatuh diam-diam ke host.**
+  - API: `GET|PUT /api/v1/config/execution` dan `GET /api/v1/config/execution/status` (menanyakan
+    daemon tingkat isolasi mana yang tersedia). Token tidak pernah dikirim balik.
+  - UI: bagian **Eksekusi** di Pengaturan dan label (Host / Proses terisolasi / Sandbox / VM) di
+    header sesi.
+  - Batasan: server MCP tetap berjalan di host; CLI/TUI belum memakai backend ini; pengaturan
+    berlaku untuk semua sesi sekaligus.
+
 ## [0.4.0] - 2026-10-15
 
 Minor release. Default langkah agent 50 → 2000, perbaikan pengiriman CLI `--max-steps`, dan retry stream llm-kita.

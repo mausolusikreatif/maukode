@@ -1,9 +1,11 @@
+use crate::exec::{format_output, ExecBackend, ExecRequest, HostBackend};
 use crate::security::{PathJail, SandboxMode};
 use crate::tool::{Tool, ToolError};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub struct BashTool {
@@ -11,6 +13,8 @@ pub struct BashTool {
     pub jail: PathJail,
     pub default_timeout: Duration,
     pub sandbox: SandboxMode,
+    /// Where commands run: a local process by default, or a lawang cell.
+    pub backend: Arc<dyn ExecBackend>,
 }
 
 impl BashTool {
@@ -21,6 +25,7 @@ impl BashTool {
             default_cwd: dir,
             default_timeout: Duration::from_secs(120),
             sandbox: SandboxMode::PathJail,
+            backend: Arc::new(HostBackend::new(SandboxMode::PathJail)),
         }
     }
 
@@ -30,6 +35,7 @@ impl BashTool {
             jail,
             default_timeout: Duration::from_secs(120),
             sandbox: SandboxMode::PathJail,
+            backend: Arc::new(HostBackend::new(SandboxMode::PathJail)),
         }
     }
 
@@ -39,6 +45,22 @@ impl BashTool {
             jail,
             default_timeout: Duration::from_secs(120),
             sandbox,
+            backend: Arc::new(HostBackend::new(sandbox)),
+        }
+    }
+
+    /// Run commands through `backend` instead of as local processes.
+    pub fn with_backend(
+        cwd: impl Into<PathBuf>,
+        jail: PathJail,
+        backend: Arc<dyn ExecBackend>,
+    ) -> Self {
+        Self {
+            default_cwd: cwd.into(),
+            jail,
+            default_timeout: Duration::from_secs(120),
+            sandbox: SandboxMode::Off,
+            backend,
         }
     }
 }
@@ -95,55 +117,17 @@ impl Tool for BashTool {
             .map(Duration::from_secs)
             .unwrap_or(self.default_timeout);
 
-        let mut command = crate::sandboxed_command(
-            "bash",
-            &["-c".into(), args.command.clone()],
-            &cwd,
-            self.sandbox,
-        )
-        .map_err(ToolError::Execution)?;
-        let child = command
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| ToolError::Execution(format!("Failed to spawn bash process: {e}")))?;
-
-        let execution = async {
-            let output = child
-                .wait_with_output()
-                .await
-                .map_err(|e| ToolError::Execution(format!("Command execution failed: {e}")))?;
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let exit_code = output.status.code().unwrap_or(-1);
-
-            let mut result = String::new();
-            if !stdout.is_empty() {
-                result.push_str(&stdout);
-            }
-            if !stderr.is_empty() {
-                if !result.is_empty() && !result.ends_with('\n') {
-                    result.push('\n');
-                }
-                result.push_str("[stderr]\n");
-                result.push_str(&stderr);
-            }
-            if exit_code != 0 {
-                result.push_str(&format!("\n[Process exited with code {exit_code}]"));
-            }
-            if result.trim().is_empty() {
-                result.push_str("(Command finished with no output)");
-            }
-            Ok(result)
-        };
-
-        tokio::time::timeout(timeout_dur, execution)
-            .await
-            .map_err(|_| {
-                ToolError::Execution(format!(
-                    "Command timed out after {} seconds",
-                    timeout_dur.as_secs()
-                ))
-            })?
+        // No sync before a command: the backend that runs it holds the truth. Changes made on the
+        // host by the file tools were pushed to it when they were made (`SyncedTool`), and what
+        // the command changes comes back before the host next reads (`before_workspace_access`).
+        let output = self
+            .backend
+            .exec(ExecRequest {
+                command: args.command,
+                cwd,
+                timeout: timeout_dur,
+            })
+            .await?;
+        Ok(format_output(&output))
     }
 }

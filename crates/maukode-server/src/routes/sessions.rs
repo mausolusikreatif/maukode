@@ -463,6 +463,21 @@ fn start_turn(
         let (provider_id, model) = effective_model(&state, id).await;
         let session_dir = session_arc.read().await.directory.clone();
 
+        // Where commands run. A configuration that cannot work stops the turn with the reason;
+        // it never quietly falls back to running commands on the host.
+        let execution = state.config.read().await.execution.clone();
+        let problems = execution.problems();
+        if !problems.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "The execution backend is misconfigured: {}",
+                    problems.join("; ")
+                ),
+            ));
+        }
+        let exec_backend = state.exec_backend_for(id, &session_dir, &execution).await;
+
         let (llm_client, runner_config, mut tool_registry, jail) = {
             let config_guard = state.config.read().await;
             let llm_client = config_guard
@@ -478,7 +493,13 @@ fn start_turn(
 
             let jail = maukode_tools::PathJail::new(&session_dir)
                 .with_allowed_paths(config_guard.security.allowed_external_paths.clone());
-            let mut tool_registry = if config_guard.security.jail_path_traversal {
+            let mut tool_registry = if let Some(backend) = &exec_backend {
+                maukode_tools::create_registry_with_backend(
+                    &session_dir,
+                    jail.clone(),
+                    Arc::clone(backend),
+                )
+            } else if config_guard.security.jail_path_traversal {
                 maukode_tools::create_default_registry_with_sandbox(
                     &session_dir,
                     jail.clone(),
@@ -525,17 +546,20 @@ fn start_turn(
             context.repo_map(),
         ))));
 
-        tool_registry.register(Arc::new(
-            SubagentTool::new(
-                id,
-                session_dir.clone(),
-                jail,
-                Arc::clone(&llm_client),
-                Some(llm_tx.clone()),
-            )
-            .with_mcp_manager(Arc::clone(&state.mcp_manager))
-            .with_app_config(Arc::clone(&state.config)),
-        ));
+        let mut subagent = SubagentTool::new(
+            id,
+            session_dir.clone(),
+            jail,
+            Arc::clone(&llm_client),
+            Some(llm_tx.clone()),
+        )
+        .with_mcp_manager(Arc::clone(&state.mcp_manager))
+        .with_app_config(Arc::clone(&state.config));
+        // A subagent runs commands where its parent does.
+        if let Some(backend) = &exec_backend {
+            subagent = subagent.with_exec_backend(Arc::clone(backend));
+        }
+        tool_registry.register(Arc::new(subagent));
         let tools = Arc::new(tool_registry);
 
         let mut runner = SessionRunner::new(
@@ -1177,6 +1201,7 @@ pub async fn delete_session(
             tracing::warn!(%error, "Failed to remove worktree");
         }
     }
+    state.destroy_exec_cell(id).await;
     state.emit(GlobalEvent::SessionDeleted { session_id: id });
     Ok(Json(json!({ "status": "deleted", "session_id": id })))
 }
