@@ -1170,4 +1170,70 @@ mod turn_tests {
         assert_eq!(stops(&events)[0].0, StopReason::Error);
         assert!(matches!(state, SessionState::Failed(_)));
     }
+
+    /// A bash tool call for a dangerous command must emit a `PermissionRequest`
+    /// event and block until the user responds.
+    #[tokio::test]
+    async fn dangerous_bash_command_triggers_permission_request() {
+        let dir = std::env::temp_dir();
+        let session = Arc::new(RwLock::new(Session::new(&dir)));
+        let perm_mgr = Arc::new(PermissionManager::new(PermissionMode::Strict));
+
+        // Step 1 — LLM emits a bash tool call for a destructive command.
+        let dangerous_call: Step = Ok(vec![
+            Ok(LLMEvent::ToolCallFinish {
+                tool_call: ToolCall {
+                    id: "call-1".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::json!({"command": "rm -rf target/"}),
+                },
+            }),
+            Ok(LLMEvent::Finish {
+                reason: FinishReason::ToolUse,
+            }),
+        ]);
+        // Step 2 — after the tool result comes back, the LLM wraps up.
+        let done = text("all done", FinishReason::EndTurn);
+
+        let runner = SessionRunner::new(
+            Arc::clone(&session),
+            Arc::new(ScriptedLlm(Mutex::new(vec![dangerous_call, done].into()))),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(ContextManager::new(&dir)),
+            RunnerConfig {
+                max_steps: 5,
+                ..RunnerConfig::default()
+            },
+        )
+        .with_permission_manager(Arc::clone(&perm_mgr));
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // Drive the runner in a background task so the main task can respond to
+        // permission prompts as they arrive on the event channel.
+        let run_handle = tokio::spawn(async move {
+            runner.run_with_cancellation(Some("go".into()), tx, None).await
+        });
+
+        let mut events = Vec::new();
+        let mut saw_permission = false;
+        while let Some(event) = rx.recv().await {
+            if let LLMEvent::PermissionRequest(ref req) = event {
+                saw_permission = true;
+                assert_eq!(req.tool_name, "bash");
+                assert_eq!(req.command.as_deref(), Some("rm -rf target/"));
+                assert_eq!(req.risk_level, "danger");
+                // Allow the execution so the turn can proceed.
+                perm_mgr
+                    .respond(&req.request_id, maukode_protocol::PermissionDecision::AllowOnce)
+                    .await;
+            }
+            events.push(event);
+        }
+
+        let result = run_handle.await.unwrap();
+        assert!(result.is_ok());
+        assert!(saw_permission, "expected a PermissionRequest event");
+        assert_eq!(stops(&events), vec![(StopReason::Completed, None)]);
+    }
 }

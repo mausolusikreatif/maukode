@@ -1,0 +1,6 @@
+---
+name: wire-static-frontend-into-rust-server
+description: "Serve a pre-built SPA frontend (Vite dist/) from an existing Axum API server using tower-http ServeDir as a fallback service."
+run_as_subagent: false
+---
+To serve a static web UI from an existing Axum API server: 1) Add the `fs` feature to `tower-http` in Cargo.toml. 2) Add an optional `web_dir: Option<PathBuf>` field to your server config/state struct. 3) In the router builder, after all API routes are registered with their middleware layers, attach `ServeDir::new(web_dir).fallback(ServeFile::new(web_dir.join("index.html")))` via `router.fallback_service(...)` — this serves static assets and falls back to index.html for SPA client-side routing. Static files bypass auth middleware since they're public assets. 4) Auto-discover `web_dir` by checking common paths (e.g. `./apps/desktop/dist/`, `./dist/`) relative to CWD when not explicitly provided. 5) In the frontend, default `getBootstrap()` to `window.location.origin` in browser mode so the UI auto-connects to the server that served it. 6) Support token-via-URL-fragment (`#token=...`) for bookmarkable authenticated access, since URL fragments are never sent to the server (no token in server logs).
