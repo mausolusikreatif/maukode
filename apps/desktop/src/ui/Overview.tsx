@@ -105,8 +105,9 @@ export function Overview({ onNew }: { onNew: () => void }) {
   const titleOf = (id: string) => sessions.find((s) => s.id === id)?.title || "Tanpa judul";
   const waiting = inbox.filter((r) => visible.some((s) => s.id === r.session_id));
   const running = visible.filter((s) => s.running);
+  // Archived sessions still show while they run or wait for approval, not among the recent ones.
   const recent = visible
-    .filter((s) => !s.running)
+    .filter((s) => !s.running && !s.archived)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .slice(0, 8);
 

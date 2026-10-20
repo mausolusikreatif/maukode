@@ -24,6 +24,9 @@ pub struct SessionSummary {
     pub project_dir: Option<String>,
     #[serde(default)]
     pub worktree_branch: Option<String>,
+    /// Hidden from the default session list (`PUT /sessions/{id}/archive`).
+    #[serde(default)]
+    pub archived: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -359,6 +362,7 @@ impl SqliteSessionStore {
             "ALTER TABLE sessions ADD COLUMN worktree_branch TEXT;",
             "ALTER TABLE sessions ADD COLUMN base_commit TEXT;",
             "ALTER TABLE messages ADD COLUMN content_hash TEXT;",
+            "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
         ] {
             match retry_busy(|| conn.execute(ddl, [])) {
                 Ok(_) => {}
@@ -772,6 +776,16 @@ impl SqliteSessionStore {
         Ok(read_session_usage(&conn, id)?)
     }
 
+    /// Archive or restore a session. Returns whether it exists.
+    pub async fn set_session_archived(&self, id: SessionId, archived: bool) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let n = conn.execute(
+            "UPDATE sessions SET archived = ?1 WHERE id = ?2",
+            params![archived as i64, id.to_string()],
+        )?;
+        Ok(n > 0)
+    }
+
     pub async fn set_session_model(
         &self,
         id: SessionId,
@@ -1039,7 +1053,7 @@ impl SqliteSessionStore {
     pub async fn list_all_sessions(&self) -> Result<Vec<SessionSummary>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count, s.project_dir, s.worktree_branch
+            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count, s.project_dir, s.worktree_branch, s.archived
              FROM sessions s
              LEFT JOIN messages m ON s.id = m.session_id
              GROUP BY s.id
@@ -1057,6 +1071,7 @@ impl SqliteSessionStore {
             let msg_count: i64 = row.get(6).unwrap_or(0);
             let project_dir: Option<String> = row.get(7).unwrap_or(None);
             let worktree_branch: Option<String> = row.get(8).unwrap_or(None);
+            let archived: bool = row.get::<_, i64>(9).map(|v| v != 0).unwrap_or(false);
             Ok((
                 id_str,
                 directory,
@@ -1067,6 +1082,7 @@ impl SqliteSessionStore {
                 msg_count,
                 project_dir,
                 worktree_branch,
+                archived,
             ))
         })?;
 
@@ -1081,6 +1097,7 @@ impl SqliteSessionStore {
             msg_count,
             project_dir,
             worktree_branch,
+            archived,
         ) in rows.flatten()
         {
             if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
@@ -1097,6 +1114,7 @@ impl SqliteSessionStore {
                     updated_at,
                     project_dir,
                     worktree_branch,
+                    archived,
                 });
             }
         }
@@ -1108,7 +1126,7 @@ impl SqliteSessionStore {
         let dir_str = dir.to_string_lossy().to_string();
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count, s.project_dir, s.worktree_branch
+            "SELECT s.id, s.directory, COALESCE(s.custom_title, s.title), s.provider, s.model, s.updated_at, COUNT(m.id) as msg_count, s.project_dir, s.worktree_branch, s.archived
              FROM sessions s
              LEFT JOIN messages m ON s.id = m.session_id
              WHERE s.directory = ?1 OR s.project_dir = ?1
@@ -1127,6 +1145,7 @@ impl SqliteSessionStore {
             let msg_count: i64 = row.get(6).unwrap_or(0);
             let project_dir: Option<String> = row.get(7).unwrap_or(None);
             let worktree_branch: Option<String> = row.get(8).unwrap_or(None);
+            let archived: bool = row.get::<_, i64>(9).map(|v| v != 0).unwrap_or(false);
             Ok((
                 id_str,
                 directory,
@@ -1137,6 +1156,7 @@ impl SqliteSessionStore {
                 msg_count,
                 project_dir,
                 worktree_branch,
+                archived,
             ))
         })?;
 
@@ -1151,6 +1171,7 @@ impl SqliteSessionStore {
             msg_count,
             project_dir,
             worktree_branch,
+            archived,
         ) in rows.flatten()
         {
             if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
@@ -1167,6 +1188,7 @@ impl SqliteSessionStore {
                     updated_at,
                     project_dir,
                     worktree_branch,
+                    archived,
                 });
             }
         }

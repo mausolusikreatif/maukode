@@ -23,15 +23,22 @@ export function Sidebar({ tab, onGo, onOpened }: {
   const threads = useApp((s) => s.threads);
   const query = useApp((s) => s.sessionSearchQuery);
   const pinned = useApp((s) => s.pinnedSessionIds);
+  const archived = useApp((s) => s.archivedSessionIds);
+  const [showArchived, setShowArchived] = useState(false);
   const connection = useApp((s) => s.connection);
   const inboxCount = useApp((s) => s.inbox.length);
-  const { setSessionSearchQuery, openSession, togglePinSession, deleteSession } = useApp.getState();
+  const { setSessionSearchQuery, openSession, togglePinSession, toggleArchiveSession, deleteSession } = useApp.getState();
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const groups = useMemo(() => {
-    const filtered = filterSessions(sessions, { query, threads });
+    const filtered = filterSessions(sessions, {
+      query,
+      threads,
+      status: showArchived ? "archived" : "all",
+      archivedIds: new Set(archived),
+    });
     return groupSessionsByProject(filtered, new Set(pinned));
-  }, [sessions, query, threads, pinned]);
+  }, [sessions, query, threads, pinned, archived, showArchived]);
 
   const online = connection === "online";
 
@@ -57,11 +64,18 @@ export function Sidebar({ tab, onGo, onOpened }: {
             className="field" placeholder="Cari sesi" value={query} aria-label="Cari sesi"
             onChange={(e) => setSessionSearchQuery(e.target.value)}
           />
+          {(archived.length > 0 || showArchived) && (
+            <button className="btn quiet small" aria-pressed={showArchived} onClick={() => setShowArchived((v) => !v)}>
+              {showArchived ? "Kembali ke sesi aktif" : `Arsip (${archived.length})`}
+            </button>
+          )}
         </div>
         <nav className="side-list">
           {groups.length === 0 && (
             <p className="muted small" style={{ padding: "1rem" }}>
-              {sessions.length === 0 ? "Belum ada sesi. Mulai dengan Sesi baru." : "Tidak ada sesi yang cocok."}
+              {sessions.length === 0
+                ? "Belum ada sesi. Mulai dengan Sesi baru."
+                : showArchived ? "Tidak ada sesi di arsip yang cocok." : "Tidak ada sesi yang cocok."}
             </p>
           )}
           {groups.map(([project, items]) => (
@@ -101,6 +115,9 @@ export function Sidebar({ tab, onGo, onOpened }: {
                       <div style={{ display: "flex", gap: 4, padding: "0 1rem 0.4rem 2.2rem" }}>
                         <button className="btn quiet small" onClick={() => togglePinSession(s.id)}>
                           {isPinned ? "Lepas sematan" : "Sematkan"}
+                        </button>
+                        <button className="btn quiet small" onClick={() => void toggleArchiveSession(s.id)}>
+                          {archived.includes(s.id) ? "Pulihkan" : "Arsipkan"}
                         </button>
                         {confirmId === s.id ? (
                           <button className="btn deny small" onClick={() => { setConfirmId(null); void deleteSession(s.id); }}>

@@ -1,11 +1,17 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../state/store";
-import { parseUnifiedDiff } from "../state/diff";
+import { parseUnifiedDiff, type DiffHunk } from "../state/diff";
+
+/** The line of the first change in a hunk (in the new file when it has one). */
+function firstChangedLine(hunk: DiffHunk): number | undefined {
+  const line = hunk.lines.find((l) => l.kind === "add" || l.kind === "del") ?? hunk.lines[0];
+  return line?.newNo ?? line?.oldNo;
+}
 
 export function Review({ onClose }: { onClose: () => void }) {
   const review = useApp((s) => s.review);
   const meta = useApp((s) => s.meta);
-  const { selectFile, undoLast, commitWorktree, mergeWorktree } = useApp.getState();
+  const { selectFile, undoLast, commitWorktree, mergeWorktree, openInEditor } = useApp.getState();
   const [message, setMessage] = useState("");
   const parsed = useMemo(() => (review.diff ? parseUnifiedDiff(review.diff.diff) : null), [review.diff]);
   const wt = review.worktree;
@@ -34,6 +40,16 @@ export function Review({ onClose }: { onClose: () => void }) {
                 </span>
               </button>
             ))}
+          </div>
+        )}
+        {review.selected && (
+          <div style={{ display: "flex", justifyContent: "flex-end", padding: "0.4rem 0.75rem 0" }}>
+            <button
+              className="btn quiet small" title="Buka di editor pada mesin tempat daemon berjalan"
+              onClick={() => review.selected && void openInEditor(review.selected, parsed?.hunks[0] ? firstChangedLine(parsed.hunks[0]) : undefined)}
+            >
+              Buka di editor
+            </button>
           </div>
         )}
         {parsed && (

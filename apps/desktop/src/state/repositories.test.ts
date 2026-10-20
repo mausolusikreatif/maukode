@@ -12,6 +12,7 @@ const session = (directory: string, project_dir: string | null = null): SessionL
   model: "test",
   updated_at: "2026-01-01T00:00:00Z",
   worktree_branch: null,
+  archived: false,
   running: false,
   pending_permission_count: 0,
   turn_started_at: null,
