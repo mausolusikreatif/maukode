@@ -1470,7 +1470,7 @@ mod tests {
             "nice -n 10 rm -rf src",
             "nohup rm -rf src &",
             "xargs -I {} sh -c 'rm -rf {}'",
-            "find . -name '*.o' -exec sh -c 'rm -rf \"$1\"' _ {} \;",
+            "find . -name '*.o' -exec sh -c 'rm -rf \"$1\"' _ {} \\;",
             "busybox rm -rf src",
             "{rm,-rf,src}",
             "bash <<< 'rm -rf src'",
