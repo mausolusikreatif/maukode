@@ -691,10 +691,14 @@ impl Tool for SyncedTool {
         } else {
             Vec::new()
         };
+        let from_patch = args.get("patch").is_some();
         let result = self.inner.execute(args).await?;
         for path in targets {
-            // A deleted file has nothing to push.
-            if let Some(path) = self.jail.validate_path(&path).ok().filter(|p| p.exists()) {
+            let Ok(path) = self.jail.validate_path(&path) else {
+                continue;
+            };
+            // A patch may delete files: those have nothing to push.
+            if !from_patch || path.exists() {
                 self.backend.after_host_write(&path).await?;
             }
         }
