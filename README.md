@@ -194,7 +194,15 @@ maukode server --bind 0.0.0.0:4096 --token "your-secret-token" --web-dir /path/t
 ### Web UI
 
 When the daemon finds a web bundle (`--web-dir`, `MAUKODE_WEB_DIR`, or a `web/` directory next to
-the binary), it serves the UI on the same address. Open `http://127.0.0.1:4096#token=<token>`.
+the binary), it serves the UI on the same address. Open the address that `maukode server status`
+prints (`http://127.0.0.1:4096#token=<token>`).
+
+### Trust a project's MCP servers
+
+```bash
+maukode trust            # allow this folder's mcp.json / .maukode/mcp.json to start MCP servers
+maukode trust --revoke   # undo
+```
 
 ### Remote daemon
 
@@ -274,15 +282,19 @@ complete sandbox on its own:
    - `[n / Esc]` deny; the agent is told and picks another approach
 3. **Permission modes** (`security.permission_mode`, or `/permission`):
    - `ask` (default): prompts for `bash` commands that the built-in risk assessment flags
-     (e.g. `rm -rf`, `sudo`, destructive git, firewall changes, access to secrets such as `.env`).
-     The assessment uses pattern rules; a command it does not recognize runs without a prompt.
-     Other tools run without prompting.
+     (e.g. `rm -rf`, `sudo`, destructive git, firewall changes, access to secrets such as `.env`),
+     also when they are wrapped in `bash -c`, `eval`, subshells, `xargs`, or `find -exec`, and for
+     code it cannot inspect (`python -c`, a shell reading from stdin). The assessment uses pattern
+     rules: a command it does not recognize, such as a script the agent wrote, runs without a
+     prompt. Other tools run without prompting. Subagents follow the same mode.
    - `strict` and `review`: prompt for every tool call. (They currently behave the same; `review`
      is the mode intended for using private results.)
    - `trust`: never prompts. Use only in disposable environments.
 
-   Commands in `security.bash_whitelist` skip approval in every mode. Entries ending in `*` match
-   by prefix, which also covers chained commands such as `cargo build && …`, so keep them narrow.
+   Commands in `security.bash_whitelist` skip approval in every mode, except commands the risk
+   assessment rates as dangerous. Entries match one simple command word by word (`cargo *` covers
+   `cargo test`, never `cargo build && rm -rf ~`); see
+   [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 4. **Shell isolation** (`security.sandbox_mode` and `execution.backend`):
    - `host` + `path_jail` (default): commands run as normal host processes in the workspace
      directory. They can read and write anything your user can.
@@ -290,9 +302,14 @@ complete sandbox on its own:
    - `lawang`: commands run in an isolated cell of a separate lawang daemon (`process` =
      bubblewrap, `sandbox` = gVisor, `vm` = Firecracker). One cell per session. Applies to
      sessions run by the daemon; MCP servers still run on the host.
-5. **Daemon access.** Without `--token`, the daemon only accepts requests whose `Host` is a
-   loopback name (a DNS-rebinding guard) and restricts CORS to local origins. Any local process can
-   still reach it, so set a token on shared machines, and always on a non-loopback bind address.
+5. **Daemon access.** A daemon started by the CLI always has a token: one is generated when you
+   give none and stored in the owner-only `daemon.json`, where local clients find it.
+   `maukode server status` prints the web UI address including the token. A foreground
+   `maukode server` refuses a non-loopback address without `--token`.
+6. **Project trust.** A repository's own `mcp.json` / `.maukode/mcp.json` can name any command,
+   so its MCP servers only start after `maukode trust` in that folder (`--revoke` undoes it).
+7. **Web fetch.** `fetch_web_content` refuses link-local and cloud-metadata addresses and the
+   local daemon API, also through redirects.
 
 ---
 

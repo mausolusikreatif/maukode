@@ -7,7 +7,8 @@ This document provides a comprehensive reference for configuring **MauKode** (`~
 ## 📁 File Locations
 
 Paths below are for Linux; other platforms use their standard config and data directories. Setting
-`MAUKODE_HOME` moves everything to `$MAUKODE_HOME/config` and `$MAUKODE_HOME/data`.
+`MAUKODE_HOME` moves everything to `$MAUKODE_HOME/config` and `$MAUKODE_HOME/data`. Files that hold
+secrets (`config.json`, `chatgpt_auth.json`, `daemon.json`) are written readable by the owner only.
 
 - **Primary configuration**: `~/.config/maukode/config.json`
 - **ChatGPT plan credentials**: `~/.config/maukode/chatgpt_auth.json`
@@ -64,7 +65,8 @@ Settings or the TUI.
     "jail_path_traversal": true,
     "allowed_external_paths": [],
     "sandbox_mode": "path_jail",
-    "bash_whitelist": ["cargo *", "git status", "git diff", "npm test"]
+    "bash_whitelist": ["cargo *", "git status", "git diff", "npm test"],
+    "trusted_projects": []
   },
   "execution": {
     "backend": "host",
@@ -129,7 +131,8 @@ below).
 | `jail_path_traversal` | `bool` | `true` | Confine file tools (`read_file`, `write_file`, `edit_file`, `glob`, `grep`) to the workspace. Does not affect `bash`. |
 | `allowed_external_paths` | `array` | `[]` | Extra directories the file tools may access outside the workspace. |
 | `sandbox_mode` | `string` | `"path_jail"` | How `bash` runs on the host backend: `"path_jail"` or `"off"` (an ordinary host process), `"bubblewrap"` (Linux, needs `bwrap`), or `"auto"` (bubblewrap when available, otherwise `"path_jail"`). |
-| `bash_whitelist` | `array` | `["cargo *", "git status", "git diff", "npm test"]` | Commands that never need approval, in any mode. An entry ending in `*` matches any command that **starts with** the text before it; other entries must match exactly. Prefix matching also covers chained commands (`cargo build && …`), so keep entries narrow. |
+| `bash_whitelist` | `array` | `["cargo *", "git status", "git diff", "npm test"]` | `bash` commands that skip approval in any mode, unless the risk assessment rates them dangerous. Entries match one simple command (no `;`, `&&`, `\|`, redirection, `$(…)`, subshell, or newline) word by word: `git status` matches exactly; `cargo *` matches `cargo` with any arguments; `git log*` also lets the last word continue (`git log --oneline`). A leading `VAR=value` never matches. |
+| `trusted_projects` | `array` | `[]` | Folders (and their subfolders) whose own `mcp.json` / `.maukode/mcp.json` may start MCP servers. Add the current folder with `maukode trust`, remove it with `maukode trust --revoke`. Takes effect without restarting the daemon. |
 
 ## 📦 Execution Backend
 
@@ -256,7 +259,9 @@ MauKode supports connecting to external tool servers implementing the Anthropic 
 MauKode loads MCP servers in the following cascading order:
 1. `config.json` (`mcpServers` section; `mcp_servers` is accepted too)
 2. Global user file: `~/.config/maukode/mcp.json` or `~/.maukode/mcp.json`
-3. Project-local file: `<workspace>/.maukode/mcp.json` or `<workspace>/mcp.json`
+3. Project-local file: `<workspace>/.maukode/mcp.json` or `<workspace>/mcp.json`, **only when the
+   workspace is in `security.trusted_projects`** (`maukode trust`). A cloned repository cannot
+   start programs on your machine until you trust it.
 
 Later sources override earlier ones when they define a server with the same name.
 

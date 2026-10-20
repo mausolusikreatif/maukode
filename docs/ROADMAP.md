@@ -48,19 +48,22 @@ remove a feature, update its row in the same PR.
 | Feature | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | File tools with path jail | **done** | `file.rs`, `grep.rs`, `security.rs` (`PathJail`) |
-| Bash risk assessment and approval prompts | **partial** | `assess_bash_command`; pattern-based, unknown commands are treated as safe (see backlog) |
+| Bash risk assessment and approval prompts | **partial** | `assess_bash_command` (inspects `bash -c`, `eval`, subshells, wrappers, `find -exec`); pattern-based, unknown commands are treated as safe (see backlog) |
+| Word-by-word `bash_whitelist`, per-tool session approvals | **done** | `bash_whitelist_allows`, `PermissionManager::is_whitelisted` (#86) |
+| Subagent tool calls go through the parent's permissions | **done** | `SubagentTool::with_permission_manager` (#86) |
+| Repo-supplied MCP servers require a trusted project | **done** | `security.trusted_projects`, `maukode trust` (#86) |
 | Private tool results (`[p]`) | **done** | `PermissionDecision::AllowPrivate`, `PrivateToolResult` |
 | Bubblewrap sandbox for bash | **done** (Linux, opt-in) | `security.sandbox_mode = bubblewrap\|auto` |
 | lawang execution cells (bubblewrap, gVisor, Firecracker) | **partial** (opt-in) | `exec.rs`, `execution.backend = lawang` (PR #84); daemon sessions only, not the in-process CLI/TUI paths; MCP servers stay on the host; one setting for all sessions |
 | Network capability controls, secret broker | **planned** | — |
-| Web search (DuckDuckGo, Brave, Tavily, SearXNG) and fetch | **done** | `web.rs` |
+| Web search (DuckDuckGo, Brave, Tavily, SearXNG) and fetch | **done** | `web.rs`; fetch blocks link-local/metadata addresses and the daemon API (#86) |
 
 ### Daemon (`maukode-server`)
 
 | Feature | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | HTTP + resumable SSE API | **done** | `routes/`, `docs/API.md` |
-| Bearer token auth, loopback Host guard, CORS | **done** | `middleware/auth.rs`, `routes/mod.rs` |
+| Bearer token auth, loopback Host guard, CORS | **done** | `middleware/auth.rs`, `routes/mod.rs`; CLI-started daemons always get a token, non-loopback binds require one (#86) |
 | Steering and prompt queueing | **done** | `/api/v1/sessions/{id}/steer`, `queued_prompts` |
 | Live progress in the session list | **done** | `SessionListItem` (`turn_started_at`, `plan_done`, `last_activity`) |
 | Session audit (permissions, mode changes, compactions) | **done** | `store/sqlite.rs` audit tables |
@@ -150,21 +153,25 @@ Ordered by impact within each group. Each item names where the problem is.
 
 ### Security
 
-1. **`bash_whitelist` matches by string prefix** (`PermissionManager::is_whitelisted`): a pattern
-   `cargo *` becomes the prefix `cargo`, so `cargo build && rm -rf ~` (or `cargox …`) is
-   whitelisted and skips approval in every mode, including `strict`. `cargo *` is in the default
-   whitelist. Match per subcommand on token boundaries, and never whitelist a compound command.
-2. **Bash risk assessment defaults to safe.** `bash -c "…"`, `sh -c`, `python -c`, `perl -e`,
-   `eval`, and command substitution are not inspected, so destructive commands wrapped this way run
-   without a prompt in `ask` mode. Treat interpreters with inline code as at least a warning, or
-   switch to an allowlist.
-3. **A non-loopback bind without a token is accepted** (`lib.rs`): the Host guard is turned off and
-   nothing requires authentication. Refuse to start in that case.
-4. The local daemon without a token is reachable by every local user; consider a generated token
-   in a 0600 file or a Unix socket.
-5. The token comparison is not constant-time (`middleware/auth.rs`).
-6. CORS and the Host guard still accept `tauri://` origins (`routes/mod.rs`), which no client uses
-   any more.
+Fixed in #86: prefix-matched `bash_whitelist` (`cargo *` let `cargo build && rm -rf ~` through
+in every mode), session approvals shared across tools, `bash -c`/`eval`/subshell/wrapper bypasses
+of the risk assessment, subagents running without any permission manager, token-less local
+daemons, non-loopback binds without a token, non-constant-time token comparison, `tauri://`
+origins, repositories starting their own MCP servers, `fetch_web_content` reaching metadata
+addresses and the daemon API, and a world-readable `config.json`.
+
+Remaining risks, by design or not yet addressed:
+
+1. **The risk assessment is a prompt filter, not a sandbox.** In `ask` mode a command it does not
+   recognize runs without a prompt, including a script the agent wrote itself (`bash x.sh`,
+   `cargo run`, `npm test`). Use `strict`/`review`, a bubblewrap sandbox, or a lawang cell when
+   that matters.
+2. **MCP tools never prompt in `ask` mode** (only `bash` is assessed); trusted projects and the
+   global configuration decide which MCP servers exist.
+3. **`fetch_web_content` can reach private LAN addresses** (only link-local/metadata addresses and
+   the daemon API are blocked) and runs without a prompt.
+4. The daemon and the CLI both rewrite `config.json`; a daemon saving its in-memory configuration
+   can drop a `trusted_projects` entry that `maukode trust` added while it was running.
 
 ### Features
 
