@@ -1379,7 +1379,10 @@ pub async fn open_in_editor(
         .validate_path(&payload.path)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     if !path.exists() {
-        return Err((StatusCode::NOT_FOUND, format!("{} does not exist", payload.path)));
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("{} does not exist", payload.path),
+        ));
     }
     let template = state.config.read().await.editor.command.clone();
     let argv = maukode_core::config::editor_argv(template.as_deref(), &path, payload.line)

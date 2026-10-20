@@ -77,10 +77,16 @@ async fn test_server_health_and_sessions() {
             .send()
     };
     assert_eq!(archive(true).await.unwrap().status(), 200);
-    let sessions = client.list_sessions(Some(temp_dir.path()), false).await.unwrap();
+    let sessions = client
+        .list_sessions(Some(temp_dir.path()), false)
+        .await
+        .unwrap();
     assert!(sessions[0].archived);
     assert_eq!(archive(false).await.unwrap().status(), 200);
-    let sessions = client.list_sessions(Some(temp_dir.path()), false).await.unwrap();
+    let sessions = client
+        .list_sessions(Some(temp_dir.path()), false)
+        .await
+        .unwrap();
     assert!(!sessions[0].archived);
 
     // Opening a file in the editor stays inside the workspace.
