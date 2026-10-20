@@ -330,7 +330,9 @@ mod tests {
         assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
         assert_eq!(body["system"][1]["text"], "today");
         assert!(body["system"][1].get("cache_control").is_none());
-        assert!(body["messages"][0]["content"][0].get("cache_control").is_none());
+        assert!(body["messages"][0]["content"][0]
+            .get("cache_control")
+            .is_none());
         assert_eq!(
             body["messages"][1]["content"][0]["cache_control"]["type"],
             "ephemeral"

@@ -1194,7 +1194,9 @@ mod tests {
             let mapped = stmt
                 .query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?)))
                 .unwrap();
-            mapped.collect::<rusqlite::Result<Vec<(i64, String)>>>().unwrap()
+            mapped
+                .collect::<rusqlite::Result<Vec<(i64, String)>>>()
+                .unwrap()
         };
         let before = rows(store.clone(), session.id.to_string()).await;
 
@@ -1203,7 +1205,11 @@ mod tests {
         let after = rows(store.clone(), session.id.to_string()).await;
 
         assert_eq!(after.len(), 3);
-        assert_eq!(after[..2], before[..], "unchanged rows must not be rewritten");
+        assert_eq!(
+            after[..2],
+            before[..],
+            "unchanged rows must not be rewritten"
+        );
         let loaded = store.load_session(session.id).await.unwrap().unwrap();
         assert_eq!(loaded.messages[2].text_content(), "second");
 

@@ -855,9 +855,10 @@ impl SessionRunner {
         calls: &[ToolCall],
         cancellation_token: &Option<tokio_util::sync::CancellationToken>,
     ) -> HashMap<String, Result<String, ToolError>> {
-        let confirms_every_call = self.permission_manager.as_ref().is_some_and(|pm| {
-            matches!(pm.mode(), PermissionMode::Strict | PermissionMode::Review)
-        });
+        let confirms_every_call = self
+            .permission_manager
+            .as_ref()
+            .is_some_and(|pm| matches!(pm.mode(), PermissionMode::Strict | PermissionMode::Review));
         let all_read_only = calls
             .iter()
             .all(|call| READ_ONLY_TOOLS.contains(&call.name.as_str()));

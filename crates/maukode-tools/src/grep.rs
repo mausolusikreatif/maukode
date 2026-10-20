@@ -128,7 +128,12 @@ fn search(re: &Regex, path: &std::path::Path, root: &std::path::Path) -> Vec<Str
         let shown = entry.path().strip_prefix(root).unwrap_or(entry.path());
         for (line_idx, line) in content.lines().enumerate() {
             if re.is_match(line) {
-                results.push(format!("{}:{}: {}", shown.display(), line_idx + 1, line.trim_end()));
+                results.push(format!(
+                    "{}:{}: {}",
+                    shown.display(),
+                    line_idx + 1,
+                    line.trim_end()
+                ));
                 if results.len() >= MAX_MATCHES {
                     results.push(format!("... (results truncated to {MAX_MATCHES} matches)"));
                     return results;
