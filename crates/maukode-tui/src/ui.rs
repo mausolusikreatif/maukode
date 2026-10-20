@@ -72,6 +72,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             app.spinner(),
             chunks[3],
         );
+        draw_mention_popup(f, app, chunks[3], chunks[2]);
     } else {
         draw_header(f, app, chunks[0]);
         draw_messages(
@@ -91,6 +92,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             app.spinner(),
             chunks[2],
         );
+        draw_mention_popup(f, app, chunks[2], chunks[1]);
     }
 
     // Active modal overlays
@@ -219,6 +221,14 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         }
         left_spans.push(Span::styled(" │ ", theme::border_style()));
         left_spans.push(Span::styled(text, theme::dim_style()));
+    }
+
+    if !app.queued_prompts.is_empty() {
+        left_spans.push(Span::styled(" │ ", theme::border_style()));
+        left_spans.push(Span::styled(
+            format!("{} queued", app.queued_prompts.len()),
+            Style::default().fg(COLOR_AMBER),
+        ));
     }
 
     if let Some((ref status, _)) = app.status_message {
@@ -606,6 +616,49 @@ fn wrapped_input(input: &str, cursor_pos: usize, width: u16) -> (Vec<String>, us
     (rows, cursor.0, cursor.1.min(width.saturating_sub(1)))
 }
 
+/// `@file` completions, drawn over the bottom of the chat (`above`) right above the prompt.
+fn draw_mention_popup(f: &mut Frame, app: &App, input_area: Rect, above: Rect) {
+    let Some(popup) = &app.mention else {
+        return;
+    };
+    let lines: Vec<Line> = if app.file_index.is_none() {
+        vec![Line::from(Span::styled(" Listing files…", theme::dim_style()))]
+    } else if popup.matches.is_empty() {
+        vec![Line::from(Span::styled(" No matching files", theme::dim_style()))]
+    } else {
+        popup
+            .matches
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let style = if i == popup.selected {
+                    theme::brand_style().add_modifier(ratatui::style::Modifier::REVERSED)
+                } else {
+                    theme::text_style()
+                };
+                Line::from(Span::styled(format!(" {path} "), style))
+            })
+            .collect()
+    };
+    let height = (lines.len() as u16 + 2).min(above.height);
+    if height < 3 {
+        return;
+    }
+    let width = input_area.width.min(72);
+    let area = Rect {
+        x: input_area.x,
+        y: input_area.y.saturating_sub(height),
+        width,
+        height,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border_style())
+        .title(Span::styled(" @file  ↑↓ Tab ", theme::dim_style()));
+    f.render_widget(ratatui::widgets::Clear, area);
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
 fn draw_input(
     f: &mut Frame,
     input: &str,
@@ -676,6 +729,10 @@ fn draw_input(
     // Row 2: Contextual hotkey bar
     let hints = if is_busy {
         vec![
+            Span::styled("Enter ", theme::brand_style()),
+            Span::styled("Queue  ", theme::dim_style()),
+            Span::styled("Alt+Enter ", theme::brand_style()),
+            Span::styled("Steer  ", theme::dim_style()),
             Span::styled("Esc ", Style::default().fg(COLOR_AMBER)),
             Span::styled("Cancel  ", theme::dim_style()),
             Span::styled("^C ", Style::default().fg(COLOR_RED)),
@@ -683,8 +740,8 @@ fn draw_input(
         ]
     } else {
         vec![
-            Span::styled("Tab ", theme::brand_style()),
-            Span::styled("Autocomplete  ", theme::dim_style()),
+            Span::styled("@ ", theme::brand_style()),
+            Span::styled("File  ", theme::dim_style()),
             Span::styled("/model ", Style::default().fg(COLOR_TOOL)),
             Span::styled("Model  ", theme::dim_style()),
             Span::styled("/provider ", Style::default().fg(COLOR_CYAN)),

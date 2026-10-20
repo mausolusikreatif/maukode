@@ -177,7 +177,17 @@ maukode init --force   # overwrite an existing AGENTS.md
 
 ```bash
 maukode run "refactor the error handling in crates/maukode-core/src/runner.rs"
+
+# For CI and scripts: one JSON result object (stream-json: every event as a JSON line first)
+maukode run --output json "update the changelog for the last release" | jq .result
+maukode run --output stream-json --permission-mode trust "run the test suite and fix failures"
 ```
+
+With `--output json` or `stream-json`, only JSON is printed. The result object holds
+`session_id`, `stop_reason`, `is_error`, `result` (the assistant's text), `tool_calls`,
+`denied_permissions`, `errors`, and `usage` (tokens and `cost_microusd`). Calls that need approval
+are denied, because nobody can answer the prompt; `--permission-mode` (for example `trust`)
+changes that for this run. The exit code is 1 when the turn failed.
 
 ### Daemon management
 
@@ -239,6 +249,8 @@ Available in the TUI and the CLI REPL:
 | `/map`, `/repomap` | Open the Tree-Sitter code map viewer. |
 | `/mcp` | List connected MCP servers and their tools. |
 | `/compact` | Summarize older history to free context. |
+| `/steer <text>` | Add guidance to the running turn (also `Alt+Enter`). |
+| `/queue [run\|clear]` | List prompts queued during a turn (`Enter` while it runs), send the next, or drop them. |
 | `/plan` | Toggle the plan widget (also `F2`). |
 | `/subagents`, `/subagent` | Open the subagent trace viewer. |
 | `/audit` | Show the session's permission and compaction audit log. |

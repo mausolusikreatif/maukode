@@ -106,11 +106,11 @@ over; they are listed as **planned** again below.
 | Milestone | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | M1 Plan widget | **done** | `PlanCreated`/`PlanStepUpdated`, `/plan`, `F2`, `draw_plan_widget` |
-| M2 Steering and queueing | **planned** | input is rejected while `App::is_running`; daemon support exists |
+| M2 Steering and queueing | **done** | `App::steer`, `App::queue_prompt` (`Alt+Enter` / `/steer`, `Enter` queues while a turn runs, `/queue`); the queue is kept in the TUI and continues after a completed turn |
 | M3 Session explorer | **partial** | `/sessions` filtered selector; no pin/archive/filter chips |
 | M4 Subagent stream cards | **done** | `Subagent*` events rendered in `ui.rs` |
 | M5 Subagent trace modal | **done** | `ActiveModal::SubagentViewer` |
-| M6 `@file` / `#symbol` autocomplete | **planned** | — |
+| M6 `@file` / `#symbol` autocomplete | **partial** | `@file` completion in `mention.rs` (fuzzy, `.gitignore`-aware, `maukode_tools::workspace_files`); no `#symbol` |
 | Concurrent subagent switching, split-pane layout | **planned** | — |
 
 ---
@@ -200,12 +200,12 @@ Remaining risks, by design or not yet addressed:
 
 Done in #89: usage and cost per session, extended thinking for Anthropic (with signature round
 trips), and image input. Done in #90: `apply_patch`, hooks, and pattern-based permission rules.
-Remaining:
+Done in #91: `maukode run --output json|stream-json` and TUI steering, queueing and `@file`
+completion. Remaining:
 
-1. A JSON output mode for `maukode run` for CI and scripts.
-2. TUI parity: steering/queueing and `@file` autocomplete (M2, M6).
-3. Restore web UI features lost in the rebuild (command palette, open in editor, archive).
-4. Turn an approval into a permission rule from the prompt ("always allow `npm run *`").
+1. Restore web UI features lost in the rebuild (command palette, open in editor, archive).
+2. Turn an approval into a permission rule from the prompt ("always allow `npm run *`").
+3. Images from the TUI, `maukode run`, and `read_file`; `#symbol` completion in the TUI.
 
 ---
 

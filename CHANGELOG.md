@@ -113,6 +113,17 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **`maukode run --output json|stream-json`** untuk CI dan skrip. Mode `json` mencetak satu objek
+  hasil (teks akhir, stop reason, tool call, izin yang ditolak, error, dan usage beserta biaya).
+  Mode `stream-json` mencetak setiap event sebagai satu baris JSON, lalu objek hasilnya. Di kedua
+  mode, panggilan yang butuh izin otomatis ditolak; `--permission-mode` mengubahnya untuk run
+  tersebut. Exit code 1 bila turn gagal.
+- **TUI: steering, antrean, dan autocomplete `@file`**:
+  - `Enter` saat agen bekerja mengantrekan prompt, yang lalu dikirim berurutan setelah turn
+    selesai. `/queue` menampilkan, menjalankan, atau mengosongkan antrean.
+  - `Alt+Enter` atau `/steer` menyisipkan arahan ke turn yang sedang berjalan.
+  - Mengetik `@` membuka daftar file workspace dengan pencocokan fuzzy yang menghormati
+    `.gitignore`.
 - **Tool `apply_patch`**: menambah, mengubah, menghapus, dan memindahkan beberapa file sekaligus
   dalam satu panggilan dengan format `*** Begin Patch`. Semua hunk diperiksa dulu, sehingga patch
   diterapkan seluruhnya atau tidak sama sekali.
