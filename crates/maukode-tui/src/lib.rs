@@ -78,14 +78,13 @@ async fn run_loop<B: ratatui::backend::Backend>(
 
     while !app.should_quit {
         if let Some(event) = events.next().await {
-            // Tick events only animate an active turn. Avoid redrawing the full terminal while idle.
-            let mut needs_draw = !matches!(&event, AppEvent::Tick) || app.is_running;
+            let mut needs_draw = wants_draw(app, &event);
             handle_app_event(app, event);
 
             // Drain any pending events that arrived in the same batch
             // (e.g. streaming tokens, rapid typing, or tick queue)
             while let Some(buffered) = events.try_next() {
-                needs_draw |= !matches!(&buffered, AppEvent::Tick) || app.is_running;
+                needs_draw |= wants_draw(app, &buffered);
                 handle_app_event(app, buffered);
                 if app.should_quit {
                     break;
@@ -102,6 +101,22 @@ async fn run_loop<B: ratatui::backend::Backend>(
         }
     }
     Ok(())
+}
+
+/// Whether `event` needs a redraw of its own. Ticks only animate an active turn, so the terminal
+/// is not redrawn while idle. During a turn, ticks redraw every 50 ms, which also shows the
+/// streamed text: a frame per token would re-render the streaming message for every few
+/// characters.
+fn wants_draw(app: &App, event: &AppEvent) -> bool {
+    match event {
+        AppEvent::Tick => app.is_running,
+        AppEvent::LLM(
+            maukode_protocol::LLMEvent::TextDelta { .. }
+            | maukode_protocol::LLMEvent::ReasoningDelta { .. }
+            | maukode_protocol::LLMEvent::ToolCallDelta { .. },
+        ) => !app.is_running,
+        _ => true,
+    }
 }
 
 fn handle_app_event(app: &mut App, event: AppEvent) {

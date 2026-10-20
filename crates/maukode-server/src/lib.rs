@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod client;
+pub mod coalesce;
 pub mod daemon;
 pub mod middleware;
 pub mod routes;
@@ -29,7 +30,7 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            bind_addr: "127.0.0.1:4096".parse().unwrap(),
+            bind_addr: SocketAddr::from(([127, 0, 0, 1], 4096)),
             auth_token: None,
             default_dir: None,
             web_dir: None,

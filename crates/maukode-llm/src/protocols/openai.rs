@@ -166,6 +166,31 @@ fn gateway_error_message(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// Add the per-turn context at the end of the last user or tool message, so providers that cache
+/// prompt prefixes reuse everything before it across turns. Without one it joins the system
+/// prompt.
+fn append_turn_context(messages: &mut Vec<serde_json::Value>, request: &LLMRequest) {
+    let Some(note) = request.turn_context_note() else {
+        return;
+    };
+    let last = messages
+        .last_mut()
+        .filter(|m| m["role"] == "user" || m["role"] == "tool");
+    if let Some(content) = last.and_then(|m| m.get_mut("content")) {
+        let text = content.as_str().unwrap_or_default();
+        *content = json!(format!("{text}\n\n{note}"));
+        return;
+    }
+    let suffix = request.system_suffix.as_deref().unwrap_or_default();
+    match messages.first_mut().filter(|m| m["role"] == "system") {
+        Some(system) => {
+            let prompt = system["content"].as_str().unwrap_or_default();
+            system["content"] = json!(format!("{prompt}\n{suffix}"));
+        }
+        None => messages.insert(0, json!({ "role": "system", "content": suffix })),
+    }
+}
+
 fn is_stream_terminator(data: &str) -> bool {
     data.trim() == "[DONE]"
 }
@@ -219,7 +244,7 @@ impl LLMClient for OpenAIClient {
     async fn stream(&self, request: LLMRequest) -> Result<LLMStream, LLMError> {
         let mut messages = Vec::new();
 
-        if let Some(sys) = request.full_system_prompt() {
+        if let Some(sys) = request.system_prompt.as_deref().filter(|p| !p.is_empty()) {
             messages.push(json!({
                 "role": "system",
                 "content": sys
@@ -272,6 +297,8 @@ impl LLMClient for OpenAIClient {
                 messages.push(obj);
             }
         }
+
+        append_turn_context(&mut messages, &request);
 
         let tools: Vec<serde_json::Value> = request
             .tools
@@ -398,6 +425,33 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn turn_context_goes_to_the_last_tool_or_user_message() {
+        let request = LLMRequest::new("model", Vec::new())
+            .with_system_prompt("stable")
+            .with_system_suffix("today");
+        let mut messages = vec![
+            json!({"role": "system", "content": "stable"}),
+            json!({"role": "user", "content": "question"}),
+            json!({"role": "tool", "tool_call_id": "c1", "content": "result"}),
+        ];
+        append_turn_context(&mut messages, &request);
+        assert_eq!(messages[0]["content"], "stable");
+        assert_eq!(messages[1]["content"], "question");
+        assert_eq!(
+            messages[2]["content"],
+            "result\n\n<maukode-context>\ntoday\n</maukode-context>"
+        );
+
+        let mut messages = vec![
+            json!({"role": "system", "content": "stable"}),
+            json!({"role": "assistant", "content": "partial"}),
+        ];
+        append_turn_context(&mut messages, &request);
+        assert_eq!(messages[0]["content"], "stable\ntoday");
+        assert_eq!(messages[1]["content"], "partial");
+    }
 
     #[test]
     fn fragmented_tool_name_and_arguments_are_assembled() {

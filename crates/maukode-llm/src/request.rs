@@ -7,8 +7,10 @@ pub struct LLMRequest {
     pub model: String,
     pub messages: Vec<Message>,
     pub system_prompt: Option<String>,
-    /// The part of the system prompt that changes between turns (date, recalled memories). It
-    /// is sent after `system_prompt` so that the stable part stays a cacheable prefix.
+    /// Context that changes between turns (date, recalled memories). Adapters send it after the
+    /// conversation, as [`Self::turn_context_note`] appended to the last user message, so that
+    /// the tools, the system prompt and the whole history before it stay a cacheable prefix
+    /// across turns. When there is no user message to append it to, it follows the system prompt.
     #[serde(default)]
     pub system_suffix: Option<String>,
     pub tools: Vec<ToolDefinition>,
@@ -40,13 +42,11 @@ impl LLMRequest {
         self
     }
 
-    /// The whole system prompt for providers that take it as one string.
-    pub fn full_system_prompt(&self) -> Option<String> {
-        match (&self.system_prompt, &self.system_suffix) {
-            (Some(prompt), Some(suffix)) => Some(format!("{prompt}\n{suffix}")),
-            (Some(text), None) | (None, Some(text)) => Some(text.clone()),
-            (None, None) => None,
-        }
+    /// `system_suffix` as the note adapters append to the last user message.
+    pub fn turn_context_note(&self) -> Option<String> {
+        self.system_suffix
+            .as_deref()
+            .map(|context| format!("<maukode-context>\n{}\n</maukode-context>", context.trim()))
     }
 
     pub fn with_tools(mut self, tools: Vec<ToolDefinition>) -> Self {

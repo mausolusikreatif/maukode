@@ -63,6 +63,12 @@ pub trait Tool: Send + Sync {
         ToolSource::Native
     }
 
+    /// Whether `ask` mode confirms every call of this tool with the user. Native tools rely on the
+    /// path jail and the bash risk assessment instead; MCP tools run code MauKode cannot inspect.
+    fn requires_confirmation(&self) -> bool {
+        false
+    }
+
     /// Rough size of this tool's schema/description in tokens. Used by the registry to reason about
     /// how much prompt budget a tool group consumes; `None` means "unknown/negligible".
     fn token_cost(&self) -> Option<usize> {

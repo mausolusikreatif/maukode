@@ -46,6 +46,12 @@ fn session_entry(tool_name: &str, key: &str) -> String {
     format!("{tool_name}\u{0}{key}")
 }
 
+/// Session whitelist entry for every call of a tool, whatever its arguments. Keys are trimmed
+/// and never contain NUL, so this cannot collide with a [`session_entry`].
+fn session_tool_entry(tool_name: &str) -> String {
+    format!("{tool_name}\u{0}\u{0}*")
+}
+
 #[derive(Clone)]
 pub struct PermissionManager {
     mode: Arc<AtomicU8>,
@@ -116,9 +122,10 @@ impl PermissionManager {
         }
 
         let session_guard = self.session_whitelists.lock().await;
-        session_guard
-            .get(session_id)
-            .is_some_and(|set| set.contains(&session_entry(tool_name, trimmed)))
+        session_guard.get(session_id).is_some_and(|set| {
+            set.contains(&session_entry(tool_name, trimmed))
+                || set.contains(&session_tool_entry(tool_name))
+        })
     }
 
     /// Allow `tool_name` with exactly this `key` for the rest of the session.
@@ -128,6 +135,15 @@ impl PermissionManager {
             .entry(session_id.to_string())
             .or_default()
             .insert(session_entry(tool_name, key.trim()));
+    }
+
+    /// Allow every call of `tool_name` for the rest of the session, whatever its arguments.
+    pub async fn whitelist_session_tool(&self, session_id: &str, tool_name: &str) {
+        let mut session_guard = self.session_whitelists.lock().await;
+        session_guard
+            .entry(session_id.to_string())
+            .or_default()
+            .insert(session_tool_entry(tool_name));
     }
 
     /// Register a pending permission request and obtain a receiver
@@ -211,6 +227,20 @@ mod tests {
                 "{refused} must not be whitelisted"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn session_tool_approval_covers_any_arguments_of_that_tool_only() {
+        let manager = PermissionManager::new(PermissionMode::Ask);
+        manager.whitelist_session_tool("s", "mcp__srv__run").await;
+        assert!(manager.is_whitelisted("s", "mcp__srv__run", "{}").await);
+        assert!(
+            manager
+                .is_whitelisted("s", "mcp__srv__run", r#"{"x":1}"#)
+                .await
+        );
+        assert!(!manager.is_whitelisted("s", "mcp__srv__other", "{}").await);
+        assert!(!manager.is_whitelisted("other", "mcp__srv__run", "{}").await);
     }
 
     #[tokio::test]

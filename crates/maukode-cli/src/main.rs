@@ -296,13 +296,13 @@ async fn main() -> anyhow::Result<()> {
         let same = |p: &PathBuf| p.canonicalize().is_ok_and(|p| p == dir);
         if revoke {
             config.security.trusted_projects.retain(|p| !same(p));
-            config.save()?;
+            config.save_trusted_projects()?;
             println!("Removed {} from the trusted projects.", dir.display());
         } else if config.security.trusted_projects.iter().any(same) {
             println!("{} is already trusted.", dir.display());
         } else {
             config.security.trusted_projects.push(dir.clone());
-            config.save()?;
+            config.save_trusted_projects()?;
             println!(
                 "Trusted {}: its mcp.json may now start MCP servers.",
                 dir.display()

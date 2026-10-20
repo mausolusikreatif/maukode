@@ -34,7 +34,7 @@ impl ChatGptClient {
 
 fn build_body(request: &LLMRequest) -> Value {
     let mut input = Vec::new();
-    let mut instructions = request.full_system_prompt().unwrap_or_default();
+    let mut instructions = request.system_prompt.clone().unwrap_or_default();
     for message in &request.messages {
         for part in &message.parts {
             if let ContentPart::ProviderItem { value } = part {
@@ -74,6 +74,25 @@ fn build_body(request: &LLMRequest) -> Value {
                     "output": result.content,
                 })),
             }
+        }
+    }
+    // The per-turn context goes last so the instructions and the earlier input stay a cacheable
+    // prefix across turns. A conversation ending with an assistant message keeps it in the
+    // instructions instead.
+    if let Some(note) = request.turn_context_note() {
+        let ends_with_assistant = request
+            .messages
+            .last()
+            .is_some_and(|m| m.role == Role::Assistant);
+        if ends_with_assistant {
+            if let Some(suffix) = &request.system_suffix {
+                if !instructions.is_empty() {
+                    instructions.push('\n');
+                }
+                instructions.push_str(suffix);
+            }
+        } else {
+            input.push(json!({ "role": "user", "content": note }));
         }
     }
     let mut body = json!({
@@ -336,7 +355,8 @@ mod tests {
                 },
             ],
         )
-        .with_system_prompt("Be helpful");
+        .with_system_prompt("Be helpful")
+        .with_system_suffix("today");
         let body = build_body(&request);
         assert_eq!(body["store"], false);
         assert_eq!(body["stream"], true);
@@ -347,6 +367,11 @@ mod tests {
         assert_eq!(body["input"][2]["name"], "grep");
         assert_eq!(body["input"][2]["namespace"], "maukode");
         assert_eq!(body["input"][3]["type"], "function_call_output");
+        assert_eq!(body["input"][4]["role"], "user");
+        assert_eq!(
+            body["input"][4]["content"],
+            "<maukode-context>\ntoday\n</maukode-context>"
+        );
         assert!(body.get("temperature").is_none());
         assert!(body.get("max_output_tokens").is_none());
     }

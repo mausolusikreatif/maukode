@@ -127,12 +127,12 @@ below).
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `permission_mode` | `string` | `"ask"` | `"ask"` prompts for `bash` commands that the risk assessment flags (`rm -rf`, `sudo`, destructive git, secret access, …); unknown commands and other tools run without a prompt. `"strict"` and `"review"` prompt for every tool call (they currently behave the same). `"trust"` never prompts. Change at runtime with `/permission <mode>`. |
+| `permission_mode` | `string` | `"ask"` | `"ask"` prompts for `bash` commands that the risk assessment flags (`rm -rf`, `sudo`, destructive git, secret access, …) and for MCP tools (except those the server marks `readOnlyHint`; "allow for this session" then covers that tool with any arguments); unknown commands and the other built-in tools run without a prompt. `"strict"` and `"review"` prompt for every tool call (they currently behave the same). `"trust"` never prompts. Change at runtime with `/permission <mode>`. |
 | `jail_path_traversal` | `bool` | `true` | Confine file tools (`read_file`, `write_file`, `edit_file`, `glob`, `grep`) to the workspace. Does not affect `bash`. |
 | `allowed_external_paths` | `array` | `[]` | Extra directories the file tools may access outside the workspace. |
 | `sandbox_mode` | `string` | `"path_jail"` | How `bash` runs on the host backend: `"path_jail"` or `"off"` (an ordinary host process), `"bubblewrap"` (Linux, needs `bwrap`), or `"auto"` (bubblewrap when available, otherwise `"path_jail"`). |
 | `bash_whitelist` | `array` | `["cargo *", "git status", "git diff", "npm test"]` | `bash` commands that skip approval in any mode, unless the risk assessment rates them dangerous. Entries match one simple command (no `;`, `&&`, `\|`, redirection, `$(…)`, subshell, or newline) word by word: `git status` matches exactly; `cargo *` matches `cargo` with any arguments; `git log*` also lets the last word continue (`git log --oneline`). A leading `VAR=value` never matches. |
-| `trusted_projects` | `array` | `[]` | Folders (and their subfolders) whose own `mcp.json` / `.maukode/mcp.json` may start MCP servers. Add the current folder with `maukode trust`, remove it with `maukode trust --revoke`. Takes effect without restarting the daemon. |
+| `trusted_projects` | `array` | `[]` | Folders (and their subfolders) whose own `mcp.json` / `.maukode/mcp.json` may start MCP servers. Add the current folder with `maukode trust`, remove it with `maukode trust --revoke`. Takes effect without restarting the daemon. Only `maukode trust` writes this list; other saves (the daemon's settings API, the CLI) keep what is on disk. |
 
 ## 📦 Execution Backend
 

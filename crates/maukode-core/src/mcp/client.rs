@@ -5,7 +5,7 @@ use maukode_tools::{sandboxed_command, SandboxMode};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -13,6 +13,20 @@ use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<serde_json::Value, String>>>>>;
+
+/// The answer to a request the server sent us. Only `ping` is supported: this client offers no
+/// other capabilities (sampling, roots, elicitation).
+fn server_request_reply(id: &serde_json::Value, method: &str) -> serde_json::Value {
+    if method == "ping" {
+        serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": {} })
+    } else {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32601, "message": format!("Method not found: {method}") },
+        })
+    }
+}
 
 pub struct McpClient {
     name: String,
@@ -23,8 +37,10 @@ pub struct McpClient {
     pending_requests: PendingRequests,
     next_id: AtomicU64,
     child: Arc<Mutex<Option<Child>>>,
-    /// The server's tool list, fetched once per connection (it is read on every prompt).
-    tools: tokio::sync::OnceCell<Vec<McpToolDefinition>>,
+    /// The server's tool list, read on every prompt. Fetched once and again only after the
+    /// server sends `notifications/tools/list_changed`.
+    tools: Mutex<Option<Vec<McpToolDefinition>>>,
+    tools_stale: Arc<AtomicBool>,
 }
 
 impl McpClient {
@@ -109,6 +125,9 @@ impl McpClient {
         let pending_requests: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
         let pending_map = Arc::clone(&pending_requests);
         let s_name = name.clone();
+        let tools_stale = Arc::new(AtomicBool::new(false));
+        let stale_flag = Arc::clone(&tools_stale);
+        let reply_tx = stdin_tx.clone();
 
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -119,7 +138,21 @@ impl McpClient {
                 }
 
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    if let Some(id) = val.get("id").and_then(|v| v.as_u64()) {
+                    // Requests and notifications from the server carry a method; responses do not.
+                    if let Some(method) = val.get("method").and_then(|m| m.as_str()) {
+                        match val.get("id") {
+                            Some(id) => {
+                                let reply = server_request_reply(id, method);
+                                let _ = reply_tx.send(reply.to_string()).await;
+                            }
+                            None if method == "notifications/tools/list_changed" => {
+                                stale_flag.store(true, Ordering::Release);
+                            }
+                            None => {
+                                tracing::trace!("[MCP:{}:notification] {}", s_name, trimmed);
+                            }
+                        }
+                    } else if let Some(id) = val.get("id").and_then(|v| v.as_u64()) {
                         let sender = {
                             let mut map = pending_map.lock().await;
                             map.remove(&id)
@@ -138,9 +171,6 @@ impl McpClient {
                                 let _ = tx.send(Ok(serde_json::Value::Null));
                             }
                         }
-                    } else {
-                        // Might be a server notification
-                        tracing::trace!("[MCP:{}:notification] {}", s_name, trimmed);
                     }
                 }
             }
@@ -154,7 +184,8 @@ impl McpClient {
             child: Arc::new(Mutex::new(Some(child))),
             signature: Self::signature_of(config),
             sandbox,
-            tools: tokio::sync::OnceCell::new(),
+            tools: Mutex::new(None),
+            tools_stale,
         };
 
         // 4. Perform MCP initialize handshake
@@ -255,12 +286,25 @@ impl McpClient {
         Ok(init_result)
     }
 
-    /// Query tools/list from MCP server
+    /// The server's tools: the cached list, fetched again after the server reported a change.
     pub async fn list_tools(&self) -> Result<Vec<McpToolDefinition>> {
-        self.tools
-            .get_or_try_init(|| self.fetch_tools())
-            .await
-            .cloned()
+        let mut cached = self.tools.lock().await;
+        // Cleared before fetching, so a change reported during the fetch triggers another one.
+        let stale = self.tools_stale.swap(false, Ordering::AcqRel);
+        if let Some(tools) = cached.as_ref().filter(|_| !stale) {
+            return Ok(tools.clone());
+        }
+        let tools = match self.fetch_tools().await {
+            Ok(tools) => tools,
+            Err(error) => {
+                if stale {
+                    self.tools_stale.store(true, Ordering::Release);
+                }
+                return Err(error);
+            }
+        };
+        *cached = Some(tools.clone());
+        Ok(tools)
     }
 
     async fn fetch_tools(&self) -> Result<Vec<McpToolDefinition>> {

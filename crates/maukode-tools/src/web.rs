@@ -4,8 +4,18 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+
+/// A regex compiled once, on first use. The patterns are constants exercised by this module's
+/// tests, so one that does not compile is a bug caught there, not a runtime condition.
+macro_rules! static_regex {
+    ($pattern:expr $(,)?) => {{
+        static RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new($pattern).expect("constant regex compiles"));
+        &*RE
+    }};
+}
 
 /// Structured search result entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -606,7 +616,7 @@ impl Tool for FetchWebContentTool {
 /// Convert raw HTML into clean, token-efficient Markdown
 pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
     // 1. Extract <title> if present
-    let title_re = Regex::new(r"(?is)<title[^>]*>(.*?)</title>").unwrap();
+    let title_re = static_regex!(r"(?is)<title[^>]*>(.*?)</title>");
     let title = title_re
         .captures(html)
         .and_then(|c| c.get(1))
@@ -614,32 +624,34 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
         .unwrap_or_default();
 
     // 2. Strip unwanted sections: <head>, <script>, <style>, <noscript>, <svg>, <nav>, <footer>, <header>, <aside>
-    let strip_patterns = [
-        r"(?is)<head[^>]*>.*?</head>",
-        r"(?is)<script[^>]*>.*?</script>",
-        r"(?is)<style[^>]*>.*?</style>",
-        r"(?is)<noscript[^>]*>.*?</noscript>",
-        r"(?is)<svg[^>]*>.*?</svg>",
-        r"(?is)<canvas[^>]*>.*?</canvas>",
-        r"(?is)<header[^>]*>.*?</header>",
-        r"(?is)<footer[^>]*>.*?</footer>",
-        r"(?is)<nav[^>]*>.*?</nav>",
-        r"(?is)<aside[^>]*>.*?</aside>",
-        r"(?is)<!--.*?-->",
-    ];
+    static STRIP: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+        [
+            r"(?is)<head[^>]*>.*?</head>",
+            r"(?is)<script[^>]*>.*?</script>",
+            r"(?is)<style[^>]*>.*?</style>",
+            r"(?is)<noscript[^>]*>.*?</noscript>",
+            r"(?is)<svg[^>]*>.*?</svg>",
+            r"(?is)<canvas[^>]*>.*?</canvas>",
+            r"(?is)<header[^>]*>.*?</header>",
+            r"(?is)<footer[^>]*>.*?</footer>",
+            r"(?is)<nav[^>]*>.*?</nav>",
+            r"(?is)<aside[^>]*>.*?</aside>",
+            r"(?is)<!--.*?-->",
+        ]
+        .iter()
+        .filter_map(|pattern| Regex::new(pattern).ok())
+        .collect()
+    });
 
     let mut text = html.to_string();
-    for pattern in &strip_patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            text = re.replace_all(&text, "").to_string();
-        }
+    for re in STRIP.iter() {
+        text = re.replace_all(&text, "").to_string();
     }
 
     // 3. Convert code blocks (<pre><code>...</code></pre> and <pre>...</pre>)
-    let pre_code_re = Regex::new(
-        r"(?is)<pre[^>]*><code(?: class=[^>]*language-([a-zA-Z0-9_-]+)[^>]*)?>(.*?)</code></pre>",
-    )
-    .unwrap();
+    let pre_code_re = static_regex!(
+        r"(?is)<pre[^>]*><code(?: class=[^>]*language-([a-zA-Z0-9_-]+)[^>]*)?>(.*?)</code></pre>"
+    );
     text = pre_code_re
         .replace_all(&text, |caps: &regex::Captures| {
             let lang = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -648,7 +660,7 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
         })
         .to_string();
 
-    let pre_re = Regex::new(r"(?is)<pre[^>]*>(.*?)</pre>").unwrap();
+    let pre_re = static_regex!(r"(?is)<pre[^>]*>(.*?)</pre>");
     text = pre_re
         .replace_all(&text, |caps: &regex::Captures| {
             let code = decode_html_entities(caps.get(1).map(|m| m.as_str()).unwrap_or(""));
@@ -657,7 +669,7 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
         .to_string();
 
     // 4. Convert inline code
-    let code_re = Regex::new(r"(?is)<code[^>]*>(.*?)</code>").unwrap();
+    let code_re = static_regex!(r"(?is)<code[^>]*>(.*?)</code>");
     text = code_re
         .replace_all(&text, |caps: &regex::Captures| {
             let code = decode_html_entities(caps.get(1).map(|m| m.as_str()).unwrap_or(""));
@@ -666,9 +678,15 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
         .to_string();
 
     // 5. Convert headings <h1> - <h6>
-    for i in 1..=6 {
-        let h_re = Regex::new(&format!(r"(?is)<h{i}[^>]*>(.*?)</h{i}>")).unwrap();
-        let hashes = "#".repeat(i);
+    static HEADINGS: LazyLock<Vec<(String, Regex)>> = LazyLock::new(|| {
+        (1..=6)
+            .filter_map(|i| {
+                let re = Regex::new(&format!(r"(?is)<h{i}[^>]*>(.*?)</h{i}>")).ok()?;
+                Some(("#".repeat(i), re))
+            })
+            .collect()
+    });
+    for (hashes, h_re) in HEADINGS.iter() {
         text = h_re
             .replace_all(&text, |caps: &regex::Captures| {
                 let inner = strip_html_tags(caps.get(1).map(|m| m.as_str()).unwrap_or(""));
@@ -678,7 +696,7 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
     }
 
     // 6. Convert links <a href="URL">TEXT</a>
-    let a_re = Regex::new(r#"(?is)<a [^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>"#).unwrap();
+    let a_re = static_regex!(r#"(?is)<a [^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>"#);
     text = a_re
         .replace_all(&text, |caps: &regex::Captures| {
             let href = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -698,7 +716,7 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
         .to_string();
 
     // 7. Convert list items <li>
-    let li_re = Regex::new(r"(?is)<li[^>]*>(.*?)</li>").unwrap();
+    let li_re = static_regex!(r"(?is)<li[^>]*>(.*?)</li>");
     text = li_re
         .replace_all(&text, |caps: &regex::Captures| {
             let inner = strip_html_tags(caps.get(1).map(|m| m.as_str()).unwrap_or(""));
@@ -707,7 +725,7 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
         .to_string();
 
     // 8. Convert paragraphs <p> and breaks <br>
-    let p_re = Regex::new(r"(?is)<p[^>]*>(.*?)</p>").unwrap();
+    let p_re = static_regex!(r"(?is)<p[^>]*>(.*?)</p>");
     text = p_re
         .replace_all(&text, |caps: &regex::Captures| {
             let inner = strip_html_tags(caps.get(1).map(|m| m.as_str()).unwrap_or(""));
@@ -715,7 +733,7 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
         })
         .to_string();
 
-    let br_re = Regex::new(r"(?is)<br\s*/?>").unwrap();
+    let br_re = static_regex!(r"(?is)<br\s*/?>");
     text = br_re.replace_all(&text, "\n").to_string();
 
     // 9. Strip any remaining HTML tags
@@ -753,8 +771,9 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
 
 /// Helper to strip HTML tags while leaving inner text
 fn strip_html_tags(input: &str) -> String {
-    let re = Regex::new(r"<[^>]+>").unwrap();
-    re.replace_all(input, " ").to_string()
+    static_regex!(r"<[^>]+>")
+        .replace_all(input, " ")
+        .to_string()
 }
 
 /// Helper to decode HTML entities
@@ -796,7 +815,9 @@ fn parse_duckduckgo_html(html: &str, max_results: usize) -> Vec<SearchResultItem
 
     // Regex matching result blocks in DuckDuckGo HTML
     // Class names in DDG html: result__title, result__url, result__snippet
-    let result_block_re = Regex::new(r#"(?is)<div class="result[^"]*results_links[^"]*">.*?<a class="result__url"[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>.*?<a class="result__snippet"[^>]*>(.*?)</a>"#).unwrap();
+    let result_block_re = static_regex!(
+        r#"(?is)<div class="result[^"]*results_links[^"]*">.*?<a class="result__url"[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>.*?<a class="result__snippet"[^>]*>(.*?)</a>"#
+    );
 
     for caps in result_block_re.captures_iter(html) {
         if results.len() >= max_results {
@@ -826,7 +847,9 @@ fn parse_duckduckgo_html(html: &str, max_results: usize) -> Vec<SearchResultItem
 
     // Fallback regex matching simpler anchor structures if classes differed
     if results.is_empty() {
-        let fallback_re = Regex::new(r#"(?is)<a rel="nofollow" class="[^"]*result__snippet[^"]*"[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>"#).unwrap();
+        let fallback_re = static_regex!(
+            r#"(?is)<a rel="nofollow" class="[^"]*result__snippet[^"]*"[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>"#
+        );
         for caps in fallback_re.captures_iter(html) {
             if results.len() >= max_results {
                 break;

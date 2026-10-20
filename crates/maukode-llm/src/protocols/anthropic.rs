@@ -34,9 +34,9 @@ fn cache_breakpoint() -> Value {
 }
 
 /// Build the Messages API body. Three cache breakpoints are set, in prefix order: the last tool,
-/// the stable part of the system prompt, and the last message. Within a turn every step then
-/// reads the whole previous request from the cache; across turns at least the tools and the
-/// stable system prompt are reused.
+/// the system prompt, and the last message. The per-turn context follows the last breakpoint (at
+/// the end of the last user message), so every step, and the first step of the next turn, reads
+/// the whole earlier conversation from the cache.
 fn build_body(request: &LLMRequest) -> Value {
     let mut messages = Vec::new();
     for msg in &request.messages {
@@ -75,7 +75,20 @@ fn build_body(request: &LLMRequest) -> Value {
 
         messages.push(json!({ "role": role, "content": contents }));
     }
-    if let Some(block) = messages
+    let last_blocks = messages
+        .last_mut()
+        .filter(|m| m["role"] == "user")
+        .and_then(|m| m["content"].as_array_mut());
+    let mut system_suffix = request.system_suffix.as_deref();
+    if let Some(blocks) = last_blocks {
+        if let Some(block) = blocks.last_mut() {
+            block["cache_control"] = cache_breakpoint();
+        }
+        if let Some(note) = request.turn_context_note() {
+            blocks.push(json!({ "type": "text", "text": note }));
+            system_suffix = None;
+        }
+    } else if let Some(block) = messages
         .last_mut()
         .and_then(|m| m["content"].as_array_mut())
         .and_then(|blocks| blocks.last_mut())
@@ -102,7 +115,7 @@ fn build_body(request: &LLMRequest) -> Value {
     if let Some(prompt) = request.system_prompt.as_deref().filter(|p| !p.is_empty()) {
         system.push(json!({ "type": "text", "text": prompt, "cache_control": cache_breakpoint() }));
     }
-    if let Some(suffix) = &request.system_suffix {
+    if let Some(suffix) = system_suffix {
         system.push(json!({ "type": "text", "text": suffix }));
     }
 
@@ -139,13 +152,17 @@ impl StreamState {
         match val["type"].as_str().unwrap_or("") {
             "message_start" => {
                 if let Some(u) = val["message"]["usage"].as_object() {
-                    self.usage.input_tokens =
-                        u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
                     self.usage.cache_read_tokens =
                         u.get("cache_read_input_tokens").and_then(|v| v.as_u64());
                     self.usage.cache_write_tokens = u
                         .get("cache_creation_input_tokens")
                         .and_then(|v| v.as_u64());
+                    // Anthropic counts cached tokens separately; `TokenUsage::input_tokens` is
+                    // the whole prompt, as with the other providers.
+                    self.usage.input_tokens =
+                        u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+                            + self.usage.cache_read_tokens.unwrap_or(0)
+                            + self.usage.cache_write_tokens.unwrap_or(0);
                 }
                 Vec::new()
             }
@@ -328,11 +345,38 @@ mod tests {
         assert_eq!(body["tools"][1]["cache_control"]["type"], "ephemeral");
         assert_eq!(body["system"][0]["text"], "stable");
         assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
-        assert_eq!(body["system"][1]["text"], "today");
-        assert!(body["system"][1].get("cache_control").is_none());
+        assert!(body["system"].get(1).is_none());
         assert!(body["messages"][0]["content"][0]
             .get("cache_control")
             .is_none());
+        assert_eq!(
+            body["messages"][1]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        // The per-turn context comes after the last breakpoint.
+        let note = &body["messages"][1]["content"][1];
+        assert_eq!(note["text"], "<maukode-context>\ntoday\n</maukode-context>");
+        assert!(note.get("cache_control").is_none());
+    }
+
+    #[test]
+    fn turn_context_follows_the_system_prompt_without_a_trailing_user_message() {
+        let request = LLMRequest::new(
+            "model",
+            vec![
+                Message::user("question"),
+                Message::assistant_text("Partial"),
+            ],
+        )
+        .with_system_prompt("stable")
+        .with_system_suffix("today");
+        let body = build_body(&request);
+
+        assert_eq!(body["system"][1]["text"], "today");
+        assert_eq!(
+            body["messages"][1]["content"].as_array().map(Vec::len),
+            Some(1)
+        );
         assert_eq!(
             body["messages"][1]["content"][0]["cache_control"]["type"],
             "ephemeral"
@@ -343,7 +387,7 @@ mod tests {
     fn stream_reports_usage_and_tool_calls() {
         let mut state = StreamState::default();
         state.consume(&json!({"type": "message_start", "message": {"usage": {
-            "input_tokens": 10, "cache_read_input_tokens": 90
+            "input_tokens": 10, "cache_read_input_tokens": 90, "cache_creation_input_tokens": 20
         }}}));
         state.consume(&json!({"type": "content_block_start", "content_block": {
             "type": "tool_use", "id": "t1", "name": "grep"
@@ -363,9 +407,10 @@ mod tests {
         assert!(matches!(
             end.as_slice(),
             [Ok(LLMEvent::Usage(usage)), Ok(LLMEvent::Finish { reason: FinishReason::ToolUse })]
-            if usage.input_tokens == 10
+            if usage.input_tokens == 120
                 && usage.output_tokens == 5
                 && usage.cache_read_tokens == Some(90)
+                && usage.cache_write_tokens == Some(20)
         ));
     }
 

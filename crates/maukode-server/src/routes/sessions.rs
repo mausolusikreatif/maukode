@@ -535,7 +535,7 @@ fn start_turn(
         let permission_mgr = state.permission_manager_for(id).await;
         let checkpoint_mgr = state.checkpoint_manager_for(&session_dir).await;
 
-        let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
+        let (llm_tx, llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
 
         // The workspace's context and knowledge store are kept across turns; only the memory
         // tools are registered again for this turn's registry.
@@ -600,6 +600,7 @@ fn start_turn(
                     .run_with_cancellation(Some(prompt), llm_tx, Some(cancellation_token))
                     .await
             });
+            let mut llm_rx = crate::coalesce::CoalescingReceiver::new(llm_rx);
 
             // Forward stream events; checkpoint progress to SQLite at most every 2s so a crash
             // costs seconds of work rather than the whole turn.

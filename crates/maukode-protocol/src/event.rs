@@ -42,12 +42,15 @@ impl StopReason {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TokenUsage {
+    /// The whole prompt, including the cached part.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub input_tokens: u64,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub output_tokens: u64,
+    /// The part of `input_tokens` read from the provider's prompt cache.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub cache_read_tokens: Option<u64>,
+    /// The part of `input_tokens` written to the provider's prompt cache.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub cache_write_tokens: Option<u64>,
 }

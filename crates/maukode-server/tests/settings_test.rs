@@ -313,7 +313,7 @@ async fn listing_mcp_servers_never_spawns_them_but_connect_does() {
         .security
         .trusted_projects
         .push(project.path().to_path_buf());
-    config.save().unwrap();
+    config.save_trusted_projects().unwrap();
 
     let (s, v) = app
         .call(M::GET, &format!("/api/v1/sessions/{id}/mcp"), None)
@@ -336,4 +336,45 @@ async fn listing_mcp_servers_never_spawns_them_but_connect_does() {
         .await;
     assert_eq!(s, 200);
     assert!(marker.exists(), "explicit connect spawns the server");
+}
+
+#[tokio::test]
+async fn a_daemon_saving_its_config_keeps_projects_trusted_while_it_ran() {
+    let _serial = SERIAL.lock().await;
+    let app = App::start().await;
+
+    // `maukode trust` runs in another process while the daemon is up.
+    let project = tempfile::tempdir().unwrap();
+    let mut cli_config = maukode_core::AppConfig::load();
+    cli_config
+        .security
+        .trusted_projects
+        .push(project.path().to_path_buf());
+    cli_config.save_trusted_projects().unwrap();
+
+    // The daemon then saves its older in-memory configuration.
+    let (s, _) = app
+        .call(
+            M::PUT,
+            "/api/v1/config/security",
+            Some(json!({ "permission_mode": "ask" })),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert!(maukode_core::AppConfig::is_trusted_project_on_disk(
+        project.path()
+    ));
+
+    // Revoking works the same way.
+    cli_config.security.trusted_projects.clear();
+    cli_config.save_trusted_projects().unwrap();
+    app.call(
+        M::PUT,
+        "/api/v1/config/security",
+        Some(json!({ "permission_mode": "ask" })),
+    )
+    .await;
+    assert!(!maukode_core::AppConfig::is_trusted_project_on_disk(
+        project.path()
+    ));
 }
