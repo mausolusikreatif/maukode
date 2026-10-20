@@ -70,6 +70,10 @@ pub struct SecurityConfig {
     /// untrusted repository must not run commands it ships. Add one with `maukode trust`.
     #[serde(default)]
     pub trusted_projects: Vec<PathBuf>,
+    /// Rules that allow, ask for, or deny tool calls by tool name, `bash` command, or path.
+    /// A matching `deny` wins over `ask`, which wins over `allow`, in every permission mode.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permission_rules: Vec<crate::permission::PermissionRule>,
 }
 
 impl SecurityConfig {
@@ -110,6 +114,7 @@ impl Default for SecurityConfig {
             sandbox_mode: SandboxMode::default(),
             bash_whitelist: default_whitelist(),
             trusted_projects: Vec::new(),
+            permission_rules: Vec::new(),
         }
     }
 }
@@ -239,6 +244,9 @@ pub struct AppConfig {
     pub agent: AgentConfig,
     #[serde(default)]
     pub execution: ExecutionConfig,
+    /// Commands run around tool calls and at the end of turns (see `hooks.rs`).
+    #[serde(default, skip_serializing_if = "crate::hooks::HooksConfig::is_empty")]
+    pub hooks: crate::hooks::HooksConfig,
     /// Per-model settings (thinking, prices), keyed by model id.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub models: std::collections::BTreeMap<String, ModelSettings>,
@@ -268,6 +276,7 @@ impl Default for AppConfig {
             web_search: WebSearchConfig::default(),
             execution: ExecutionConfig::default(),
             models: std::collections::BTreeMap::new(),
+            hooks: crate::hooks::HooksConfig::default(),
             providers: vec![
                 ProviderConfig {
                     id: "llmkita".to_string(),

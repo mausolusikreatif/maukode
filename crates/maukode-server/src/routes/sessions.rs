@@ -638,7 +638,8 @@ fn start_turn(
             runner_config,
         )
         .with_permission_manager(permission_mgr)
-        .with_permission_store(Arc::clone(&state.store));
+        .with_permission_store(Arc::clone(&state.store))
+        .with_hooks(Arc::new(maukode_core::Hooks::load(&session_dir, &app_config)));
         if let Some(binding) = memory {
             runner = runner.with_memory(binding);
         }

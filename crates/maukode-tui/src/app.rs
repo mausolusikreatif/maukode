@@ -321,7 +321,8 @@ impl App {
         let tools = Arc::new(tool_registry);
         let permission_manager = Arc::new(
             PermissionManager::new(config.security.permission_mode)
-                .with_whitelist(config.security.bash_whitelist.clone()),
+                .with_whitelist(config.security.bash_whitelist.clone())
+                .with_rules(config.security.permission_rules.clone()),
         );
         let checkpoint_manager = Arc::new(CheckpointManager::new(&cwd).await?);
 
@@ -1105,7 +1106,8 @@ impl App {
         let runner = SessionRunner::new(session, llm_client, tools, context, runner_config)
             .with_permission_manager(Arc::clone(&self.permission_manager))
             .with_permission_store(Arc::new(self.store.clone()))
-            .with_checkpoint_manager(Arc::clone(&self.checkpoint_manager));
+            .with_checkpoint_manager(Arc::clone(&self.checkpoint_manager))
+            .with_hooks(Arc::new(maukode_core::Hooks::load(&self.cwd, &self.config)));
         let runner = match &self.memory {
             Some(binding) => runner.with_memory(binding.clone()),
             None => runner,

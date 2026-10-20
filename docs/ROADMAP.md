@@ -51,6 +51,9 @@ remove a feature, update its row in the same PR.
 | Feature | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | File tools with path jail | **done** | `file.rs`, `grep.rs`, `security.rs` (`PathJail`) |
+| Multi-file edits (`apply_patch`) | **done** | `patch.rs`; add, update, delete and move files in one all-or-nothing call; synced to lawang VMs like the other file tools |
+| Pattern-based permission rules | **done** | `security.permission_rules`, `PermissionManager::rule_action` |
+| Hooks (`pre_tool_use`, `post_tool_use`, `turn_end`) | **done** | `hooks.rs`; global config, and `.maukode/hooks.json` for trusted projects |
 | Bash risk assessment and approval prompts | **partial** | `assess_bash_command` (inspects `bash -c`, `eval`, subshells, wrappers, `find -exec`); pattern-based, unknown commands are treated as safe (see backlog) |
 | Word-by-word `bash_whitelist`, per-tool session approvals | **done** | `bash_whitelist_allows`, `PermissionManager::is_whitelisted` (#86) |
 | MCP tools confirmed in `ask` mode | **done** | `Tool::requires_confirmation`, `McpTool::with_read_only` (`readOnlyHint` skips the prompt), `PermissionManager::whitelist_session_tool` |
@@ -196,14 +199,13 @@ Remaining risks, by design or not yet addressed:
 ### Features
 
 Done in #89: usage and cost per session, extended thinking for Anthropic (with signature round
-trips), and image input. Remaining:
+trips), and image input. Done in #90: `apply_patch`, hooks, and pattern-based permission rules.
+Remaining:
 
-1. Multi-file edits (`apply_patch`).
-2. Hooks (e.g. format after edit) and pattern-based permission rules instead of exact-match
-   session whitelisting.
-3. A JSON output mode for `maukode run` for CI and scripts.
-4. TUI parity: steering/queueing and `@file` autocomplete (M2, M6).
-5. Restore web UI features lost in the rebuild (command palette, open in editor, archive).
+1. A JSON output mode for `maukode run` for CI and scripts.
+2. TUI parity: steering/queueing and `@file` autocomplete (M2, M6).
+3. Restore web UI features lost in the rebuild (command palette, open in editor, archive).
+4. Turn an approval into a permission rule from the prompt ("always allow `npm run *`").
 
 ---
 

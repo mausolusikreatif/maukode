@@ -762,7 +762,8 @@ async fn main() -> anyhow::Result<()> {
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
         let perm_mgr = Arc::new(
             maukode_core::PermissionManager::new(config.security.permission_mode)
-                .with_whitelist(config.security.bash_whitelist.clone()),
+                .with_whitelist(config.security.bash_whitelist.clone())
+                .with_rules(config.security.permission_rules.clone()),
         );
         let mut context = ContextManager::new(&cwd);
         let mut tool_reg = if config.security.jail_path_traversal {
@@ -816,7 +817,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_permission_manager(Arc::clone(&perm_mgr))
         .with_permission_store(Arc::clone(&store))
-        .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
+        .with_checkpoint_manager(Arc::clone(&checkpoint_manager))
+        .with_hooks(Arc::new(maukode_core::Hooks::load(&cwd, &config)));
         let runner = match memory {
             Some(binding) => runner.with_memory(binding),
             None => runner,
@@ -872,7 +874,8 @@ async fn main() -> anyhow::Result<()> {
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
         let perm_mgr = Arc::new(
             maukode_core::PermissionManager::new(config.security.permission_mode)
-                .with_whitelist(config.security.bash_whitelist.clone()),
+                .with_whitelist(config.security.bash_whitelist.clone())
+                .with_rules(config.security.permission_rules.clone()),
         );
         let mut context = ContextManager::new(&cwd);
         let mut tool_reg = if config.security.jail_path_traversal {
@@ -924,7 +927,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_permission_manager(Arc::clone(&perm_mgr))
         .with_permission_store(Arc::clone(&store))
-        .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
+        .with_checkpoint_manager(Arc::clone(&checkpoint_manager))
+        .with_hooks(Arc::new(maukode_core::Hooks::load(&cwd, &config)));
         if let Some(binding) = memory {
             runner = runner.with_memory(binding);
         }

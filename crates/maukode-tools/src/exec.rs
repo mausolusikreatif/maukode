@@ -633,7 +633,8 @@ pub struct SyncedTool {
 }
 
 impl SyncedTool {
-    /// `writes`: the tool changes the file named by its `path` argument.
+    /// `writes`: the tool changes the file named by its `path` argument, or the files of its
+    /// `patch` argument (`apply_patch`).
     pub fn new(
         inner: Arc<dyn Tool>,
         backend: Arc<dyn ExecBackend>,
@@ -647,6 +648,18 @@ impl SyncedTool {
             writes,
         }
     }
+}
+
+/// Files a writing tool call changes: its `path`, or every file of its `patch`.
+fn written_paths(args: &Value) -> Vec<String> {
+    if let Some(path) = args["path"].as_str() {
+        return vec![path.to_string()];
+    }
+    args["patch"]
+        .as_str()
+        .and_then(|patch| crate::patch::parse_patch(patch).ok())
+        .map(|ops| crate::patch::touched_paths(&ops))
+        .unwrap_or_default()
 }
 
 #[async_trait]
@@ -673,10 +686,15 @@ impl Tool for SyncedTool {
 
     async fn execute(&self, args: Value) -> Result<String, ToolError> {
         self.backend.before_workspace_access().await?;
-        let target = args["path"].as_str().map(str::to_string);
+        let targets = if self.writes {
+            written_paths(&args)
+        } else {
+            Vec::new()
+        };
         let result = self.inner.execute(args).await?;
-        if self.writes {
-            if let Some(path) = target.and_then(|p| self.jail.validate_path(&p).ok()) {
+        for path in targets {
+            // A deleted file has nothing to push.
+            if let Some(path) = self.jail.validate_path(&path).ok().filter(|p| p.exists()) {
                 self.backend.after_host_write(&path).await?;
             }
         }

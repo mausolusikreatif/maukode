@@ -1,5 +1,5 @@
 use crate::context::ContextManager;
-use crate::permission::{PermissionManager, PermissionMode};
+use crate::permission::{PermissionManager, PermissionMode, RuleAction};
 use crate::session::Session;
 use crate::store::sqlite::{PermissionAuditRecord, SqliteSessionStore};
 use futures::StreamExt;
@@ -163,6 +163,7 @@ pub struct SessionRunner {
     memory: Option<crate::context::MemoryBinding>,
     reflection_config: Option<crate::reflection::ReflectionConfig>,
     consolidation_config: Option<crate::consolidation::ConsolidationConfig>,
+    hooks: Option<Arc<crate::hooks::Hooks>>,
 }
 
 impl SessionRunner {
@@ -185,7 +186,16 @@ impl SessionRunner {
             memory: None,
             reflection_config: None,
             consolidation_config: None,
+            hooks: None,
         }
+    }
+
+    /// Run the configured hooks around tool calls and at the end of each turn.
+    pub fn with_hooks(mut self, hooks: Arc<crate::hooks::Hooks>) -> Self {
+        if !hooks.is_empty() {
+            self.hooks = Some(hooks);
+        }
+        self
     }
 
     /// Attach the knowledge-store binding. Enables end-of-turn extraction when the binding has
@@ -272,6 +282,7 @@ impl SessionRunner {
         {
             Ok((reason, message)) => {
                 let _ = event_tx.send(stopped(reason, message));
+                self.run_turn_end_hooks(reason).await;
                 Ok(())
             }
             Err(e) => {
@@ -282,6 +293,7 @@ impl SessionRunner {
                     message: message.clone(),
                 });
                 let _ = event_tx.send(stopped(StopReason::Error, Some(message)));
+                self.run_turn_end_hooks(StopReason::Error).await;
                 Err(e)
             }
         }
@@ -328,6 +340,7 @@ impl SessionRunner {
         }
 
         let mut system_prompt = self.session_system_prompt().await;
+        let workspace = self.session.read().await.directory.clone();
         let tool_defs = self.tools.definitions();
         let tool_schema_tokens = crate::compaction::TokenEstimator::estimate_text(
             &serde_json::to_string(&tool_defs).unwrap_or_default(),
@@ -731,6 +744,26 @@ impl SessionRunner {
                 };
 
                 if let Some(ref perm_mgr) = self.permission_manager {
+                    let rule = perm_mgr.rule_action(&call.name, &call.arguments, &workspace);
+                    if rule == Some(RuleAction::Deny) {
+                        info!("Tool call {} denied by a permission rule", call.name);
+                        let tr = ToolResult {
+                            tool_call_id: call.id,
+                            tool_name: call.name,
+                            content: "Blocked by a permission rule in the MauKode configuration \
+                                      (security.permission_rules). Do not retry this call."
+                                .to_string(),
+                            is_error: true,
+                        };
+                        let _ = event_tx.send(LLMEvent::ToolResult(tr.clone()));
+                        tool_results.push(ContentPart::ToolResult(tr));
+                        continue;
+                    }
+                    let dangerous_bash = call.name == "bash"
+                        && call.arguments["command"].as_str().is_some_and(|command| {
+                            maukode_tools::assess_bash_command(command).level
+                                == maukode_tools::RiskLevel::Danger
+                        });
                     // MCP tools: `ask` mode confirms them, and "allow for this session" then
                     // covers the tool with any arguments.
                     let confirms_every_call = self
@@ -745,7 +778,9 @@ impl SessionRunner {
                         }
                         None => false,
                     };
-                    let needs_permission = if whitelisted {
+                    let needs_permission = if rule == Some(RuleAction::Ask) {
+                        true
+                    } else if whitelisted || (rule == Some(RuleAction::Allow) && !dangerous_bash) {
                         false
                     } else {
                         match perm_mgr.mode() {
@@ -897,6 +932,23 @@ impl SessionRunner {
                     }
                 }
 
+                // `pre_tool_use` hooks can block the call; read-only batches never run when one
+                // applies (see `run_read_only_batch`).
+                if let Some(hooks) = &self.hooks {
+                    if let Err(reason) = hooks.before_tool(&session_id_str, &call).await {
+                        let tr = ToolResult {
+                            tool_call_id: call.id,
+                            tool_name: call.name,
+                            content: reason,
+                            is_error: true,
+                        };
+                        let _ = event_tx.send(LLMEvent::ToolResult(tr.clone()));
+                        tool_results.push(ContentPart::ToolResult(tr));
+                        continue;
+                    }
+                }
+                let hook_call = self.hooks.as_ref().map(|_| call.clone());
+
                 let exec_res = if let Some(res) = prefetched.remove(&call.id) {
                     res
                 } else if let Some(ref token) = cancellation_token {
@@ -911,10 +963,19 @@ impl SessionRunner {
                 } else {
                     self.tools.execute(&call.name, call.arguments).await
                 };
-                let (content, is_error) = match exec_res {
+                let (mut content, is_error) = match exec_res {
                     Ok(out) => (out, false),
                     Err(err) => (format!("Error executing tool: {err}"), true),
                 };
+                if let (Some(hooks), Some(hook_call)) = (&self.hooks, &hook_call) {
+                    if let Some(feedback) = hooks
+                        .after_tool(&session_id_str, hook_call, &content, is_error)
+                        .await
+                    {
+                        content.push_str("\n\n");
+                        content.push_str(&feedback);
+                    }
+                }
 
                 let tr = ToolResult {
                     tool_call_id: call.id,
@@ -988,6 +1049,13 @@ impl SessionRunner {
         Ok(stop)
     }
 
+    async fn run_turn_end_hooks(&self, reason: StopReason) {
+        if let Some(hooks) = &self.hooks {
+            let session_id = self.session.read().await.id.to_string();
+            hooks.turn_end(&session_id, reason).await;
+        }
+    }
+
     /// The session's system prompt: built on its first turn (and again after a compaction) and
     /// reused unchanged on every other request, so it stays a cacheable prefix and Anthropic
     /// thinking blocks, which are bound to it, stay valid.
@@ -1015,7 +1083,18 @@ impl SessionRunner {
         let all_read_only = calls
             .iter()
             .all(|call| READ_ONLY_TOOLS.contains(&call.name.as_str()));
-        if calls.len() < 2 || confirms_every_call || !all_read_only {
+        // A permission rule or a `pre_tool_use` hook must see each call before it runs.
+        let workspace = self.session.read().await.directory.clone();
+        let screened = calls.iter().any(|call| {
+            self.permission_manager.as_ref().is_some_and(|pm| {
+                pm.rule_action(&call.name, &call.arguments, &workspace)
+                    .is_some()
+            }) || self
+                .hooks
+                .as_ref()
+                .is_some_and(|hooks| hooks.has_pre_tool_use(&call.name))
+        });
+        if calls.len() < 2 || confirms_every_call || !all_read_only || screened {
             return HashMap::new();
         }
 
@@ -1566,6 +1645,139 @@ mod turn_tests {
             [ContentPart::Reasoning { .. }, ContentPart::ProviderItem { value },
              ContentPart::Text { text }, ContentPart::ToolCall(_)]
             if *value == thinking && text == "Looking"));
+    }
+
+    /// Run one `echo` call (then "done") with `manager` and `hooks`; returns the tool result and
+    /// how many approval prompts were shown (each answered "allow once").
+    async fn run_echo(
+        manager: PermissionManager,
+        hooks: Option<crate::hooks::Hooks>,
+        dir: &std::path::Path,
+    ) -> (String, usize) {
+        let script: Vec<Step> = vec![
+            Ok(vec![
+                Ok(LLMEvent::ToolCallFinish {
+                    tool_call: ToolCall {
+                        id: "1".into(),
+                        name: "echo".into(),
+                        arguments: serde_json::json!({}),
+                    },
+                }),
+                Ok(LLMEvent::Finish {
+                    reason: FinishReason::ToolUse,
+                }),
+            ]),
+            text("done", FinishReason::EndTurn),
+        ];
+        let session = Arc::new(RwLock::new(Session::new(dir)));
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(EchoTool));
+        let manager = Arc::new(manager);
+        let mut runner = SessionRunner::new(
+            Arc::clone(&session),
+            Arc::new(ScriptedLlm(Mutex::new(script.into()))),
+            Arc::new(tools),
+            Arc::new(ContextManager::new(dir)),
+            RunnerConfig {
+                max_steps: 5,
+                ..RunnerConfig::default()
+            },
+        )
+        .with_permission_manager(Arc::clone(&manager));
+        if let Some(hooks) = hooks {
+            runner = runner.with_hooks(Arc::new(hooks));
+        }
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let answer = async {
+            let mut prompts = 0;
+            while let Some(event) = rx.recv().await {
+                if let LLMEvent::PermissionRequest(request) = event {
+                    prompts += 1;
+                    let decision = maukode_protocol::PermissionDecision::AllowOnce;
+                    manager.respond(&request.request_id, decision).await;
+                }
+            }
+            prompts
+        };
+        let (result, prompts) = tokio::join!(
+            runner.run_with_cancellation(Some("go".into()), tx, None),
+            answer
+        );
+        result.unwrap();
+        let guard = session.read().await;
+        let output = guard
+            .messages
+            .iter()
+            .flat_map(|m| &m.parts)
+            .find_map(|p| match p {
+                ContentPart::ToolResult(r) => Some(r.content.clone()),
+                _ => None,
+            })
+            .unwrap();
+        (output, prompts)
+    }
+
+    #[tokio::test]
+    async fn permission_rules_override_the_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let rule = |action| crate::permission::PermissionRule {
+            tool: "ech*".into(),
+            command: None,
+            path: None,
+            action,
+        };
+        let deny = PermissionManager::new(PermissionMode::Trust).with_rules(vec![
+            rule(RuleAction::Allow),
+            rule(RuleAction::Deny),
+        ]);
+        let (output, prompts) = run_echo(deny, None, dir.path()).await;
+        assert!(output.contains("Blocked by a permission rule"), "{output}");
+        assert_eq!(prompts, 0);
+
+        // `ask` prompts even in trust mode.
+        let ask = PermissionManager::new(PermissionMode::Trust).with_rules(vec![rule(RuleAction::Ask)]);
+        let (output, prompts) = run_echo(ask, None, dir.path()).await;
+        assert_eq!((output.as_str(), prompts), ("echoed", 1));
+
+        // `allow` skips the prompt strict mode would show.
+        let allow =
+            PermissionManager::new(PermissionMode::Strict).with_rules(vec![rule(RuleAction::Allow)]);
+        let (output, prompts) = run_echo(allow, None, dir.path()).await;
+        assert_eq!((output.as_str(), prompts), ("echoed", 0));
+    }
+
+    #[tokio::test]
+    async fn hooks_can_block_a_call_or_report_on_it() {
+        use crate::hooks::{Hook, Hooks, HooksConfig};
+        let dir = tempfile::tempdir().unwrap();
+        let hook = |command: &str| Hook {
+            tools: vec!["echo".into()],
+            command: command.into(),
+            timeout_secs: None,
+        };
+        let trust = || PermissionManager::new(PermissionMode::Trust);
+
+        let blocking = Hooks::new(
+            HooksConfig {
+                pre_tool_use: vec![hook("echo not now; exit 1")],
+                ..HooksConfig::default()
+            },
+            dir.path(),
+        );
+        let (output, _) = run_echo(trust(), Some(blocking), dir.path()).await;
+        assert!(output.contains("not now") && !output.contains("echoed"), "{output}");
+
+        let reporting = Hooks::new(
+            HooksConfig {
+                post_tool_use: vec![hook("echo lint failed; exit 2")],
+                turn_end: vec![hook("touch turn-ended")],
+                ..HooksConfig::default()
+            },
+            dir.path(),
+        );
+        let (output, _) = run_echo(trust(), Some(reporting), dir.path()).await;
+        assert!(output.starts_with("echoed") && output.contains("lint failed"), "{output}");
+        assert!(dir.path().join("turn-ended").exists());
     }
 
     /// Stands in for an MCP tool: `ask` mode confirms its calls.

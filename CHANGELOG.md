@@ -113,6 +113,15 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Tool `apply_patch`**: menambah, mengubah, menghapus, dan memindahkan beberapa file sekaligus
+  dalam satu panggilan dengan format `*** Begin Patch`. Semua hunk diperiksa dulu, sehingga patch
+  diterapkan seluruhnya atau tidak sama sekali.
+- **Aturan izin berbasis pola** (`security.permission_rules`): izinkan, tanyakan, atau tolak tool
+  call berdasarkan nama tool, pola perintah bash, atau glob path, di semua mode izin. `deny` selalu
+  menang.
+- **Hooks** (`hooks`): perintah shell untuk `pre_tool_use` (bisa memblokir), `post_tool_use`
+  (misalnya formatter setelah edit; output kegagalan diteruskan ke model), dan `turn_end`. Hooks
+  dari `.maukode/hooks.json` milik project hanya jalan untuk project yang di-trust.
 - **Pemakaian token dan biaya per sesi**: total token (input, output, cache read/write) dan biaya
   setiap sesi disimpan, termasuk pemakaian subagen. Totalnya tampil di composer web UI dan status
   bar TUI. Harga bawaan tersedia untuk model Claude terkini; model lain bisa diberi harga lewat

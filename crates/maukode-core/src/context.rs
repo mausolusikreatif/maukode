@@ -206,10 +206,10 @@ impl ContextManager {
              - Working Directory: {cwd_str}\n\n\
              Guidelines:\n\
              - Always inspect existing files before making modifications.\n\
-             - Use the provided tools (read_file, write_file, edit_file, bash, grep, glob, web_search, fetch_web_content, get_codebase_map) to explore and make changes.\n\
+             - Use the provided tools (read_file, write_file, edit_file, apply_patch, bash, grep, glob, web_search, fetch_web_content, get_codebase_map) to explore and make changes.\n\
              - When researching modern libraries, new crate versions, breaking API changes, or unfamiliar error messages, proactively use `web_search` and `fetch_web_content` to consult up-to-date documentation.\n\
              - Keep responses concise and focused on the solution.\n\
-             - Prefer surgical edits using `edit_file` over overwriting complete files when possible.\n\
+             - Prefer surgical edits using `edit_file` (one change) or `apply_patch` (changes across several files) over overwriting complete files when possible.\n\
              - A user message may end with a `<maukode-context>` note (current date, memories relevant to that request). MauKode adds it; it was not written by the user.\n\n\
              Working style:\n\
              - Finish the task end to end. Keep calling tools until the work is done and verified; do not stop to ask whether to continue or to report intermediate progress.\n\

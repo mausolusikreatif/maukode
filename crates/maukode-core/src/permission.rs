@@ -1,6 +1,7 @@
 use maukode_protocol::PermissionDecision;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
@@ -40,6 +41,98 @@ impl PermissionMode {
     }
 }
 
+/// What a matching [`PermissionRule`] does with a tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleAction {
+    /// Run without a prompt (a `bash` command rated dangerous still asks).
+    Allow,
+    /// Ask, whatever the permission mode.
+    Ask,
+    /// Never run; the model is told the call was blocked.
+    Deny,
+}
+
+/// A configured rule (`security.permission_rules`). Every condition given must hold.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PermissionRule {
+    /// Tool name; `*` matches any characters (`mcp__github__*`).
+    pub tool: String,
+    /// For `bash`: a command pattern, matched like `bash_whitelist` entries (`npm run *`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// For tools that take a `path` (or an `apply_patch` patch): a glob relative to the workspace,
+    /// where `*` stays within a directory and `**` crosses them (`migrations/**`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub action: RuleAction,
+}
+
+impl PermissionRule {
+    fn matches(&self, tool_name: &str, args: &serde_json::Value, workspace: &Path) -> bool {
+        if !glob_match(&self.tool, tool_name) {
+            return false;
+        }
+        if let Some(pattern) = &self.command {
+            let command = args["command"].as_str().unwrap_or_default();
+            if tool_name != "bash" || !maukode_tools::bash_whitelist_allows(pattern, command) {
+                return false;
+            }
+        }
+        if let Some(pattern) = &self.path {
+            let pattern = pattern.trim_start_matches("./");
+            return call_paths(args)
+                .iter()
+                .any(|path| glob_match(pattern, &workspace_relative(path, workspace)));
+        }
+        true
+    }
+}
+
+/// Paths a call works on: its `path` argument, or the files of an `apply_patch` patch.
+fn call_paths(args: &serde_json::Value) -> Vec<String> {
+    if let Some(path) = args["path"].as_str() {
+        return vec![path.to_string()];
+    }
+    args["patch"]
+        .as_str()
+        .and_then(|patch| maukode_tools::patch::parse_patch(patch).ok())
+        .map(|ops| maukode_tools::patch::touched_paths(&ops))
+        .unwrap_or_default()
+}
+
+fn workspace_relative(path: &str, workspace: &Path) -> String {
+    let relative = Path::new(path)
+        .strip_prefix(workspace)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string());
+    relative.trim_start_matches("./").to_string()
+}
+
+/// Glob matching: `*` matches within one path segment, `**` across segments (and `**/` also
+/// matches no directory at all), `?` matches one character.
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    fn go(p: &[u8], t: &[u8]) -> bool {
+        if let Some(rest) = p.strip_prefix(b"**") {
+            if let Some(after_slash) = rest.strip_prefix(b"/") {
+                if go(after_slash, t) {
+                    return true;
+                }
+            }
+            return (0..=t.len()).any(|i| go(rest, &t[i..]));
+        }
+        match p.first() {
+            None => t.is_empty(),
+            Some(b'*') => (0..=t.len())
+                .take_while(|&i| i == 0 || t[i - 1] != b'/')
+                .any(|i| go(&p[1..], &t[i..])),
+            Some(b'?') => t.first().is_some_and(|&c| c != b'/') && go(&p[1..], &t[1..]),
+            Some(c) => t.first() == Some(c) && go(&p[1..], &t[1..]),
+        }
+    }
+    go(pattern.as_bytes(), text.as_bytes())
+}
+
 /// Session whitelist entries include the tool name: approving `memory_get {"id":1}` for the session
 /// must not also approve `memory_delete {"id":1}`.
 fn session_entry(tool_name: &str, key: &str) -> String {
@@ -58,6 +151,7 @@ pub struct PermissionManager {
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<PermissionDecision>>>>,
     session_whitelists: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     static_whitelist: Arc<Vec<String>>,
+    rules: Arc<Vec<PermissionRule>>,
 }
 
 impl Default for PermissionManager {
@@ -73,7 +167,32 @@ impl PermissionManager {
             pending: Arc::new(Mutex::new(HashMap::new())),
             session_whitelists: Arc::new(Mutex::new(HashMap::new())),
             static_whitelist: Arc::new(Vec::new()),
+            rules: Arc::new(Vec::new()),
         }
+    }
+
+    pub fn with_rules(mut self, rules: Vec<PermissionRule>) -> Self {
+        self.rules = Arc::new(rules);
+        self
+    }
+
+    /// What the configured rules say about a call: `Deny` if a matching rule denies it, else
+    /// `Ask` if one asks, else `Allow` if one allows; `None` when no rule matches.
+    pub fn rule_action(
+        &self,
+        tool_name: &str,
+        args: &serde_json::Value,
+        workspace: &Path,
+    ) -> Option<RuleAction> {
+        let matching: Vec<RuleAction> = self
+            .rules
+            .iter()
+            .filter(|rule| rule.matches(tool_name, args, workspace))
+            .map(|rule| rule.action)
+            .collect();
+        [RuleAction::Deny, RuleAction::Ask, RuleAction::Allow]
+            .into_iter()
+            .find(|action| matching.contains(action))
     }
 
     pub fn with_whitelist(mut self, whitelist: Vec<String>) -> Self {
@@ -89,6 +208,7 @@ impl PermissionManager {
             pending: Arc::clone(&self.pending),
             session_whitelists: Arc::clone(&self.session_whitelists),
             static_whitelist: Arc::clone(&self.static_whitelist),
+            rules: Arc::clone(&self.rules),
         }
     }
 
@@ -227,6 +347,75 @@ mod tests {
                 "{refused} must not be whitelisted"
             );
         }
+    }
+
+    #[test]
+    fn globs_match_within_and_across_directories() {
+        assert!(glob_match("mcp__github__*", "mcp__github__create_issue"));
+        assert!(!glob_match("mcp__github__*", "mcp__gitlab__x"));
+        assert!(glob_match("src/*.rs", "src/lib.rs"));
+        assert!(!glob_match("src/*.rs", "src/a/lib.rs"));
+        assert!(glob_match("migrations/**", "migrations/2026/01.sql"));
+        assert!(glob_match("**/*.lock", "Cargo.lock"));
+        assert!(glob_match("**/*.lock", "apps/x/package.lock"));
+        assert!(glob_match("a?c", "abc"));
+        assert!(!glob_match("a?c", "a/c"));
+    }
+
+    #[test]
+    fn rules_deny_before_ask_before_allow() {
+        let rule = |tool: &str, command: Option<&str>, path: Option<&str>, action| PermissionRule {
+            tool: tool.into(),
+            command: command.map(Into::into),
+            path: path.map(Into::into),
+            action,
+        };
+        let manager = PermissionManager::new(PermissionMode::Ask).with_rules(vec![
+            rule("bash", Some("npm run *"), None, RuleAction::Allow),
+            rule("bash", Some("npm run deploy*"), None, RuleAction::Deny),
+            rule("*", None, Some("migrations/**"), RuleAction::Ask),
+            rule("mcp__docs__*", None, None, RuleAction::Allow),
+        ]);
+        let ws = Path::new("/work");
+        let bash = |command: &str| serde_json::json!({ "command": command });
+        assert_eq!(
+            manager.rule_action("bash", &bash("npm run test"), ws),
+            Some(RuleAction::Allow)
+        );
+        assert_eq!(
+            manager.rule_action("bash", &bash("npm run deploy --prod"), ws),
+            Some(RuleAction::Deny)
+        );
+        // A chained command is not one simple command, so no command rule matches it.
+        assert_eq!(
+            manager.rule_action("bash", &bash("npm run test && rm -rf ~"), ws),
+            None
+        );
+        let write = serde_json::json!({ "path": "/work/migrations/001.sql", "content": "" });
+        assert_eq!(
+            manager.rule_action("write_file", &write, ws),
+            Some(RuleAction::Ask)
+        );
+        let patch = serde_json::json!({
+            "patch": "*** Begin Patch\n*** Add File: migrations/002.sql\n+x\n*** End Patch"
+        });
+        assert_eq!(
+            manager.rule_action("apply_patch", &patch, ws),
+            Some(RuleAction::Ask)
+        );
+        assert_eq!(
+            manager.rule_action("mcp__docs__search", &serde_json::json!({}), ws),
+            Some(RuleAction::Allow)
+        );
+        assert_eq!(
+            manager.rule_action("read_file", &serde_json::json!({ "path": "src/a.rs" }), ws),
+            None
+        );
+        // Forks keep the rules.
+        assert_eq!(
+            manager.fork().rule_action("bash", &bash("npm run deploy"), ws),
+            Some(RuleAction::Deny)
+        );
     }
 
     #[tokio::test]
