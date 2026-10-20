@@ -111,6 +111,13 @@ enum Commands {
         #[arg(short, long, help = "Force overwrite existing AGENTS.md")]
         force: bool,
     },
+    #[command(about = "Allow a project's own mcp.json to start MCP servers")]
+    Trust {
+        #[arg(help = "Project folder (defaults to the working directory)")]
+        dir: Option<PathBuf>,
+        #[arg(long, help = "Remove the folder from the trusted projects")]
+        revoke: bool,
+    },
     #[command(about = "Manage background server daemon or start foreground server")]
     Server {
         #[command(subcommand)]
@@ -282,6 +289,28 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Handle "trust" subcommand
+    if let Some(Commands::Trust { dir, revoke }) = cli.command {
+        let dir = dir.unwrap_or_else(|| cwd.clone()).canonicalize()?;
+        let mut config = maukode_core::AppConfig::load();
+        let same = |p: &PathBuf| p.canonicalize().is_ok_and(|p| p == dir);
+        if revoke {
+            config.security.trusted_projects.retain(|p| !same(p));
+            config.save()?;
+            println!("Removed {} from the trusted projects.", dir.display());
+        } else if config.security.trusted_projects.iter().any(same) {
+            println!("{} is already trusted.", dir.display());
+        } else {
+            config.security.trusted_projects.push(dir.clone());
+            config.save()?;
+            println!(
+                "Trusted {}: its mcp.json may now start MCP servers.",
+                dir.display()
+            );
+        }
+        return Ok(());
+    }
+
     // Handle "server" subcommand
     if let Some(Commands::Server {
         action,
@@ -296,6 +325,10 @@ async fn main() -> anyhow::Result<()> {
                 let info = maukode_server::ensure_daemon_running(port, token).await?;
                 println!("🚀 MauKode daemon started in background");
                 println!("  URL: \x1b[1;32m{}\x1b[0m", info.url);
+                println!(
+                    "  Web UI: \x1b[1;32m{}\x1b[0m",
+                    maukode_server::daemon::web_ui_url(&info)
+                );
                 println!("  PID: {}", info.pid);
                 println!(
                     "  Log: \x1b[2m{}\x1b[0m",
@@ -315,6 +348,10 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(info) = maukode_server::get_daemon_status().await? {
                     println!("● \x1b[1;32mMauKode daemon is running\x1b[0m");
                     println!("  URL: \x1b[1;32m{}\x1b[0m", info.url);
+                    println!(
+                        "  Web UI: \x1b[1;32m{}\x1b[0m",
+                        maukode_server::daemon::web_ui_url(&info)
+                    );
                     println!("  PID: {}", info.pid);
                     println!(
                         "  Log: \x1b[2m{}\x1b[0m",
@@ -331,6 +368,10 @@ async fn main() -> anyhow::Result<()> {
                 let info = maukode_server::ensure_daemon_running(port, token).await?;
                 println!("🚀 MauKode daemon restarted in background");
                 println!("  URL: \x1b[1;32m{}\x1b[0m", info.url);
+                println!(
+                    "  Web UI: \x1b[1;32m{}\x1b[0m",
+                    maukode_server::daemon::web_ui_url(&info)
+                );
                 println!("  PID: {}", info.pid);
                 return Ok(());
             }

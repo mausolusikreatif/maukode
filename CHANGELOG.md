@@ -7,6 +7,45 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Security
+
+- **Whitelist bash tidak bisa lagi ditumpangi perintah lain**: entri `bash_whitelist` dulu dicocokkan
+  sebagai awalan string, sehingga `cargo *` (ada di whitelist bawaan) juga meloloskan
+  `cargo build && rm -rf ~` tanpa persetujuan, bahkan di mode `strict`. Sekarang entri hanya cocok
+  dengan **satu perintah sederhana** (tanpa `;`, `&&`, `|`, redirection, `$(…)`, backtick, subshell,
+  atau baris baru), dicocokkan kata per kata, hanya untuk tool `bash`, dan tidak pernah meloloskan
+  perintah yang dinilai berbahaya.
+- **Persetujuan "untuk sesi ini" kini per tool**: menyetujui `memory_get {"id":1}` tidak lagi ikut
+  meloloskan `memory_delete {"id":1}`.
+- **Penilaian risiko bash melihat isi perintah yang dibungkus**: `bash -c '…'`, `sh -c`, `eval`,
+  subshell `( … )`, `<( … )`, `{ …; }`, `if … then`, brace expansion `{rm,-rf,x}`, here-string
+  `bash <<< '…'`, wrapper (`timeout`, `nice`, `nohup`, `xargs`, `busybox`, …), `find -exec`, dan
+  `git -C dir …` kini diperiksa isinya. Kode yang tidak bisa diperiksa (`python -c`, `node -e`,
+  `perl -e`, shell/interpreter yang membaca dari stdin, nama perintah dari variabel, `awk` dengan
+  `system()`) minimal menjadi peringatan sehingga mode `ask` meminta persetujuan. Begitu juga tulis
+  ke luar workspace (`>> ~/.bashrc`, `tee /etc/…`, `cp`/`mv` ke path absolut), `git checkout -- .`,
+  `git restore`, dan `git push --force-with-lease`/`--delete`. Membaca `daemon.json` atau
+  `chatgpt_auth.json` dan memanggil API daemon lokal (`curl localhost:4096/api/v1/…`) dianggap
+  berbahaya.
+- **Subagen kini meminta persetujuan**: tool call subagen dulu berjalan tanpa permission manager
+  apa pun. Sekarang subagen memakai mode izin dan whitelist sesi induknya, dan permintaan izinnya
+  muncul di sesi induk.
+- **Daemon lokal selalu memakai token**: `maukode` dan `maukode server start` membuat token acak bila
+  tidak diberi, menyimpannya di `daemon.json` (hanya bisa dibaca pemilik), dan klien lokal
+  memakainya otomatis. `maukode server start|status|restart` mencetak alamat web UI lengkap dengan
+  `#token=…`. Membuka `http://127.0.0.1:4096` tanpa token kini meminta token.
+- **`maukode server` menolak alamat non-loopback tanpa token** (misalnya `--bind 0.0.0.0:4096`);
+  token kosong dianggap tidak ada token. Token dibandingkan dalam waktu konstan. Origin `tauri://`
+  tidak lagi diterima.
+- **Server MCP dari repo tidak otomatis jalan**: `mcp.json` / `.maukode/mcp.json` milik project
+  hanya dipakai bila folder tersebut ada di `security.trusted_projects`. Tambahkan dengan
+  `maukode trust` (cabut dengan `maukode trust --revoke`). Server MCP dari konfigurasi global tetap
+  berjalan seperti biasa.
+- **`fetch_web_content` menolak alamat metadata cloud dan API daemon**: alamat link-local
+  (`169.254.169.254`, `fe80::/10`), alamat metadata lain, dan `localhost/api/…` ditolak, termasuk
+  lewat redirect dan nama DNS. Body dibaca bertahap dan berhenti di batas 2 MB.
+- **`config.json` kini hanya bisa dibaca pemiliknya** (0600) karena berisi API key.
+
 ### Added
 
 - **Tempat perintah dijalankan bisa dipilih (`ExecBackend`)**: tool `bash` tidak lagi selalu

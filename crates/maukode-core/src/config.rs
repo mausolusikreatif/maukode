@@ -3,7 +3,7 @@ use anyhow::Result;
 use maukode_llm::{AnthropicClient, LLMClient, OpenAIClient};
 use maukode_tools::{LawangSettings, SandboxMode};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Agent loop limits applied to every turn started through the server.
@@ -65,6 +65,27 @@ pub struct SecurityConfig {
     pub sandbox_mode: SandboxMode,
     #[serde(default = "default_whitelist")]
     pub bash_whitelist: Vec<String>,
+    /// Folders whose own configuration may run programs: the MCP servers in a project's
+    /// `mcp.json` / `.maukode/mcp.json` start only for projects inside one of these. Opening an
+    /// untrusted repository must not run commands it ships. Add one with `maukode trust`.
+    #[serde(default)]
+    pub trusted_projects: Vec<PathBuf>,
+}
+
+impl SecurityConfig {
+    /// Whether `dir` is one of `trusted_projects` or inside one.
+    pub fn is_trusted_project(&self, dir: &Path) -> bool {
+        is_inside_any(dir, &self.trusted_projects)
+    }
+}
+
+fn is_inside_any(dir: &Path, roots: &[PathBuf]) -> bool {
+    let Ok(dir) = dir.canonicalize() else {
+        return false;
+    };
+    roots
+        .iter()
+        .any(|root| root.canonicalize().is_ok_and(|root| dir.starts_with(root)))
 }
 
 fn default_true() -> bool {
@@ -88,6 +109,7 @@ impl Default for SecurityConfig {
             allowed_external_paths: Vec::new(),
             sandbox_mode: SandboxMode::default(),
             bash_whitelist: default_whitelist(),
+            trusted_projects: Vec::new(),
         }
     }
 }
@@ -348,8 +370,31 @@ impl AppConfig {
             std::fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, json)?;
+        write_owner_only(&path, &json)?;
         Ok(())
+    }
+
+    /// Whether `dir` is a trusted project according to the configuration file on disk.
+    ///
+    /// A running daemon keeps its configuration in memory; this lets `maukode trust` take effect
+    /// without a restart.
+    pub fn is_trusted_project_on_disk(dir: &Path) -> bool {
+        let Ok(content) = std::fs::read_to_string(Self::config_path()) else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+            return false;
+        };
+        let roots: Vec<PathBuf> = value["security"]["trusted_projects"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str().map(PathBuf::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        is_inside_any(dir, &roots)
     }
 
     pub fn get_provider(&self, id: &str) -> Option<&ProviderConfig> {
@@ -650,6 +695,26 @@ impl AppConfig {
             registry.register_alias("read_url", "fetch_web_content");
         }
     }
+}
+
+/// Write `contents` so only the owner can read it: the configuration holds API keys.
+fn write_owner_only(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    // `mode` only applies when the file is created; tighten an existing file too.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents.as_bytes())
 }
 
 #[cfg(test)]

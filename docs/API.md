@@ -5,10 +5,16 @@ Base URL `http://127.0.0.1:4096`. All `/api/v1/*` routes except `health` require
 bodies with a 4xx/5xx status.
 
 ## Security model
-- **No token (local mode):** browser requests carrying a foreign `Origin` get `403`; CORS only
-  allows `localhost`, `127.0.0.1`, `[::1]`, `tauri://localhost` and `tauri.localhost`. Clients that
-  send no `Origin` (CLI, native HTTP) are unaffected.
-- **Token set:** CORS is open; the bearer token is the only gate.
+- **Daemons started by the CLI always have a token.** `maukode` / `maukode server start` generate
+  one when none is given and store it in the owner-only `daemon.json`; local clients read it from
+  there, and `maukode server status` prints the web UI address with `#token=…`.
+- **No token (foreground `maukode server` on loopback only):** browser requests carrying a foreign
+  `Origin` get `403`, and requests whose `Host` is not a loopback name get `403` (DNS-rebinding
+  guard); CORS only allows `localhost`, `127.0.0.1` and `[::1]`. Clients that send no `Origin`
+  (CLI, native HTTP) are unaffected. A non-loopback bind address without a token is refused at
+  startup, and an empty token counts as no token.
+- **Token set:** CORS is open; the bearer token is the only gate. It is compared in constant
+  time.
 - Provider API keys are never returned. `GET /providers` gives `api_key: null` and
   `has_api_key`. `POST /providers` with `api_key: null` keeps the stored key.
 

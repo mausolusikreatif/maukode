@@ -16,7 +16,8 @@ pub use file::{EditFileTool, GlobTool, ReadFileTool, WriteFileTool};
 pub use grep::GrepTool;
 pub use registry::ToolRegistry;
 pub use security::{
-    assess_bash_command, sandboxed_command, PathJail, RiskAssessment, RiskLevel, SandboxMode,
+    assess_bash_command, bash_whitelist_allows, sandboxed_command, simple_command_words, PathJail,
+    RiskAssessment, RiskLevel, SandboxMode,
 };
 pub use tool::{Tool, ToolDefinition, ToolError, ToolSource};
 pub use web::{html_to_clean_markdown, FetchWebContentTool, SearchResultItem, WebSearchTool};
