@@ -14,7 +14,7 @@ pub use exec::{
     HostBackend, LawangBackend, LawangSettings, SyncedTool,
 };
 pub use file::{EditFileTool, GlobTool, ReadFileTool, WriteFileTool};
-pub use grep::GrepTool;
+pub use grep::{workspace_files, GrepTool};
 pub use patch::ApplyPatchTool;
 pub use registry::ToolRegistry;
 pub use security::{

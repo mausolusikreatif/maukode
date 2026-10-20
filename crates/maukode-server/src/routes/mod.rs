@@ -156,6 +156,11 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(sessions::get_session_audit),
         )
         .route(
+            "/api/v1/sessions/{id}/archive",
+            axum::routing::put(sessions::set_session_archived),
+        )
+        .route("/api/v1/sessions/{id}/open", post(sessions::open_in_editor))
+        .route(
             "/api/v1/sessions/{id}/prompt",
             post(sessions::submit_prompt),
         )

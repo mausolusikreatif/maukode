@@ -187,6 +187,16 @@ lawang cell, with a 60-second default timeout. They receive the event as JSON on
 apply to subagents' tool calls. A project's own `.maukode/hooks.json` (same shape as `hooks`) is
 used only when the project is trusted (`maukode trust`).
 
+## 📝 Editor
+
+`editor.command` is how the web UI's "Buka di editor" opens a file, on the machine the daemon runs
+on. The command is split on whitespace and run without a shell; `{path}` and `{line}` are replaced
+in each argument. It defaults to `code --goto {path}:{line}`.
+
+```json
+"editor": { "command": "zed {path}:{line}" }
+```
+
 ## 📦 Execution Backend
 
 `execution` chooses where `bash` commands run:

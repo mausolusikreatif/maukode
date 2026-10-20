@@ -17,4 +17,8 @@ last_activity: string | null, id: SessionId, directory: string, title: string, m
 /**
  * Original repository when the session runs in an isolated git worktree.
  */
-project_dir: string | null, worktree_branch: string | null, };
+project_dir: string | null, worktree_branch: string | null, 
+/**
+ * Hidden from the default session list (`PUT /sessions/{id}/archive`).
+ */
+archived: boolean, };

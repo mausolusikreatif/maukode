@@ -365,6 +365,13 @@ kbd { font: inherit; font-size: 10.5px; padding: 0 0.35em; margin-left: 0.4em; b
 .mention { position: absolute; bottom: calc(100% + 0.35rem); left: 0; right: 0; z-index: 10; margin: 0; padding: 0; list-style: none; max-height: 16rem; overflow-y: auto; background: var(--surface); border: 1px solid var(--ink-2); border-radius: 4px; }
 .mention-item { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; text-align: left; padding: 0.45rem 0.75rem; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
 .mention-item[data-active="true"], .mention-item:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); box-shadow: inset 3px 0 0 var(--ink); }
+.overlay { position: fixed; inset: 0; z-index: 50; display: grid; justify-items: center; align-items: start; padding: 12vh 16px 16px; background: color-mix(in srgb, var(--ink) 25%, transparent); }
+.palette { width: min(36rem, 100%); max-height: 70vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25); }
+.palette > .field { margin: 0.6rem; }
+.palette ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.shortcuts { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.shortcuts td { padding: 0.35rem 0.75rem; border-top: 1px solid var(--line); }
+.shortcuts kbd { margin-left: 0; opacity: 0.85; }
 .title-btn { display: block; max-width: 100%; border: 0; background: transparent; padding: 0; text-align: left; font-weight: 700; font-stretch: 108%; }
 .title-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
 

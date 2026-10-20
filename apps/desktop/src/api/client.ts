@@ -122,6 +122,13 @@ export class ApiClient {
   renameSession(id: string, title: string | null) {
     return this.request<void>("PATCH", `/api/v1/sessions/${id}`, { title });
   }
+  archiveSession(id: string, archived: boolean) {
+    return this.request<void>("PUT", `/api/v1/sessions/${id}/archive`, { archived });
+  }
+  /** Open a workspace file in the editor of the machine the daemon runs on. */
+  openInEditor(id: string, path: string, line: number | null = null) {
+    return this.request<void>("POST", `/api/v1/sessions/${id}/open`, { path, line });
+  }
   prompt(id: string, prompt: string, images: PromptImage[] = []) {
     return this.request<void>("POST", `/api/v1/sessions/${id}/prompt`, { prompt, images });
   }

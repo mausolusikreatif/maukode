@@ -132,7 +132,9 @@ interface AppState {
   setSessionSearchQuery: (query: string) => void;
   setSessionStatusFilter: (filter: SessionStatusFilter) => void;
   togglePinSession: (id: string) => void;
-  toggleArchiveSession: (id: string) => void;
+  toggleArchiveSession: (id: string) => Promise<void>;
+  /** Open a file of the active session in the daemon machine's editor. */
+  openInEditor: (path: string, line?: number) => Promise<void>;
 
   refreshProviders: () => Promise<void>;
   goHome: () => void;
@@ -366,7 +368,7 @@ export const useApp = create<AppState>((set, get) => {
     sessionSearchQuery: "",
     sessionStatusFilter: "all",
     pinnedSessionIds: loadPinnedSessions(),
-    archivedSessionIds: loadArchivedSessions(),
+    archivedSessionIds: [],
 
     setSessionSearchQuery: (query) => set({ sessionSearchQuery: query }),
     setSessionStatusFilter: (filter) => set({ sessionStatusFilter: filter }),
@@ -376,11 +378,29 @@ export const useApp = create<AppState>((set, get) => {
       savePinnedSessions(next);
       set({ pinnedSessionIds: next });
     },
-    toggleArchiveSession: (id) => {
-      const current = get().archivedSessionIds;
-      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
-      saveArchivedSessions(next);
-      set({ archivedSessionIds: next });
+    toggleArchiveSession: async (id) => {
+      const client = get().client;
+      if (!client) return;
+      const archived = !get().archivedSessionIds.includes(id);
+      // Optimistic: the list updates at once and the refresh confirms it.
+      set((s) => ({
+        archivedSessionIds: archived ? [...s.archivedSessionIds, id] : s.archivedSessionIds.filter((x) => x !== id),
+      }));
+      try {
+        await client.archiveSession(id, archived);
+      } finally {
+        await get().refreshSessions();
+      }
+    },
+
+    openInEditor: async (path, line) => {
+      const { client, activeId } = get();
+      if (!client || !activeId) return;
+      try {
+        await client.openInEditor(activeId, path, line ?? null);
+      } catch (e) {
+        patchThread(activeId, (t) => addNotice(t, "error", `Gagal membuka editor: ${errorText(e)}`));
+      }
     },
 
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -516,7 +536,14 @@ export const useApp = create<AppState>((set, get) => {
       if (!client) return;
       try {
         const { sessions } = await client.listSessions(true);
-        set({ sessions });
+        set({ sessions, archivedSessionIds: sessions.filter((s) => s.archived).map((s) => s.id) });
+        // Archives used to live in this browser only: move them to the daemon once.
+        const local = loadArchivedSessions().filter((id) => sessions.some((s) => s.id === id && !s.archived));
+        if (local.length > 0) {
+          saveArchivedSessions([]);
+          await Promise.allSettled(local.map((id) => client.archiveSession(id, true)));
+          await get().refreshSessions();
+        }
       } catch {
         /* transient; the next event triggers another refresh */
       }
@@ -581,7 +608,6 @@ export const useApp = create<AppState>((set, get) => {
       const pinned = get().pinnedSessionIds.filter((x) => x !== id);
       const archived = get().archivedSessionIds.filter((x) => x !== id);
       savePinnedSessions(pinned);
-      saveArchivedSessions(archived);
       set({ pinnedSessionIds: pinned, archivedSessionIds: archived });
       await get().refreshSessions();
     },

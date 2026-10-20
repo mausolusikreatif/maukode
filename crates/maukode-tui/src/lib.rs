@@ -1,6 +1,7 @@
 pub mod app;
 pub mod event;
 pub mod markdown;
+pub mod mention;
 pub mod render_cache;
 pub mod theme;
 pub mod ui;
@@ -217,6 +218,9 @@ fn handle_app_event(app: &mut App, event: AppEvent) {
         },
         AppEvent::TurnFinished(result) => {
             app.handle_turn_finished(result);
+        }
+        AppEvent::FileIndex(files) => {
+            app.set_file_index(files);
         }
         AppEvent::ModelsFetched {
             provider_id,
@@ -940,7 +944,32 @@ fn input_byte_index(input: &str, char_index: usize) -> usize {
 }
 
 fn handle_normal_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    // The `@file` popup takes the navigation keys while it has completions.
+    if app.mention.as_ref().is_some_and(|m| !m.matches.is_empty()) {
+        match key.code {
+            KeyCode::Up => return app.move_mention_selection(-1),
+            KeyCode::Down => return app.move_mention_selection(1),
+            KeyCode::Tab | KeyCode::Enter => {
+                app.accept_mention();
+                return;
+            }
+            KeyCode::Esc => {
+                app.mention = None;
+                return;
+            }
+            _ => {}
+        }
+    }
+    handle_input_key(app, key);
+    app.update_mention();
+}
+
+fn handle_input_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
+        // While a turn runs, Enter queues the prompt and Alt+Enter steers the turn with it.
+        KeyCode::Enter if app.is_running && key.modifiers.contains(KeyModifiers::ALT) => {
+            app.steer_input();
+        }
         KeyCode::Enter => {
             app.submit_prompt();
         }

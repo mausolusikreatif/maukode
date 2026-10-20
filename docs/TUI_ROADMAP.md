@@ -41,9 +41,8 @@ The current TUI implementation in `crates/maukode-tui` provides:
 - **Daemon integration**: resumable session events, checkpoints/undo, worktree review, provider/model
   selection, MCP status, and session audit are available.
 
-The TUI does not yet provide web UI parity for steering/queueing, pin/archive session organization,
-or `@file`/`#symbol` context autocomplete. Phase 2 and Phase 3 status is tracked below rather than
-calling all daemon capabilities "integrated".
+The TUI does not yet provide web UI parity for pin/archive session organization or `#symbol`
+context autocomplete. Feature status lives in [ROADMAP.md](./ROADMAP.md).
 
 ---
 
@@ -77,9 +76,9 @@ evidence behind each label.
 
 ### Track 2.2: Mid-Turn Steering & Prompt Queuing — **web UI done, TUI planned**
 
-The daemon exposes `/api/v1/sessions/{id}/steer` and queueing routes, and the web UI composer already
-uses them. The TUI, however, still rejects submission while `App::is_running` is true, so this track
-is unfinished terminal work, not a shipped feature. Planned TUI affordances:
+The daemon exposes `/api/v1/sessions/{id}/steer` and queueing routes, used by the web UI composer.
+The TUI steers with `Alt+Enter` or `/steer` and queues prompts typed during a turn (`/queue`). The
+design notes for this track:
 
 - **Steering**: send mid-turn guidance through the existing daemon route without restarting the turn.
 - **Prompt queuing**: queue follow-ups and show a badge such as `[Queued: 2 prompts waiting]`.
