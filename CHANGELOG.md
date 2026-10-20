@@ -113,6 +113,34 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Web UI: palet perintah, arsip sesi, dan buka di editor**:
+  - `Ctrl/Cmd+K` membuka palet untuk berpindah sesi (cari judul), navigasi, dan aksi sesi
+    (lihat perubahan, hentikan agent, arsipkan). `?` menampilkan daftar pintasan.
+  - Arsip sesi kini disimpan di daemon (`PUT /sessions/{id}/archive`), sehingga sama di semua
+    perangkat; arsip lama di browser dipindahkan otomatis. Sidebar punya tombol Arsip serta
+    Arsipkan/Pulihkan.
+  - "Buka di editor" di panel perubahan dan di tool call file membuka file dengan
+    `editor.command` (default `code --goto {path}:{line}`) di mesin tempat daemon berjalan.
+- **`maukode run --output json|stream-json`** untuk CI dan skrip. Mode `json` mencetak satu objek
+  hasil (teks akhir, stop reason, tool call, izin yang ditolak, error, dan usage beserta biaya).
+  Mode `stream-json` mencetak setiap event sebagai satu baris JSON, lalu objek hasilnya. Di kedua
+  mode, panggilan yang butuh izin otomatis ditolak; `--permission-mode` mengubahnya untuk run
+  tersebut. Exit code 1 bila turn gagal.
+- **TUI: steering, antrean, dan autocomplete `@file`**:
+  - `Enter` saat agen bekerja mengantrekan prompt, yang lalu dikirim berurutan setelah turn
+    selesai. `/queue` menampilkan, menjalankan, atau mengosongkan antrean.
+  - `Alt+Enter` atau `/steer` menyisipkan arahan ke turn yang sedang berjalan.
+  - Mengetik `@` membuka daftar file workspace dengan pencocokan fuzzy yang menghormati
+    `.gitignore`.
+- **Tool `apply_patch`**: menambah, mengubah, menghapus, dan memindahkan beberapa file sekaligus
+  dalam satu panggilan dengan format `*** Begin Patch`. Semua hunk diperiksa dulu, sehingga patch
+  diterapkan seluruhnya atau tidak sama sekali.
+- **Aturan izin berbasis pola** (`security.permission_rules`): izinkan, tanyakan, atau tolak tool
+  call berdasarkan nama tool, pola perintah bash, atau glob path, di semua mode izin. `deny` selalu
+  menang.
+- **Hooks** (`hooks`): perintah shell untuk `pre_tool_use` (bisa memblokir), `post_tool_use`
+  (misalnya formatter setelah edit; output kegagalan diteruskan ke model), dan `turn_end`. Hooks
+  dari `.maukode/hooks.json` milik project hanya jalan untuk project yang di-trust.
 - **Pemakaian token dan biaya per sesi**: total token (input, output, cache read/write) dan biaya
   setiap sesi disimpan, termasuk pemakaian subagen. Totalnya tampil di composer web UI dan status
   bar TUI. Harga bawaan tersedia untuk model Claude terkini; model lain bisa diberi harga lewat

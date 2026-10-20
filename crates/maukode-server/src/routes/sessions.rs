@@ -638,7 +638,11 @@ fn start_turn(
             runner_config,
         )
         .with_permission_manager(permission_mgr)
-        .with_permission_store(Arc::clone(&state.store));
+        .with_permission_store(Arc::clone(&state.store))
+        .with_hooks(Arc::new(maukode_core::Hooks::load(
+            &session_dir,
+            &app_config,
+        )));
         if let Some(binding) = memory {
             runner = runner.with_memory(binding);
         }
@@ -1325,6 +1329,78 @@ pub async fn update_session(
     Ok(Json(
         json!({ "status": "ok", "session_id": id, "title": title }),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct ArchiveSessionRequest {
+    pub archived: bool,
+}
+
+/// `PUT /sessions/{id}/archive`: hide a session from the default list, or restore it.
+pub async fn set_session_archived(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<ArchiveSessionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let found = state
+        .store
+        .set_session_archived(id, payload.archived)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if !found {
+        return Err((StatusCode::NOT_FOUND, "Session not found".to_string()));
+    }
+    state.emit(GlobalEvent::SessionUpdated { session_id: id });
+    Ok(Json(
+        json!({ "status": "ok", "session_id": id, "archived": payload.archived }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct OpenInEditorRequest {
+    /// A file in the session's workspace (relative to it, or absolute inside it).
+    pub path: String,
+    /// 1-based line to open at.
+    pub line: Option<u32>,
+}
+
+/// `POST /sessions/{id}/open`: open a workspace file in the editor of the machine the daemon runs
+/// on, using `editor.command` from the configuration.
+pub async fn open_in_editor(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+    Json(payload): Json<OpenInEditorRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session = load_session(&state, id).await?;
+    let directory = session.read().await.directory.clone();
+    let path = maukode_tools::PathJail::new(&directory)
+        .validate_path(&payload.path)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    if !path.exists() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("{} does not exist", payload.path),
+        ));
+    }
+    let template = state.config.read().await.editor.command.clone();
+    let argv = maukode_core::config::editor_argv(template.as_deref(), &path, payload.line)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(&directory)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Could not start `{}`: {e}", argv[0]),
+            )
+        })?;
+    Ok(Json(json!({ "status": "opened", "path": path })))
 }
 
 #[derive(Debug, Deserialize)]

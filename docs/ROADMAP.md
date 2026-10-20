@@ -51,6 +51,9 @@ remove a feature, update its row in the same PR.
 | Feature | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | File tools with path jail | **done** | `file.rs`, `grep.rs`, `security.rs` (`PathJail`) |
+| Multi-file edits (`apply_patch`) | **done** | `patch.rs`; add, update, delete and move files in one all-or-nothing call; synced to lawang VMs like the other file tools |
+| Pattern-based permission rules | **done** | `security.permission_rules`, `PermissionManager::rule_action` |
+| Hooks (`pre_tool_use`, `post_tool_use`, `turn_end`) | **done** | `hooks.rs`; global config, and `.maukode/hooks.json` for trusted projects |
 | Bash risk assessment and approval prompts | **partial** | `assess_bash_command` (inspects `bash -c`, `eval`, subshells, wrappers, `find -exec`); pattern-based, unknown commands are treated as safe (see backlog) |
 | Word-by-word `bash_whitelist`, per-tool session approvals | **done** | `bash_whitelist_allows`, `PermissionManager::is_whitelisted` (#86) |
 | MCP tools confirmed in `ask` mode | **done** | `Tool::requires_confirmation`, `McpTool::with_read_only` (`readOnlyHint` skips the prompt), `PermissionManager::whitelist_session_tool` |
@@ -86,13 +89,13 @@ over; they are listed as **planned** again below.
 | Composer with `@` context chips (files, folders, symbols, changes), steering, queueing | **done** | `ui/Composer.tsx`, `components/composerContext.ts` |
 | Change review, undo, worktree commit and merge | **done** | `ui/Review.tsx` |
 | Session list: project grouping, search, pin, rename, delete | **done** | `ui/Sidebar.tsx`, `state/sessionFilters.ts`; pin state is browser-local |
-| Session archive | **planned** | state exists in `state/sessionFilters.ts`, no UI |
+| Session archive | **done** | `PUT /sessions/{id}/archive`, `sessions.archived`; sidebar Archive toggle and Arsipkan/Pulihkan; browser-local archives move to the daemon once |
 | Settings: providers, ChatGPT login, permissions, sandbox, agent limits, memory, MCP/plugins/skills, theme | **done** | `ui/Settings.tsx` |
 | Browser notifications for approvals and finished turns | **done** | `state/notify.ts` |
 | Phone layout with bottom tabs and history-based Back | **done** | `App.tsx` |
 | New session: folder text field with recent repositories, worktree toggle | **done** | `ui/Home.tsx`, `state/repositories.ts` |
-| Command palette and shortcut sheet | **planned** | only `shortcutsOpen` state remains in `state/store.ts` |
-| Open in editor / reveal in file manager | **planned** | removed with the Tauri shell |
+| Command palette and shortcut sheet | **done** | `ui/Palette.tsx` (`Ctrl/Cmd+K`: navigation, session actions, every session by title), shortcut sheet on `?` |
+| Open in editor | **done** | `POST /sessions/{id}/open`, `editor.command` (default `code --goto {path}:{line}`); buttons in the review panel and on file tool calls; runs on the daemon's machine. No "reveal in file manager" |
 | Discard worktree from the review panel | **planned** | branch can be discarded when deleting the session |
 | Attachments | **partial** | images (pick, paste, drop) in `ui/Composer.tsx`; no other file types |
 | Split/syntax-highlighted diff, line comments, per-hunk revert | **planned** | — |
@@ -103,11 +106,11 @@ over; they are listed as **planned** again below.
 | Milestone | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | M1 Plan widget | **done** | `PlanCreated`/`PlanStepUpdated`, `/plan`, `F2`, `draw_plan_widget` |
-| M2 Steering and queueing | **planned** | input is rejected while `App::is_running`; daemon support exists |
+| M2 Steering and queueing | **done** | `App::steer`, `App::queue_prompt` (`Alt+Enter` / `/steer`, `Enter` queues while a turn runs, `/queue`); the queue is kept in the TUI and continues after a completed turn |
 | M3 Session explorer | **partial** | `/sessions` filtered selector; no pin/archive/filter chips |
 | M4 Subagent stream cards | **done** | `Subagent*` events rendered in `ui.rs` |
 | M5 Subagent trace modal | **done** | `ActiveModal::SubagentViewer` |
-| M6 `@file` / `#symbol` autocomplete | **planned** | — |
+| M6 `@file` / `#symbol` autocomplete | **partial** | `@file` completion in `mention.rs` (fuzzy, `.gitignore`-aware, `maukode_tools::workspace_files`); no `#symbol` |
 | Concurrent subagent switching, split-pane layout | **planned** | — |
 
 ---
@@ -196,14 +199,13 @@ Remaining risks, by design or not yet addressed:
 ### Features
 
 Done in #89: usage and cost per session, extended thinking for Anthropic (with signature round
-trips), and image input. Remaining:
+trips), and image input. Done in #90: `apply_patch`, hooks, and pattern-based permission rules.
+Done in #91: `maukode run --output json|stream-json` and TUI steering, queueing and `@file`
+completion. Done in #92: the web UI command palette and shortcut sheet, session archive on the
+daemon, and open in editor. Remaining:
 
-1. Multi-file edits (`apply_patch`).
-2. Hooks (e.g. format after edit) and pattern-based permission rules instead of exact-match
-   session whitelisting.
-3. A JSON output mode for `maukode run` for CI and scripts.
-4. TUI parity: steering/queueing and `@file` autocomplete (M2, M6).
-5. Restore web UI features lost in the rebuild (command palette, open in editor, archive).
+1. Turn an approval into a permission rule from the prompt ("always allow `npm run *`").
+2. Images from the TUI, `maukode run`, and `read_file`; `#symbol` completion in the TUI.
 
 ---
 

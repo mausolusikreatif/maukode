@@ -6,6 +6,7 @@ pub mod compaction;
 pub mod config;
 pub mod consolidation;
 pub mod context;
+pub mod hooks;
 pub mod mcp;
 pub mod paths;
 pub mod permission;
@@ -36,9 +37,10 @@ pub use context::{
     context_with_project_memory, memory_auto_extract_enabled, project_context,
     register_memory_tools, ContextManager, MemoryBinding,
 };
+pub use hooks::{Hook, Hooks, HooksConfig};
 pub use maukode_memory::{MemoryContext, MemoryStore, Scope};
 pub use mcp::{McpClient, McpManager, McpTool};
-pub use permission::{PermissionManager, PermissionMode};
+pub use permission::{PermissionManager, PermissionMode, PermissionRule, RuleAction};
 pub use plugin::PluginManager;
 pub use pricing::ModelPricing;
 pub use reflection::{ProposedSkill, ReflectionConfig, ReflectionEngine};

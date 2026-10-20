@@ -134,6 +134,69 @@ below).
 | `bash_whitelist` | `array` | `["cargo *", "git status", "git diff", "npm test"]` | `bash` commands that skip approval in any mode, unless the risk assessment rates them dangerous. Entries match one simple command (no `;`, `&&`, `\|`, redirection, `$(…)`, subshell, or newline) word by word: `git status` matches exactly; `cargo *` matches `cargo` with any arguments; `git log*` also lets the last word continue (`git log --oneline`). A leading `VAR=value` never matches. |
 | `trusted_projects` | `array` | `[]` | Folders (and their subfolders) whose own `mcp.json` / `.maukode/mcp.json` may start MCP servers. Add the current folder with `maukode trust`, remove it with `maukode trust --revoke`. Takes effect without restarting the daemon. Only `maukode trust` writes this list; other saves (the daemon's settings API, the CLI) keep what is on disk. |
 
+### Permission rules
+
+`security.permission_rules` allows, asks for, or denies tool calls in every permission mode. Each
+rule names a `tool` (`*` wildcards allowed) and optionally a `command` (for `bash`, matched like a
+`bash_whitelist` entry) and a `path` (a glob relative to the workspace, for tools with a `path`
+argument and for the files of an `apply_patch` patch; `*` stays within a directory, `**` crosses
+directories). Every condition a rule gives must match.
+
+```json
+"permission_rules": [
+  { "tool": "bash", "command": "npm run *", "action": "allow" },
+  { "tool": "bash", "command": "git push*", "action": "deny" },
+  { "tool": "*", "path": "migrations/**", "action": "ask" },
+  { "tool": "mcp__github__*", "action": "ask" }
+]
+```
+
+When several rules match, `deny` wins over `ask`, and `ask` over `allow`. `deny` blocks the call
+and tells the model so; `ask` prompts even in `trust` mode; `allow` skips the prompt, except for a
+`bash` command the risk assessment rates dangerous. A chained command (`npm run x && rm …`) is not
+one simple command, so no `command` pattern matches it. Rules are read when the daemon, TUI, or CLI
+starts.
+
+## 🪝 Hooks
+
+`hooks` runs shell commands around tool calls and at the end of turns:
+
+```json
+"hooks": {
+  "post_tool_use": [
+    { "tools": ["edit_file", "write_file", "apply_patch"], "command": "cargo fmt --all" }
+  ],
+  "pre_tool_use": [
+    { "tools": ["bash"], "command": "./scripts/check-command.sh", "timeout_secs": 10 }
+  ],
+  "turn_end": [{ "command": "notify-send 'MauKode finished a turn'" }]
+}
+```
+
+| Event | When | Effect of a non-zero exit |
+| :--- | :--- | :--- |
+| `pre_tool_use` | Before a matching call runs (after approval) | The call is blocked; the model receives the hook's output as the error. A timeout blocks too. |
+| `post_tool_use` | After a matching call | The hook's output is appended to the tool result. |
+| `turn_end` | After every turn | Logged only. |
+
+`tools` lists tool names (`*` wildcards allowed); without it a hook applies to every tool. Hooks run
+on the host with `bash -c` in the session's directory, also when commands of the session run in a
+lawang cell, with a 60-second default timeout. They receive the event as JSON on stdin
+(`event`, `session_id`, `tool_name`, `tool_input`, and for `post_tool_use` also `tool_output` and
+`is_error`) and in `MAUKODE_HOOK_EVENT`, `MAUKODE_SESSION_ID` and `MAUKODE_TOOL_NAME`. Hooks also
+apply to subagents' tool calls. A project's own `.maukode/hooks.json` (same shape as `hooks`) is
+used only when the project is trusted (`maukode trust`).
+
+## 📝 Editor
+
+`editor.command` is how the web UI's "Buka di editor" opens a file, on the machine the daemon runs
+on. The command is split on whitespace and run without a shell; `{path}` and `{line}` are replaced
+in each argument. It defaults to `code --goto {path}:{line}`.
+
+```json
+"editor": { "command": "zed {path}:{line}" }
+```
+
 ## 📦 Execution Backend
 
 `execution` chooses where `bash` commands run:

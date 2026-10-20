@@ -2,6 +2,7 @@ pub mod bash;
 pub mod exec;
 pub mod file;
 pub mod grep;
+pub mod patch;
 pub mod registry;
 pub mod security;
 pub mod tool;
@@ -13,7 +14,8 @@ pub use exec::{
     HostBackend, LawangBackend, LawangSettings, SyncedTool,
 };
 pub use file::{EditFileTool, GlobTool, ReadFileTool, WriteFileTool};
-pub use grep::GrepTool;
+pub use grep::{workspace_files, GrepTool};
+pub use patch::ApplyPatchTool;
 pub use registry::ToolRegistry;
 pub use security::{
     assess_bash_command, bash_whitelist_allows, sandboxed_command, simple_command_words, PathJail,
@@ -53,6 +55,7 @@ pub fn create_default_registry_with_jail(cwd: impl Into<PathBuf>, jail: PathJail
         jail.clone(),
     )));
     registry.register(Arc::new(EditFileTool::with_jail(cwd.clone(), jail.clone())));
+    registry.register(Arc::new(ApplyPatchTool::with_jail(jail.clone())));
     registry.register(Arc::new(GlobTool::with_jail(cwd.clone(), jail.clone())));
     registry.register(Arc::new(GrepTool::with_jail(cwd, jail)));
     registry.register(Arc::new(WebSearchTool::new()));
@@ -82,7 +85,11 @@ pub fn create_registry_with_backend(
         &mut registry,
         &jail,
         &backend,
-        &[("write_file", true), ("edit_file", true)],
+        &[
+            ("write_file", true),
+            ("edit_file", true),
+            ("apply_patch", true),
+        ],
     );
     registry
 }
@@ -105,7 +112,14 @@ fn wrap_file_tools(
     backend: &Arc<dyn ExecBackend>,
     writes: &[(&str, bool)],
 ) {
-    for name in ["read_file", "glob", "grep", "write_file", "edit_file"] {
+    for name in [
+        "read_file",
+        "glob",
+        "grep",
+        "write_file",
+        "edit_file",
+        "apply_patch",
+    ] {
         let Some(tool) = registry.get(name) else {
             continue;
         };

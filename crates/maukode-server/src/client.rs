@@ -277,6 +277,21 @@ impl ServerClient {
         Ok(())
     }
 
+    /// Add guidance to the running turn (`POST /sessions/{id}/steer`).
+    pub async fn steer_prompt(&self, id: SessionId, prompt: &str) -> Result<()> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/sessions/{id}/steer", self.base_url))
+            .json(&serde_json::json!({ "prompt": prompt }))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to steer: {err}"));
+        }
+        Ok(())
+    }
+
     pub async fn cancel_prompt(&self, id: SessionId) -> Result<()> {
         let resp = self
             .http
@@ -336,6 +351,27 @@ impl ServerClient {
         if !resp.status().is_success() {
             let err = resp.text().await.unwrap_or_default();
             return Err(anyhow!("Failed to set permission mode: {err}"));
+        }
+        Ok(())
+    }
+
+    /// Change the permission mode of one session only.
+    pub async fn set_session_permission_mode(
+        &self,
+        session_id: SessionId,
+        mode: maukode_core::PermissionMode,
+    ) -> Result<()> {
+        let resp = self
+            .http
+            .post(format!("{}/api/v1/permissions/mode", self.base_url))
+            .json(&serde_json::json!({ "mode": mode, "session_id": session_id }))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "Failed to set the session's permission mode: {err}"
+            ));
         }
         Ok(())
     }

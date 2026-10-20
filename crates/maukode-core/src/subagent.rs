@@ -271,6 +271,11 @@ impl Tool for SubagentTool {
         if let Some(manager) = &self.permission_manager {
             child_runner = child_runner.with_permission_manager(Arc::clone(manager));
         }
+        // The session's hooks apply to its subagents' tool calls too.
+        child_runner = child_runner.with_hooks(Arc::new(crate::hooks::Hooks::load(
+            &self.directory,
+            &config,
+        )));
 
         let (child_tx, mut child_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let event_sender_task = event_sender.clone();

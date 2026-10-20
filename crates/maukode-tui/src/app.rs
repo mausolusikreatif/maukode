@@ -271,6 +271,21 @@ pub struct App {
     pub server_client: Option<Arc<ServerClient>>,
     pub mcp_manager: Arc<maukode_core::McpManager>,
     pub render_cache: crate::render_cache::MessageRenderCache,
+    /// Prompts typed while a turn ran; the next one starts when a turn completes.
+    pub queued_prompts: std::collections::VecDeque<String>,
+    /// Workspace files for `@file` completion, listed on the first `@`.
+    pub file_index: Option<Arc<Vec<String>>>,
+    file_index_loading: bool,
+    /// The `@file` completion popup, while a mention is being typed.
+    pub mention: Option<MentionPopup>,
+}
+
+/// Completions for the `@` mention under the cursor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MentionPopup {
+    pub mention: crate::mention::Mention,
+    pub matches: Vec<String>,
+    pub selected: usize,
 }
 
 impl App {
@@ -321,7 +336,8 @@ impl App {
         let tools = Arc::new(tool_registry);
         let permission_manager = Arc::new(
             PermissionManager::new(config.security.permission_mode)
-                .with_whitelist(config.security.bash_whitelist.clone()),
+                .with_whitelist(config.security.bash_whitelist.clone())
+                .with_rules(config.security.permission_rules.clone()),
         );
         let checkpoint_manager = Arc::new(CheckpointManager::new(&cwd).await?);
 
@@ -430,6 +446,10 @@ impl App {
             animation_frame: 0,
             should_quit: false,
             event_tx,
+            queued_prompts: std::collections::VecDeque::new(),
+            file_index: None,
+            file_index_loading: false,
+            mention: None,
             server_client,
             mcp_manager,
             render_cache: crate::render_cache::MessageRenderCache::default(),
@@ -589,6 +609,40 @@ impl App {
         let cmd = parts.first().copied().unwrap_or("");
 
         match cmd {
+            "/steer" => {
+                let text = line.trim_start().trim_start_matches("/steer").trim();
+                if text.is_empty() {
+                    self.set_status("Usage: /steer <guidance for the running turn>");
+                } else {
+                    self.steer(text.to_string());
+                }
+            }
+            "/queue" => match parts.get(1).copied() {
+                Some("clear") => {
+                    let dropped = self.queued_prompts.len();
+                    self.queued_prompts.clear();
+                    self.set_status(format!("Dropped {dropped} queued prompt(s)"));
+                }
+                Some("run") if !self.is_running => self.start_next_queued(),
+                Some("run") => self.set_status("A turn is running; the queue continues after it."),
+                _ => {
+                    let content = if self.queued_prompts.is_empty() {
+                        "No queued prompts. Press Enter while a turn runs to queue one.".into()
+                    } else {
+                        let list: Vec<String> = self
+                            .queued_prompts
+                            .iter()
+                            .enumerate()
+                            .map(|(i, p)| format!("{}. {p}", i + 1))
+                            .collect();
+                        format!("Queued prompts:\n{}", list.join("\n"))
+                    };
+                    self.items.push(ChatItem {
+                        role: ChatRole::System,
+                        content,
+                    });
+                }
+            },
             "/dir" | "/pwd" => {
                 self.items.push(ChatItem {
                     role: ChatRole::System,
@@ -978,7 +1032,7 @@ impl App {
         }
 
         if self.is_running {
-            self.set_status("Agent is currently busy processing.");
+            self.queue_prompt(input);
             return;
         }
 
@@ -1105,7 +1159,8 @@ impl App {
         let runner = SessionRunner::new(session, llm_client, tools, context, runner_config)
             .with_permission_manager(Arc::clone(&self.permission_manager))
             .with_permission_store(Arc::new(self.store.clone()))
-            .with_checkpoint_manager(Arc::clone(&self.checkpoint_manager));
+            .with_checkpoint_manager(Arc::clone(&self.checkpoint_manager))
+            .with_hooks(Arc::new(maukode_core::Hooks::load(&self.cwd, &self.config)));
         let runner = match &self.memory {
             Some(binding) => runner.with_memory(binding.clone()),
             None => runner,
@@ -1404,10 +1459,153 @@ impl App {
         }
     }
 
+    /// Keep a prompt typed during a turn for when the turn completes.
+    fn queue_prompt(&mut self, text: String) {
+        self.queued_prompts.push_back(text.clone());
+        self.items.push(ChatItem {
+            role: ChatRole::System,
+            content: format!("Queued for after this turn: {text}"),
+        });
+        self.auto_scroll = true;
+        self.set_status(format!(
+            "{} prompt(s) queued. Alt+Enter steers the running turn instead.",
+            self.queued_prompts.len()
+        ));
+    }
+
+    /// Steer the running turn with what is in the prompt.
+    pub fn steer_input(&mut self) {
+        let text = std::mem::take(&mut self.input).trim().to_string();
+        self.cursor_pos = 0;
+        self.mention = None;
+        if !text.is_empty() {
+            self.steer(text);
+        }
+    }
+
+    /// Give the running turn more guidance: it is added to the conversation and the model reads it
+    /// at its next step.
+    pub fn steer(&mut self, text: String) {
+        if !self.is_running {
+            self.set_status("No turn is running; send it as a prompt instead.");
+            return;
+        }
+        self.items.push(ChatItem {
+            role: ChatRole::User,
+            content: format!("[Steer] {text}"),
+        });
+        self.auto_scroll = true;
+        let session_id = self.session.try_read().map(|s| s.id).ok();
+        match (self.server_client.clone(), session_id) {
+            (Some(client), Some(id)) => {
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = client.steer_prompt(id, &text).await {
+                        let _ = tx.send(AppEvent::LLM(LLMEvent::Error {
+                            message: format!("Steering failed: {e}"),
+                        }));
+                    }
+                });
+            }
+            _ => {
+                let session = Arc::clone(&self.session);
+                tokio::spawn(async move {
+                    session
+                        .write()
+                        .await
+                        .add_message(Message::user(format!("[Steer]: {text}")));
+                });
+            }
+        }
+        self.set_status("Steering sent; the agent reads it at its next step.");
+    }
+
+    /// Start the next queued prompt, if any.
+    fn start_next_queued(&mut self) {
+        if let Some(next) = self.queued_prompts.pop_front() {
+            self.input = next;
+            self.cursor_pos = 0;
+            self.submit_prompt();
+        }
+    }
+
+    /// Recompute the `@file` completions after the input or the cursor changed.
+    pub fn update_mention(&mut self) {
+        let Some(mention) = crate::mention::mention_at(&self.input, self.cursor_pos) else {
+            self.mention = None;
+            return;
+        };
+        let matches = match &self.file_index {
+            Some(files) => {
+                crate::mention::rank(&mention.query, files, crate::mention::MAX_SUGGESTIONS)
+            }
+            None => {
+                self.load_file_index();
+                Vec::new()
+            }
+        };
+        let selected = self
+            .mention
+            .as_ref()
+            .map_or(0, |m| m.selected.min(matches.len().saturating_sub(1)));
+        self.mention = Some(MentionPopup {
+            mention,
+            matches,
+            selected,
+        });
+    }
+
+    fn load_file_index(&mut self) {
+        if self.file_index_loading {
+            return;
+        }
+        self.file_index_loading = true;
+        let root = self.cwd.clone();
+        let tx = self.event_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let files = maukode_tools::workspace_files(&root, 20_000);
+            let _ = tx.send(AppEvent::FileIndex(files));
+        });
+    }
+
+    /// Store the listed workspace files and refresh the completions.
+    pub fn set_file_index(&mut self, files: Vec<String>) {
+        self.file_index = Some(Arc::new(files));
+        self.file_index_loading = false;
+        self.update_mention();
+    }
+
+    /// Move the completion selection by `delta`, wrapping around.
+    pub fn move_mention_selection(&mut self, delta: isize) {
+        if let Some(popup) = &mut self.mention {
+            let len = popup.matches.len() as isize;
+            if len > 0 {
+                popup.selected = (popup.selected as isize + delta).rem_euclid(len) as usize;
+            }
+        }
+    }
+
+    /// Put the selected completion in place of the mention. Returns whether one was chosen.
+    pub fn accept_mention(&mut self) -> bool {
+        let Some(popup) = self.mention.take() else {
+            return false;
+        };
+        let Some(path) = popup.matches.get(popup.selected) else {
+            return false;
+        };
+        let (text, cursor) =
+            crate::mention::complete(&self.input, &popup.mention, self.cursor_pos, path);
+        self.input = text;
+        self.cursor_pos = cursor;
+        true
+    }
+
     pub fn handle_turn_finished(&mut self, result: Result<(), String>) {
         self.is_running = false;
         self.active_cancellation = None;
         let was_cancelled = std::mem::take(&mut self.cancel_requested);
+        // Queued prompts follow a completed turn only; a failed or cancelled one leaves them.
+        let run_next = result.is_ok() && !was_cancelled;
         match result {
             Ok(()) if was_cancelled => {
                 self.set_status("Cancelled");
@@ -1422,6 +1620,19 @@ impl App {
                     content: format!("Turn finished with error: {e}"),
                 });
             }
+        }
+        if !run_next && !self.queued_prompts.is_empty() {
+            self.items.push(ChatItem {
+                role: ChatRole::System,
+                content: format!(
+                    "{} queued prompt(s) kept. /queue run sends the next, /queue clear drops them.",
+                    self.queued_prompts.len()
+                ),
+            });
+        }
+
+        if run_next {
+            self.start_next_queued();
         }
 
         // If connected to server, sync session state from server
@@ -1839,6 +2050,29 @@ mod stream_tests {
             matches!(&items[1].role, ChatRole::ToolCall { name, args, .. }
             if name == "glob" && args.is_empty())
         );
+    }
+
+    #[tokio::test]
+    async fn prompts_typed_during_a_turn_are_queued_and_mentions_complete() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(dir.path().to_path_buf(), tx, None, false, None, None)
+            .await
+            .unwrap();
+        app.is_running = true;
+        app.input = "next task".into();
+        app.submit_prompt();
+        assert_eq!(app.queued_prompts, ["next task"]);
+        assert!(app.input.is_empty());
+
+        app.set_file_index(vec!["README.md".into(), "src/main.rs".into()]);
+        app.input = "see @mai".into();
+        app.cursor_pos = 8;
+        app.update_mention();
+        assert_eq!(app.mention.as_ref().unwrap().matches[0], "src/main.rs");
+        assert!(app.accept_mention());
+        assert_eq!(app.input, "see @src/main.rs ");
+        assert!(app.mention.is_none());
     }
 
     #[tokio::test]

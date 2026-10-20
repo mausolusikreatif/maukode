@@ -10,7 +10,25 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+mod output;
 mod remote;
+
+use output::{OutputFormat, RunReport};
+
+fn parse_permission_mode(value: &str) -> Result<maukode_core::PermissionMode, String> {
+    serde_json::from_value(serde_json::Value::String(value.to_lowercase()))
+        .map_err(|_| format!("'{value}' is not one of ask, strict, review, trust"))
+}
+
+/// Print a machine-readable report and exit non-zero when the turn failed.
+fn finish_machine_run(report: &RunReport, format: OutputFormat) {
+    if format.is_machine() {
+        println!("{}", report.to_json());
+        if report.failed() {
+            std::process::exit(1);
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -105,6 +123,21 @@ enum Commands {
     Run {
         #[arg(required = true, help = "The prompt instruction for MauKode")]
         prompt: String,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = OutputFormat::Text,
+            help = "text: progress for people; json: one result object at the end; \
+                    stream-json: every event as a JSON line, then the result"
+        )]
+        output: OutputFormat,
+        #[arg(
+            long,
+            value_parser = parse_permission_mode,
+            help = "ask, strict, review or trust for this run. With --output json or \
+                    stream-json, calls that need approval are denied unless this allows them"
+        )]
+        permission_mode: Option<maukode_core::PermissionMode>,
     },
     #[command(about = "Scan project and initialize standard AGENTS.md conventions")]
     Init {
@@ -429,16 +462,17 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Determine direct prompt
-    let prompt_to_run = match cli.command {
-        Some(Commands::Run { prompt }) => Some(prompt),
+    let (prompt_to_run, run_format, run_mode) = match cli.command {
+        Some(Commands::Run {
+            prompt,
+            output,
+            permission_mode,
+        }) => (Some(prompt), output, permission_mode),
         None => {
-            if !cli.prompt.is_empty() {
-                Some(cli.prompt.join(" "))
-            } else {
-                None
-            }
+            let prompt = (!cli.prompt.is_empty()).then(|| cli.prompt.join(" "));
+            (prompt, OutputFormat::Text, None)
         }
-        _ => None,
+        _ => (None, OutputFormat::Text, None),
     };
 
     let parsed_session_id = if let Some(ref s) = cli.session {
@@ -520,12 +554,21 @@ async fn main() -> anyhow::Result<()> {
         };
 
         if let Some(prompt) = prompt_to_run {
-            println!(
-                "🚀 \x1b[1;36mMauKode\x1b[0m running via {label} (\x1b[2m{}\x1b[0m)",
-                client.base_url()
-            );
-            println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
-            remote::run_remote_turn(&client, target_session_id, &prompt).await?;
+            if !run_format.is_machine() {
+                println!(
+                    "🚀 \x1b[1;36mMauKode\x1b[0m running via {label} (\x1b[2m{}\x1b[0m)",
+                    client.base_url()
+                );
+                println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
+            }
+            if let Some(mode) = run_mode {
+                client
+                    .set_session_permission_mode(target_session_id, mode)
+                    .await?;
+            }
+            let report =
+                remote::run_remote_turn(&client, target_session_id, &prompt, run_format).await?;
+            finish_machine_run(&report, run_format);
             return Ok(());
         }
 
@@ -687,7 +730,8 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 }
                 println!();
-                remote::run_remote_turn(&client, target_session_id, trimmed).await?;
+                remote::run_remote_turn(&client, target_session_id, trimmed, OutputFormat::Text)
+                    .await?;
                 println!();
             }
             return Ok(());
@@ -742,8 +786,10 @@ async fn main() -> anyhow::Result<()> {
 
     // If single prompt is supplied, run headless turn and persist
     if let Some(prompt) = prompt_to_run {
-        println!("🚀 \x1b[1;36mMauKode\x1b[0m running with provider \x1b[1;32m{}\x1b[0m, model \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
-        println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
+        if !run_format.is_machine() {
+            println!("🚀 \x1b[1;36mMauKode\x1b[0m running with provider \x1b[1;32m{}\x1b[0m, model \x1b[1;33m{}\x1b[0m", config.active_provider, config.active_model);
+            println!("📂 Workspace: \x1b[2m{}\x1b[0m\n", cwd.display());
+        }
 
         let active_sess = if let Some(id) = parsed_session_id {
             store
@@ -760,9 +806,13 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
+        let session_id = session_arc.read().await.id;
         let perm_mgr = Arc::new(
-            maukode_core::PermissionManager::new(config.security.permission_mode)
-                .with_whitelist(config.security.bash_whitelist.clone()),
+            maukode_core::PermissionManager::new(
+                run_mode.unwrap_or(config.security.permission_mode),
+            )
+            .with_whitelist(config.security.bash_whitelist.clone())
+            .with_rules(config.security.permission_rules.clone()),
         );
         let mut context = ContextManager::new(&cwd);
         let mut tool_reg = if config.security.jail_path_traversal {
@@ -816,7 +866,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_permission_manager(Arc::clone(&perm_mgr))
         .with_permission_store(Arc::clone(&store))
-        .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
+        .with_checkpoint_manager(Arc::clone(&checkpoint_manager))
+        .with_hooks(Arc::new(maukode_core::Hooks::load(&cwd, &config)));
         let runner = match memory {
             Some(binding) => runner.with_memory(binding),
             None => runner,
@@ -832,14 +883,35 @@ async fn main() -> anyhow::Result<()> {
             runner
         };
 
-        execute_turn(&runner, Some(Arc::clone(&perm_mgr)), Some(prompt)).await?;
+        let model = config.active_model.clone();
+        let cost = |usage: &maukode_protocol::TokenUsage| config.cost_of(&model, usage);
+        let report = execute_turn(
+            &runner,
+            Some(Arc::clone(&perm_mgr)),
+            Some(prompt),
+            run_format,
+            session_id,
+            &cost,
+        )
+        .await?;
 
         // Save session to SQLite
         let guard = session_arc.read().await;
         store
             .save_session(&guard, &config.active_provider, &config.active_model)
             .await?;
-        println!("\n\x1b[2m[Session saved to SQLite: {}]\x1b[0m", guard.id);
+        if let Err(error) = store.add_session_usage(guard.id, &report.usage).await {
+            tracing::warn!(%error, "Failed to record session usage");
+        }
+        if run_format.is_machine() {
+            finish_machine_run(&report, run_format);
+        } else {
+            println!(
+                "\n\x1b[2m[Session saved to SQLite: {}{}]\x1b[0m",
+                guard.id,
+                usage_suffix(&report.usage)
+            );
+        }
         return Ok(());
     }
 
@@ -872,7 +944,8 @@ async fn main() -> anyhow::Result<()> {
         let session_arc = Arc::new(tokio::sync::RwLock::new(active_sess));
         let perm_mgr = Arc::new(
             maukode_core::PermissionManager::new(config.security.permission_mode)
-                .with_whitelist(config.security.bash_whitelist.clone()),
+                .with_whitelist(config.security.bash_whitelist.clone())
+                .with_rules(config.security.permission_rules.clone()),
         );
         let mut context = ContextManager::new(&cwd);
         let mut tool_reg = if config.security.jail_path_traversal {
@@ -924,7 +997,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_permission_manager(Arc::clone(&perm_mgr))
         .with_permission_store(Arc::clone(&store))
-        .with_checkpoint_manager(Arc::clone(&checkpoint_manager));
+        .with_checkpoint_manager(Arc::clone(&checkpoint_manager))
+        .with_hooks(Arc::new(maukode_core::Hooks::load(&cwd, &config)));
         if let Some(binding) = memory {
             runner = runner.with_memory(binding);
         }
@@ -1110,16 +1184,26 @@ async fn main() -> anyhow::Result<()> {
             }
 
             println!();
-            execute_turn(
+            let session_id = session_arc.read().await.id;
+            let model = config.active_model.clone();
+            let cost = |usage: &maukode_protocol::TokenUsage| config.cost_of(&model, usage);
+            let report = execute_turn(
                 &runner,
                 Some(Arc::clone(&perm_mgr)),
                 Some(trimmed.to_string()),
+                OutputFormat::Text,
+                session_id,
+                &cost,
             )
             .await?;
             let guard = session_arc.read().await;
             store
                 .save_session(&guard, &config.active_provider, &config.active_model)
                 .await?;
+            // After the save: the usage row refers to the session row.
+            if let Err(error) = store.add_session_usage(session_id, &report.usage).await {
+                tracing::warn!(%error, "Failed to record session usage");
+            }
             println!("\n");
         }
         return Ok(());
@@ -1138,11 +1222,32 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// " · 12k tokens · $0.042" for the end-of-run line (empty without usage).
+fn usage_suffix(usage: &maukode_protocol::SessionUsage) -> String {
+    let tokens = usage.input_tokens + usage.output_tokens;
+    if tokens == 0 {
+        return String::new();
+    }
+    let mut out = format!(" · {tokens} tokens");
+    if usage.cost_microusd > 0 || usage.unpriced_responses == 0 {
+        out.push_str(&format!(
+            " · ${:.3}",
+            usage.cost_microusd as f64 / 1_000_000.0
+        ));
+    }
+    out
+}
+
+/// Run one turn in-process. With `OutputFormat::Text` progress is printed and approvals are asked
+/// on the terminal; the machine formats print only JSON and deny calls that need approval.
 async fn execute_turn(
     runner: &SessionRunner,
     perm_mgr: Option<Arc<maukode_core::PermissionManager>>,
     prompt: Option<String>,
-) -> anyhow::Result<()> {
+    format: OutputFormat,
+    session_id: SessionId,
+    cost: &(dyn Fn(&maukode_protocol::TokenUsage) -> Option<f64> + Sync),
+) -> anyhow::Result<RunReport> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<LLMEvent>();
 
     let runner_task = async move { runner.run(prompt, event_tx).await };
@@ -1150,8 +1255,23 @@ async fn execute_turn(
     let display_task = async {
         let mut stdout = io::stdout();
         let mut in_reasoning = false;
+        let mut report = RunReport::new(session_id.to_string());
 
         while let Some(event) = event_rx.recv().await {
+            report.observe(&event, cost);
+            if format.is_machine() {
+                if format == OutputFormat::StreamJson {
+                    println!("{}", output::event_line(&event));
+                }
+                if let LLMEvent::PermissionRequest(req) = &event {
+                    report.denied_permissions.push(denied_label(req));
+                    if let Some(ref pm) = perm_mgr {
+                        let decision = maukode_protocol::PermissionDecision::Deny;
+                        let _ = pm.respond(&req.request_id, decision).await;
+                    }
+                }
+                continue;
+            }
             match event {
                 LLMEvent::TextDelta { text } => {
                     if in_reasoning {
@@ -1260,9 +1380,21 @@ async fn execute_turn(
                 _ => {}
             }
         }
+        report
     };
 
-    let (run_res, _) = tokio::join!(runner_task, display_task);
-    run_res?;
-    Ok(())
+    let (run_res, report) = tokio::join!(runner_task, display_task);
+    // The machine formats report a failed turn in the result instead.
+    if !format.is_machine() {
+        run_res?;
+    }
+    Ok(report)
+}
+
+/// How a denied approval is listed in a machine-readable report.
+pub(crate) fn denied_label(req: &maukode_protocol::PermissionRequest) -> String {
+    match req.command.as_deref().or(req.path.as_deref()) {
+        Some(detail) => format!("{}: {detail}", req.tool_name),
+        None => req.tool_name.clone(),
+    }
 }

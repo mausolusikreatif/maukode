@@ -20,6 +20,8 @@ pub enum AppEvent {
     McpStatusFetched(Result<maukode_protocol::McpListResponse, String>),
     SessionCompacted(Result<maukode_protocol::CompactResponse, String>),
     AuditLoaded(Result<String, String>),
+    /// Workspace files for `@file` completion.
+    FileIndex(Vec<String>),
 }
 
 pub struct EventHandler {

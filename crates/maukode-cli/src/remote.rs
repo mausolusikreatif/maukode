@@ -1,14 +1,25 @@
+use crate::output::{event_line, usage_since, OutputFormat, RunReport};
 use anyhow::Result;
 use futures::StreamExt;
 use maukode_protocol::{LLMEvent, SessionId};
 use maukode_server::ServerClient;
 use std::io::{self, Write};
 
+/// Run one turn on the daemon. With `OutputFormat::Text` progress is printed and approvals are
+/// asked on the terminal; the machine formats print only JSON and deny calls that need approval.
 pub async fn run_remote_turn(
     client: &ServerClient,
     session_id: SessionId,
     prompt: &str,
-) -> Result<()> {
+    format: OutputFormat,
+) -> Result<RunReport> {
+    // The session's totals before this turn, to report the turn's own usage.
+    let usage_before = client
+        .get_session(session_id)
+        .await
+        .map(|detail| detail.usage)
+        .unwrap_or_default();
+
     // 1. Subscribe to SSE events
     let mut event_stream = client.subscribe_events(session_id).await?;
 
@@ -18,9 +29,32 @@ pub async fn run_remote_turn(
     let mut stdout = io::stdout();
     let mut in_reasoning = false;
     let mut in_assistant = false;
+    let mut report = RunReport::new(session_id.to_string());
 
     // 3. Consume events in real-time
     while let Some(event_res) = event_stream.next().await {
+        if let Ok(event) = &event_res {
+            // The daemon prices the responses; local counting is replaced below.
+            report.observe(event, |_| None);
+        }
+        if format.is_machine() {
+            let event = event_res?;
+            if format == OutputFormat::StreamJson {
+                println!("{}", event_line(&event));
+            }
+            match &event {
+                LLMEvent::PermissionRequest(req) => {
+                    report.denied_permissions.push(crate::denied_label(req));
+                    let decision = maukode_protocol::PermissionDecision::Deny;
+                    let _ = client
+                        .respond_permission(session_id, &req.request_id, decision)
+                        .await;
+                }
+                LLMEvent::TurnStopped { .. } => break,
+                _ => {}
+            }
+            continue;
+        }
         match event_res {
             Ok(event) => match event {
                 LLMEvent::ReasoningDelta { text } => {
@@ -137,6 +171,11 @@ pub async fn run_remote_turn(
         }
     }
 
-    println!();
-    Ok(())
+    if let Some(totals) = &report.server_totals {
+        report.usage = usage_since(totals, &usage_before);
+    }
+    if !format.is_machine() {
+        println!();
+    }
+    Ok(report)
 }

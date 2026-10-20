@@ -96,6 +96,32 @@ const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 
 /// Search `path` for `re`, honouring `.gitignore` and skipping hidden, binary and large files.
+/// Files under `root` (relative paths, sorted), honouring `.gitignore` and skipping `target` and
+/// `node_modules`; at most `limit`. Used for `@file` completion.
+pub fn workspace_files(root: &std::path::Path, limit: usize) -> Vec<String> {
+    let walker = ignore::WalkBuilder::new(root)
+        .max_depth(Some(12))
+        .require_git(false)
+        .filter_entry(|e| {
+            let name = e.file_name();
+            name != "target" && name != "node_modules"
+        })
+        .build();
+    let mut files: Vec<String> = walker
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+        .filter_map(|e| {
+            e.path()
+                .strip_prefix(root)
+                .ok()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+        })
+        .take(limit)
+        .collect();
+    files.sort();
+    files
+}
+
 /// Paths in the output are relative to `root` when they are inside it.
 fn search(re: &Regex, path: &std::path::Path, root: &std::path::Path) -> Vec<String> {
     let mut results = Vec::new();

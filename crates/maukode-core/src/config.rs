@@ -70,6 +70,10 @@ pub struct SecurityConfig {
     /// untrusted repository must not run commands it ships. Add one with `maukode trust`.
     #[serde(default)]
     pub trusted_projects: Vec<PathBuf>,
+    /// Rules that allow, ask for, or deny tool calls by tool name, `bash` command, or path.
+    /// A matching `deny` wins over `ask`, which wins over `allow`, in every permission mode.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permission_rules: Vec<crate::permission::PermissionRule>,
 }
 
 impl SecurityConfig {
@@ -110,6 +114,7 @@ impl Default for SecurityConfig {
             sandbox_mode: SandboxMode::default(),
             bash_whitelist: default_whitelist(),
             trusted_projects: Vec::new(),
+            permission_rules: Vec::new(),
         }
     }
 }
@@ -239,9 +244,55 @@ pub struct AppConfig {
     pub agent: AgentConfig,
     #[serde(default)]
     pub execution: ExecutionConfig,
+    /// How the daemon opens a file in an editor (web UI "open in editor").
+    #[serde(default, skip_serializing_if = "EditorConfig::is_default")]
+    pub editor: EditorConfig,
+    /// Commands run around tool calls and at the end of turns (see `hooks.rs`).
+    #[serde(default, skip_serializing_if = "crate::hooks::HooksConfig::is_empty")]
+    pub hooks: crate::hooks::HooksConfig,
     /// Per-model settings (thinking, prices), keyed by model id.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub models: std::collections::BTreeMap<String, ModelSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorConfig {
+    /// Command and arguments, split on whitespace, with `{path}` and `{line}` replaced in each
+    /// argument (no shell is involved). Defaults to `code --goto {path}:{line}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
+impl EditorConfig {
+    fn is_default(&self) -> bool {
+        self.command.is_none()
+    }
+}
+
+/// The program and arguments that open `path` at `line` (1 when unset) with the editor
+/// command `template` (`code --goto {path}:{line}` when unset).
+pub fn editor_argv(
+    template: Option<&str>,
+    path: &Path,
+    line: Option<u32>,
+) -> std::result::Result<Vec<String>, String> {
+    let template = template
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or("code --goto {path}:{line}");
+    let path = path.to_string_lossy();
+    let line = line.unwrap_or(1).to_string();
+    let argv: Vec<String> = template
+        .split_whitespace()
+        .map(|word| word.replace("{path}", &path).replace("{line}", &line))
+        .collect();
+    if argv.is_empty() {
+        return Err("editor.command is empty".into());
+    }
+    if !template.contains("{path}") {
+        return Err("editor.command must contain {path}".into());
+    }
+    Ok(argv)
 }
 
 /// Settings for one model.
@@ -268,6 +319,8 @@ impl Default for AppConfig {
             web_search: WebSearchConfig::default(),
             execution: ExecutionConfig::default(),
             models: std::collections::BTreeMap::new(),
+            hooks: crate::hooks::HooksConfig::default(),
+            editor: EditorConfig::default(),
             providers: vec![
                 ProviderConfig {
                     id: "llmkita".to_string(),
@@ -779,6 +832,20 @@ fn write_owner_only(path: &Path, contents: &str) -> std::io::Result<()> {
 mod execution_tests {
     use super::*;
     use maukode_tools::CellIsolation;
+
+    #[test]
+    fn editor_command_fills_in_path_and_line_without_a_shell() {
+        let path = Path::new("/work/src/a b.rs");
+        assert_eq!(
+            editor_argv(None, path, Some(12)).unwrap(),
+            ["code", "--goto", "/work/src/a b.rs:12"]
+        );
+        assert_eq!(
+            editor_argv(Some("zed {path}"), path, None).unwrap(),
+            ["zed", "/work/src/a b.rs"]
+        );
+        assert!(editor_argv(Some("vim +{line}"), path, None).is_err());
+    }
 
     fn lawang(isolation: CellIsolation, image: Option<&str>) -> ExecutionConfig {
         ExecutionConfig {

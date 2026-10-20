@@ -193,7 +193,8 @@ impl ServerState {
 
         let permission_manager = Arc::new(
             PermissionManager::new(config.security.permission_mode)
-                .with_whitelist(config.security.bash_whitelist.clone()),
+                .with_whitelist(config.security.bash_whitelist.clone())
+                .with_rules(config.security.permission_rules.clone()),
         );
 
         let mcp_manager = Arc::new(maukode_core::McpManager::new());
