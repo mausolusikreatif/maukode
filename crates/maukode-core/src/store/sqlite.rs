@@ -1276,7 +1276,10 @@ mod tests {
             unpriced_responses: 1,
             ..SessionUsage::default()
         };
-        let total = store.add_session_usage(session.id, &unpriced).await.unwrap();
+        let total = store
+            .add_session_usage(session.id, &unpriced)
+            .await
+            .unwrap();
         assert_eq!(total.input_tokens, 105);
         assert_eq!(total.cost_microusd, 500);
         assert_eq!(total.unpriced_responses, 1);

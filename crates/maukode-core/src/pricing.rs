@@ -90,7 +90,10 @@ mod tests {
 
     #[test]
     fn builtin_prices_match_ids_snapshots_and_gateway_prefixes() {
-        assert_eq!(builtin_pricing("claude-opus-5-5").map(|p| p.input), Some(4.0));
+        assert_eq!(
+            builtin_pricing("claude-opus-5-5").map(|p| p.input),
+            Some(4.0)
+        );
         // `claude-opus-5` must not take the price of `claude-opus-5-5`, or the reverse.
         assert_eq!(builtin_pricing("claude-opus-5").map(|p| p.input), Some(5.0));
         assert_eq!(

@@ -521,9 +521,7 @@ mod tests {
                     ContentPart::ProviderItem {
                         value: thinking.clone(),
                     },
-                    ContentPart::Reasoning {
-                        text: "hmm".into(),
-                    },
+                    ContentPart::Reasoning { text: "hmm".into() },
                     ContentPart::Text { text: "A".into() },
                     ContentPart::ProviderItem {
                         value: json!({"type": "reasoning", "encrypted_content": "x"}),
@@ -567,7 +565,10 @@ mod tests {
             mode: ThinkingMode::Off,
             ..ThinkingSettings::default()
         };
-        assert_eq!(thinking("claude-sonnet-5-5", off.clone())["thinking"]["type"], "adaptive");
+        assert_eq!(
+            thinking("claude-sonnet-5-5", off.clone())["thinking"]["type"],
+            "adaptive"
+        );
         assert!(thinking("claude-opus-4-8", off).get("thinking").is_none());
         // 4.6 is adaptive but predates `display`.
         let body = thinking("claude-sonnet-4-6", auto.clone());
@@ -614,15 +615,19 @@ mod tests {
             "type": "signature_delta", "signature": "abc"
         }}));
         let done = state.consume(&json!({"type": "content_block_stop"}));
-        assert!(matches!(done.as_slice(), [Ok(LLMEvent::ProviderItem { item })]
-            if *item == json!({"type": "thinking", "thinking": "Let me see", "signature": "abc"})));
+        assert!(
+            matches!(done.as_slice(), [Ok(LLMEvent::ProviderItem { item })]
+            if *item == json!({"type": "thinking", "thinking": "Let me see", "signature": "abc"}))
+        );
 
         state.consume(&json!({"type": "content_block_start", "content_block": {
             "type": "redacted_thinking", "data": "opaque"
         }}));
         let done = state.consume(&json!({"type": "content_block_stop"}));
-        assert!(matches!(done.as_slice(), [Ok(LLMEvent::ProviderItem { item })]
-            if *item == json!({"type": "redacted_thinking", "data": "opaque"})));
+        assert!(
+            matches!(done.as_slice(), [Ok(LLMEvent::ProviderItem { item })]
+            if *item == json!({"type": "redacted_thinking", "data": "opaque"}))
+        );
     }
 
     #[test]

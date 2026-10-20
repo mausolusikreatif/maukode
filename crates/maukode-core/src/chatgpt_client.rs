@@ -53,7 +53,10 @@ fn build_body(request: &LLMRequest) -> Value {
         for part in &message.parts {
             // Other providers' items (Anthropic thinking blocks) mean nothing here.
             if let ContentPart::ProviderItem { value } = part {
-                if !matches!(value["type"].as_str(), Some("thinking" | "redacted_thinking")) {
+                if !matches!(
+                    value["type"].as_str(),
+                    Some("thinking" | "redacted_thinking")
+                ) {
                     input.push(value.clone());
                 }
             }
@@ -404,7 +407,9 @@ mod tests {
                     ContentPart::ProviderItem {
                         value: json!({"type": "thinking", "thinking": "x", "signature": "s"}),
                     },
-                    ContentPart::Text { text: "A cat".into() },
+                    ContentPart::Text {
+                        text: "A cat".into(),
+                    },
                 ]),
             ],
         );

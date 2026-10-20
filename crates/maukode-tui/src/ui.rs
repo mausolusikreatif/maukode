@@ -207,7 +207,11 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     if usage.input_tokens + usage.output_tokens > 0 {
         let mut text = format!("{} tok", usage.input_tokens + usage.output_tokens);
         if usage.cost_microusd > 0 || usage.unpriced_responses == 0 {
-            let partial = if usage.unpriced_responses > 0 { "+" } else { "" };
+            let partial = if usage.unpriced_responses > 0 {
+                "+"
+            } else {
+                ""
+            };
             text.push_str(&format!(
                 " ${:.3}{partial}",
                 usage.cost_microusd as f64 / 1_000_000.0

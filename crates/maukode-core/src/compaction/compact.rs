@@ -334,11 +334,17 @@ mod tests {
 
         assert!(session.system_prompt.is_none());
         let kept: Vec<_> = session.messages.iter().flat_map(|m| &m.parts).collect();
-        assert!(kept.iter().any(|p| matches!(p, ContentPart::Text { text } if text == "answer 7")));
-        assert!(kept.iter().all(|p| !matches!(p, ContentPart::ProviderItem { value }
+        assert!(kept
+            .iter()
+            .any(|p| matches!(p, ContentPart::Text { text } if text == "answer 7")));
+        assert!(kept
+            .iter()
+            .all(|p| !matches!(p, ContentPart::ProviderItem { value }
             if value["type"] == "thinking")));
         // Other providers' items are not bound to the history and stay.
-        assert!(kept.iter().any(|p| matches!(p, ContentPart::ProviderItem { value }
+        assert!(kept
+            .iter()
+            .any(|p| matches!(p, ContentPart::ProviderItem { value }
             if value["type"] == "reasoning")));
     }
 

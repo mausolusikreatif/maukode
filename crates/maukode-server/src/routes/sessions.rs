@@ -215,11 +215,7 @@ async fn record_usage(
     let mut delta = maukode_protocol::SessionUsage::default();
     delta.add(usage, cost);
     match state.store.add_session_usage(id, &delta).await {
-        Ok(total) => {
-            state
-                .publish_event(id, LLMEvent::SessionUsage(total))
-                .await
-        }
+        Ok(total) => state.publish_event(id, LLMEvent::SessionUsage(total)).await,
         Err(error) => tracing::warn!(%error, "Failed to record session usage"),
     }
 }
@@ -667,11 +663,7 @@ fn start_turn(
         tokio::spawn(async move {
             let run_handle = tokio::spawn(async move {
                 runner
-                    .run_message_with_cancellation(
-                        Some(prompt),
-                        llm_tx,
-                        Some(cancellation_token),
-                    )
+                    .run_message_with_cancellation(Some(prompt), llm_tx, Some(cancellation_token))
                     .await
             });
             let mut llm_rx = crate::coalesce::CoalescingReceiver::new(llm_rx);
