@@ -55,17 +55,24 @@ impl ToolRegistry {
         None
     }
 
+    /// Definitions sorted by name. The order must not change between requests: the tools are part
+    /// of the prompt prefix that providers cache.
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|t| t.definition()).collect()
+        let mut definitions: Vec<_> = self.tools.values().map(|t| t.definition()).collect();
+        definitions.sort_by(|a, b| a.name.cmp(&b.name));
+        definitions
     }
 
-    /// Definitions for a single source group (native, memory, sandbox, mcp).
+    /// Definitions for a single source group (native, memory, sandbox, mcp), sorted by name.
     pub fn definitions_by_source(&self, source: ToolSource) -> Vec<ToolDefinition> {
-        self.tools
+        let mut definitions: Vec<_> = self
+            .tools
             .values()
             .filter(|t| t.source() == source)
             .map(|t| t.definition())
-            .collect()
+            .collect();
+        definitions.sort_by(|a, b| a.name.cmp(&b.name));
+        definitions
     }
 
     /// Drop every tool belonging to the given source group (and any alias pointing at one).
@@ -181,6 +188,9 @@ mod tests {
         reg.register(Arc::new(MockTool));
         reg.register(Arc::new(SecondTool));
         assert_eq!(reg.definitions().len(), 2);
+
+        let names: Vec<_> = reg.definitions().into_iter().map(|d| d.name).collect();
+        assert_eq!(names, ["second_tool", "test_tool"]);
 
         reg.filter_by_allowed(&["second_tool".to_string()]);
         assert_eq!(reg.definitions().len(), 1);

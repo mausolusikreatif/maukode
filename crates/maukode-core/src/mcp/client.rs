@@ -23,6 +23,8 @@ pub struct McpClient {
     pending_requests: PendingRequests,
     next_id: AtomicU64,
     child: Arc<Mutex<Option<Child>>>,
+    /// The server's tool list, fetched once per connection (it is read on every prompt).
+    tools: tokio::sync::OnceCell<Vec<McpToolDefinition>>,
 }
 
 impl McpClient {
@@ -152,6 +154,7 @@ impl McpClient {
             child: Arc::new(Mutex::new(Some(child))),
             signature: Self::signature_of(config),
             sandbox,
+            tools: tokio::sync::OnceCell::new(),
         };
 
         // 4. Perform MCP initialize handshake
@@ -254,6 +257,13 @@ impl McpClient {
 
     /// Query tools/list from MCP server
     pub async fn list_tools(&self) -> Result<Vec<McpToolDefinition>> {
+        self.tools
+            .get_or_try_init(|| self.fetch_tools())
+            .await
+            .cloned()
+    }
+
+    async fn fetch_tools(&self) -> Result<Vec<McpToolDefinition>> {
         let resp_val = self
             .send_request("tools/list", serde_json::json!({}), Duration::from_secs(20))
             .await

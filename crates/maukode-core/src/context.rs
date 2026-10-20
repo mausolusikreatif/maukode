@@ -63,6 +63,16 @@ pub fn context_with_project_memory(
     dir: impl AsRef<Path>,
     registry: &mut ToolRegistry,
 ) -> (ContextManager, Option<MemoryBinding>) {
+    let (context, binding) = project_context(dir);
+    if let Some(binding) = &binding {
+        register_memory_tools(registry, binding);
+    }
+    (context, binding)
+}
+
+/// Like [`context_with_project_memory`] without registering tools, for callers that keep the
+/// context across turns (its repo-map cache then survives) and register the tools per turn.
+pub fn project_context(dir: impl AsRef<Path>) -> (ContextManager, Option<MemoryBinding>) {
     let dir = dir.as_ref();
     let binding = match MemoryBinding::open_default(Scope::project(dir)) {
         Ok(binding) => Some(binding.with_auto_extract(memory_auto_extract_enabled())),
@@ -71,9 +81,6 @@ pub fn context_with_project_memory(
             None
         }
     };
-    if let Some(binding) = &binding {
-        register_memory_tools(registry, binding);
-    }
     let context = match &binding {
         Some(binding) => ContextManager::new(dir).with_knowledge(binding.clone()),
         None => ContextManager::new(dir),
@@ -176,9 +183,18 @@ impl ContextManager {
         }
     }
 
-    /// Render baseline system context with project instructions and codebase repository map
+    /// The part of the system prompt that changes between turns: today's date and the knowledge
+    /// recalled for `query`. Providers that cache prompts get it after the stable part.
+    pub async fn render_turn_context(&self, query: Option<&str>) -> String {
+        let mut out = format!("Current date: {}\n", Utc::now().format("%Y-%m-%d"));
+        out.push_str(&self.render_knowledge_context(query).await);
+        out
+    }
+
+    /// Render baseline system context with project instructions and codebase repository map.
+    /// Keep it free of anything that changes from turn to turn (see [`Self::render_turn_context`]),
+    /// so providers can cache it.
     pub async fn render_system_context(&self) -> String {
-        let now = Utc::now().to_rfc3339();
         let os = std::env::consts::OS;
         let arch = std::env::consts::ARCH;
         let cwd_str = self.cwd.display().to_string();
@@ -187,8 +203,7 @@ impl ContextManager {
             "You are MauKode, an expert agentic AI coding assistant designed to solve complex software engineering tasks.\n\
              Environment:\n\
              - Operating System: {os} ({arch})\n\
-             - Working Directory: {cwd_str}\n\
-             - Current Time: {now}\n\n\
+             - Working Directory: {cwd_str}\n\n\
              Guidelines:\n\
              - Always inspect existing files before making modifications.\n\
              - Use the provided tools (read_file, write_file, edit_file, bash, grep, glob, web_search, fetch_web_content, get_codebase_map) to explore and make changes.\n\

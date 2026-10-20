@@ -537,11 +537,12 @@ fn start_turn(
 
         let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
 
-        // Bind the project-scoped knowledge store before building the context so the system prompt
-        // can carry the taxonomy template and recall hits.
-        let (context, memory) =
-            maukode_core::context_with_project_memory(&session_dir, &mut tool_registry);
-        let context = Arc::new(context);
+        // The workspace's context and knowledge store are kept across turns; only the memory
+        // tools are registered again for this turn's registry.
+        let (context, memory) = state.project_context_for(&session_dir).await;
+        if let Some(binding) = &memory {
+            maukode_core::register_memory_tools(&mut tool_registry, binding);
+        }
         tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
             context.repo_map(),
         ))));

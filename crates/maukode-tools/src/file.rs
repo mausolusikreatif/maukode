@@ -44,7 +44,8 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read file content with line numbers. Optionally specify start_line and end_line (1-indexed)."
+        "Read file content with line numbers. Optionally specify start_line and end_line \
+         (1-indexed). Without end_line, at most 2000 lines are returned."
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -81,7 +82,12 @@ impl Tool for ReadFileTool {
         let total_lines = lines.len();
 
         let start = args.start_line.unwrap_or(1).saturating_sub(1);
-        let end = args.end_line.unwrap_or(total_lines).min(total_lines);
+        // Without an explicit end_line, read at most DEFAULT_READ_LINES so one call on a large
+        // file does not fill the context window.
+        let end = args
+            .end_line
+            .unwrap_or(start.saturating_add(DEFAULT_READ_LINES))
+            .min(total_lines);
 
         if start >= total_lines {
             return Ok(format!(
@@ -102,12 +108,28 @@ impl Tool for ReadFileTool {
         let mut output = String::new();
         for (idx, line) in lines[start..end].iter().enumerate() {
             let line_no = start + idx + 1;
-            output.push_str(&format!("{:4}: {}\n", line_no, line));
+            let (text, note) = match line.char_indices().nth(MAX_LINE_CHARS) {
+                Some((cut, _)) => (&line[..cut], "... (line truncated)"),
+                None => (*line, ""),
+            };
+            output.push_str(&format!("{line_no:4}: {text}{note}\n"));
+        }
+        if args.end_line.is_none() && end < total_lines {
+            output.push_str(&format!(
+                "... (lines {}-{end} of {total_lines} shown; use start_line/end_line for more)\n",
+                start + 1
+            ));
         }
 
         Ok(output)
     }
 }
+
+/// Lines returned by `read_file` when no end_line is given.
+const DEFAULT_READ_LINES: usize = 2000;
+
+/// Longer lines (minified code, data) are cut to this many characters.
+const MAX_LINE_CHARS: usize = 2000;
 
 // -------------------------------------------------------------
 // WriteFileTool
@@ -381,5 +403,30 @@ impl Tool for GlobTool {
         } else {
             Ok(matches.join("\n"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn read_file_without_end_line_is_capped_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let text: String = (1..=2500).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(dir.path().join("big.txt"), text).unwrap();
+        let tool = ReadFileTool::new(dir.path());
+
+        let out = tool.execute(json!({ "path": "big.txt" })).await.unwrap();
+        assert!(out.contains("2000: line 2000\n"));
+        assert!(!out.contains("line 2001"));
+        assert!(out.ends_with("(lines 1-2000 of 2500 shown; use start_line/end_line for more)\n"));
+
+        let rest = tool
+            .execute(json!({ "path": "big.txt", "start_line": 2001, "end_line": 2500 }))
+            .await
+            .unwrap();
+        assert!(rest.contains("2500: line 2500\n"));
+        assert!(!rest.contains("shown;"));
     }
 }

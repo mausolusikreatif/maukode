@@ -39,7 +39,7 @@ remove a feature, update its row in the same PR.
 | Feature | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | OpenAI-compatible streaming (OpenAI, OpenRouter, Ollama, DeepSeek, llm-kita, custom) | **done** | `protocols/openai.rs`, usage via `stream_options` |
-| Anthropic streaming | **partial** | `protocols/anthropic.rs`; no prompt caching, no `Usage` event, thinking blocks dropped, mid-stream `error` events ignored (see backlog) |
+| Anthropic streaming | **done** | `protocols/anthropic.rs`; prompt caching (tools, stable system prompt, last message), `Usage` events, mid-stream `error` events fail the attempt (#87); thinking blocks are dropped |
 | ChatGPT plan (Sign in with ChatGPT, Responses API) | **done** | `chatgpt_auth.rs`, `chatgpt_client.rs`, `maukode auth` |
 | ChatGPT credentials on a remote daemon | **planned** | — |
 
@@ -114,41 +114,44 @@ Ordered by impact within each group. Each item names where the problem is.
 
 ### Cost and latency
 
-1. **Prompt caching never hits.**
-   - The Anthropic adapter sends no `cache_control` (`protocols/anthropic.rs`).
-   - `ToolRegistry::definitions()` iterates a `HashMap`, and the registry is rebuilt every turn
-     (`routes/sessions.rs`), so tool order changes between requests. Sort the definitions.
-   - The system prompt starts with the current time to the second (`context.rs`), and the repo map
-     and knowledge recall are also part of it. Keep the stable prefix first and move the parts that
-     change to the end.
-2. **Work repeated on every turn.** The server rebuilds the tool registry, registers MCP tools,
-   creates a new `ContextManager` (its `RepoMapGenerator` cache starts empty, so the whole repo is
-   parsed again), and opens the memory store, for every prompt. Cache these per session or
-   directory, as is already done for checkpoint managers.
-3. **`save_session` rewrites the whole history** (`store/sqlite.rs`) every ~2 s during a turn,
-   synchronously on the async runtime while holding the session lock, and resets every message's
-   `created_at`. Make it append-only with an ordinal and run it on a blocking thread.
-   `messages_audit` uses `UNIQUE(session_id, parts_json)`: this indexes the full text and drops
-   identical messages. Use an ordinal or a content hash instead.
-4. **Tools run one at a time** (`runner.rs`). Run read-only calls from the same step concurrently.
-5. **`grep` blocks the runtime** (`grep.rs`): synchronous `walkdir` + `read_to_string`, ignores
-   `.gitignore` although the `ignore` crate is a dependency, no file-size limit, absolute paths in
-   output.
-6. **`read_file` has no default limit**: large files are read in full and only cut by the pruner.
-7. A failed automatic compaction is retried on every following step (one extra LLM call each).
-8. Token estimation uses a chars/4 heuristic and ignores tool schemas; use the provider's reported
+Fixed in #87:
+- prompt caching: tool definitions are sorted, the system prompt is split into a stable part and a
+  per-turn suffix (date and recalled memories), and the Anthropic adapter sets `cache_control` on
+  the last tool, the stable system prompt, and the last message;
+- the server keeps each workspace's `ContextManager` (with its repo-map parse cache) and memory
+  store across turns, and MCP tool lists are fetched once per connection;
+- `save_session` writes only messages that changed (compared by content hash), on a blocking
+  thread, and keeps `created_at`; `messages_audit` is keyed by content hash instead of the full
+  text;
+- read-only tool calls of one step run concurrently;
+- `grep` runs on a blocking thread, honours `.gitignore`, skips binary and large files, and prints
+  workspace-relative paths;
+- `read_file` returns at most 2000 lines (and 2000 characters per line) unless `end_line` is given.
+
+Remaining:
+
+1. The tool registry itself is still rebuilt every turn (cheap now that the expensive parts are
+   cached). MCP tool lists are not refreshed when a server reports `tools/list_changed`.
+2. Recalled memories change the system prompt between turns, so on Anthropic the cached messages
+   of the previous turn are not reused across turns (within a turn every step is a cache hit).
+3. A failed automatic compaction is retried on every following step (one extra LLM call each).
+4. Token estimation uses a chars/4 heuristic and ignores tool schemas; use the provider's reported
    `input_tokens` when available.
-9. Streaming text is published one delta per event into a 500-slot broadcast channel; coalesce
+5. Streaming text is published one delta per event into a 500-slot broadcast channel; coalesce
    deltas to reduce SSE and redraw load. In the TUI, the streaming message is re-parsed on every
    frame.
+6. Identical messages in one session are stored once in `messages_audit` (it deduplicates by
+   content hash, as it did by text before).
 
 ### Reliability
 
-1. **No HTTP timeouts** on any LLM client (`reqwest::Client::new()` in `anthropic.rs`,
-   `openai.rs`, `chatgpt_client.rs`). A half-open stream hangs the turn indefinitely.
-2. Anthropic: mid-stream `error` events (e.g. `overloaded_error`) end the stream as if it
-   succeeded; malformed tool-argument JSON silently becomes `{}`; no `LLMEvent::Usage` is emitted.
-3. Around 400 `unwrap()`/`expect()` calls in non-test-looking code paths (rough count); audit
+Fixed in #87: LLM clients have a 30 s connect timeout and a 300 s read timeout (a stalled stream
+is retried instead of hanging the turn); the Anthropic adapter reports mid-stream `error` events,
+rejects malformed tool-argument JSON, and emits `LLMEvent::Usage`.
+
+Remaining:
+
+1. Around 400 `unwrap()`/`expect()` calls in non-test-looking code paths (rough count); audit
    against the `AGENTS.md` rule.
 
 ### Security

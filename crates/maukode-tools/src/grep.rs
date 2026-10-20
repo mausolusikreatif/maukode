@@ -72,46 +72,89 @@ impl Tool for GrepTool {
             Some(ref p) => self.jail.validate_path(p)?,
             None => self.jail.workspace_root.clone(),
         };
+        let root = self.jail.workspace_root.clone();
 
-        let mut results = Vec::new();
-        let max_matches = 100;
-
-        for entry in walkdir::WalkDir::new(&search_path)
-            .max_depth(10)
-            .into_iter()
-            .filter_entry(|e| {
-                let name = e.file_name().to_string_lossy();
-                !name.starts_with('.') && name != "target" && name != "node_modules"
-            })
-            .filter_map(|e| e.ok())
-        {
-            if entry.file_type().is_file() {
-                if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                    for (line_idx, line) in content.lines().enumerate() {
-                        if re.is_match(line) {
-                            results.push(format!(
-                                "{}:{}: {}",
-                                entry.path().display(),
-                                line_idx + 1,
-                                line.trim_end()
-                            ));
-                            if results.len() >= max_matches {
-                                results.push("... (results truncated to 100 matches)".to_string());
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            if results.len() >= max_matches {
-                break;
-            }
-        }
+        // Walking and reading files is blocking I/O; keep it off the async runtime.
+        let results = tokio::task::spawn_blocking(move || search(&re, &search_path, &root))
+            .await
+            .map_err(|e| ToolError::Execution(format!("grep task failed: {e}")))?;
 
         if results.is_empty() {
             Ok(format!("No matches found for '{}'", args.query))
         } else {
             Ok(results.join("\n"))
         }
+    }
+}
+
+const MAX_MATCHES: usize = 100;
+
+/// Files larger than this are skipped: they are almost always generated or data files.
+const MAX_FILE_BYTES: u64 = 1024 * 1024;
+
+/// Bytes inspected for a NUL to decide that a file is binary.
+const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+
+/// Search `path` for `re`, honouring `.gitignore` and skipping hidden, binary and large files.
+/// Paths in the output are relative to `root` when they are inside it.
+fn search(re: &Regex, path: &std::path::Path, root: &std::path::Path) -> Vec<String> {
+    let mut results = Vec::new();
+    let walker = ignore::WalkBuilder::new(path)
+        .max_depth(Some(10))
+        // Honour .gitignore even outside a git checkout.
+        .require_git(false)
+        .filter_entry(|e| {
+            let name = e.file_name();
+            name != "target" && name != "node_modules"
+        })
+        .build();
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        if !entry.metadata().is_ok_and(|m| m.len() <= MAX_FILE_BYTES) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        if bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0) {
+            continue;
+        }
+        let Ok(content) = String::from_utf8(bytes) else {
+            continue;
+        };
+        let shown = entry.path().strip_prefix(root).unwrap_or(entry.path());
+        for (line_idx, line) in content.lines().enumerate() {
+            if re.is_match(line) {
+                results.push(format!("{}:{}: {}", shown.display(), line_idx + 1, line.trim_end()));
+                if results.len() >= MAX_MATCHES {
+                    results.push(format!("... (results truncated to {MAX_MATCHES} matches)"));
+                    return results;
+                }
+            }
+        }
+    }
+    results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn grep_honours_gitignore_skips_binaries_and_prints_relative_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "ignored.txt\n").unwrap();
+        std::fs::write(dir.path().join("ignored.txt"), "needle\n").unwrap();
+        std::fs::write(dir.path().join("binary.bin"), b"needle\0\x01").unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "fn a() {}\n// needle here\n").unwrap();
+
+        let tool = GrepTool::new(dir.path());
+        let out = tool.execute(json!({ "query": "needle" })).await.unwrap();
+
+        assert_eq!(out, "src/lib.rs:2: // needle here");
     }
 }

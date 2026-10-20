@@ -8,7 +8,8 @@ use maukode_protocol::{
     ContentPart, FinishReason, LLMEvent, Message, Role, SessionState, StopReason, ToolCall,
     ToolResult,
 };
-use maukode_tools::ToolRegistry;
+use maukode_tools::{ToolError, ToolRegistry};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info};
@@ -48,6 +49,20 @@ const MAX_STREAM_ATTEMPTS: usize = 4;
 /// instead of regenerating (which would duplicate the visible output).
 const STREAM_RESUME_PROMPT: &str = "Your previous response was cut off by a connection error. \
     Continue exactly where you left off, without repeating what you already wrote.";
+
+/// Tools without side effects. When every call of a step is one of these they run concurrently.
+const READ_ONLY_TOOLS: &[&str] = &[
+    "fetch_web_content",
+    "get_codebase_map",
+    "glob",
+    "grep",
+    "memory_browse",
+    "memory_catalog",
+    "memory_get",
+    "memory_search",
+    "read_file",
+    "web_search",
+];
 
 /// Every tool call stored in history must have a matching result, or the next provider request
 /// is rejected. Build "cancelled" results for the calls (`(id, name)`) that never got one.
@@ -245,15 +260,14 @@ impl SessionRunner {
             }
         }
 
-        let mut system_prompt = self.context.render_system_context().await;
-        let knowledge = self
+        // The stable part is sent first so providers can cache it; the date and recalled
+        // memories follow it.
+        let system_prompt = self.context.render_system_context().await;
+        let system_suffix = self
             .context
-            .render_knowledge_context(user_prompt.as_deref())
+            .render_turn_context(user_prompt.as_deref())
             .await;
-        if !knowledge.trim().is_empty() {
-            system_prompt.push('\n');
-            system_prompt.push_str(&knowledge);
-        }
+        let estimated_system = format!("{system_prompt}\n{system_suffix}");
         let mut step = 0;
         let mut continuations = 0usize;
         let mut stop: (StopReason, Option<String>) = (StopReason::Completed, None);
@@ -287,7 +301,7 @@ impl SessionRunner {
             // Context window threshold monitoring
             let usage = crate::compaction::TokenEstimator::check_threshold(
                 &pruned_messages,
-                &system_prompt,
+                &estimated_system,
                 &self.config.model,
             );
             if usage.exceeds_threshold {
@@ -379,6 +393,7 @@ impl SessionRunner {
             'attempts: loop {
                 let mut req = LLMRequest::new(&self.config.model, pruned_messages.clone())
                     .with_system_prompt(&system_prompt)
+                    .with_system_suffix(&system_suffix)
                     .with_tools(tool_defs.clone());
                 req.max_tokens = self.config.max_tokens;
                 req.temperature = self.config.temperature;
@@ -565,6 +580,9 @@ impl SessionRunner {
                 .map(|c| (c.id.clone(), c.name.clone()))
                 .collect();
             let mut cancelled = false;
+            let mut prefetched = self
+                .run_read_only_batch(&tool_calls, &cancellation_token)
+                .await;
             for call in tool_calls {
                 let mut keep_result_private = false;
                 if cancellation_token
@@ -738,7 +756,9 @@ impl SessionRunner {
                     }
                 }
 
-                let exec_res = if let Some(ref token) = cancellation_token {
+                let exec_res = if let Some(res) = prefetched.remove(&call.id) {
+                    res
+                } else if let Some(ref token) = cancellation_token {
                     tokio::select! {
                         biased;
                         _ = token.cancelled() => {
@@ -825,6 +845,38 @@ impl SessionRunner {
         }
 
         Ok(stop)
+    }
+
+    /// Run the calls of a step concurrently when all of them only read, so none can miss a write
+    /// that comes before it, and none of them needs the user's confirmation. Returns the results
+    /// by call id; an empty map means the caller runs the calls one by one as usual.
+    async fn run_read_only_batch(
+        &self,
+        calls: &[ToolCall],
+        cancellation_token: &Option<tokio_util::sync::CancellationToken>,
+    ) -> HashMap<String, Result<String, ToolError>> {
+        let confirms_every_call = self.permission_manager.as_ref().is_some_and(|pm| {
+            matches!(pm.mode(), PermissionMode::Strict | PermissionMode::Review)
+        });
+        let all_read_only = calls
+            .iter()
+            .all(|call| READ_ONLY_TOOLS.contains(&call.name.as_str()));
+        if calls.len() < 2 || confirms_every_call || !all_read_only {
+            return HashMap::new();
+        }
+
+        let batch = futures::future::join_all(calls.iter().map(|call| async move {
+            let result = self.tools.execute(&call.name, call.arguments.clone()).await;
+            (call.id.clone(), result)
+        }));
+        match cancellation_token {
+            Some(token) => tokio::select! {
+                biased;
+                _ = token.cancelled() => HashMap::new(),
+                results = batch => results.into_iter().collect(),
+            },
+            None => batch.await.into_iter().collect(),
+        }
     }
 
     /// Run the reflection engine over the completed turn, if configured. Never fails
@@ -1173,5 +1225,84 @@ mod turn_tests {
         assert_eq!(stops(&events).len(), 1);
         assert_eq!(stops(&events)[0].0, StopReason::Error);
         assert!(matches!(state, SessionState::Failed(_)));
+    }
+
+    /// A read tool that only returns once two calls are running at the same time.
+    struct RendezvousTool(Arc<tokio::sync::Barrier>);
+
+    #[async_trait::async_trait]
+    impl maukode_tools::Tool for RendezvousTool {
+        fn name(&self) -> &str {
+            "read_file"
+        }
+        fn description(&self) -> &str {
+            "test"
+        }
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        async fn execute(&self, _args: serde_json::Value) -> Result<String, ToolError> {
+            self.0.wait().await;
+            Ok("read".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_calls_of_one_step_run_concurrently() {
+        let call = |id: &str| {
+            Ok(LLMEvent::ToolCallFinish {
+                tool_call: ToolCall {
+                    id: id.into(),
+                    name: "read_file".into(),
+                    arguments: serde_json::json!({}),
+                },
+            })
+        };
+        let script: Vec<Step> = vec![
+            Ok(vec![
+                call("1"),
+                call("2"),
+                Ok(LLMEvent::Finish {
+                    reason: FinishReason::ToolUse,
+                }),
+            ]),
+            text("done", FinishReason::EndTurn),
+        ];
+        let dir = std::env::temp_dir();
+        let session = Arc::new(RwLock::new(Session::new(&dir)));
+        let mut tools = ToolRegistry::new();
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        tools.register(Arc::new(RendezvousTool(barrier)));
+        let runner = SessionRunner::new(
+            Arc::clone(&session),
+            Arc::new(ScriptedLlm(Mutex::new(script.into()))),
+            Arc::new(tools),
+            Arc::new(ContextManager::new(&dir)),
+            RunnerConfig {
+                max_steps: 5,
+                ..RunnerConfig::default()
+            },
+        );
+        let (tx, _rx) = mpsc::unbounded_channel();
+        // Run one after the other, the first call would wait for the second forever.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            runner.run_with_cancellation(Some("go".into()), tx, None),
+        )
+        .await
+        .expect("the read-only calls ran one at a time")
+        .unwrap();
+
+        let guard = session.read().await;
+        let results: Vec<_> = guard
+            .messages
+            .iter()
+            .flat_map(|m| &m.parts)
+            .filter_map(|p| match p {
+                ContentPart::ToolResult(r) => Some(r.content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results, ["read", "read"]);
     }
 }
