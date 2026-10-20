@@ -85,7 +85,11 @@ pub fn create_registry_with_backend(
         &mut registry,
         &jail,
         &backend,
-        &[("write_file", true), ("edit_file", true), ("apply_patch", true)],
+        &[
+            ("write_file", true),
+            ("edit_file", true),
+            ("apply_patch", true),
+        ],
     );
     registry
 }

@@ -413,7 +413,9 @@ mod tests {
         );
         // Forks keep the rules.
         assert_eq!(
-            manager.fork().rule_action("bash", &bash("npm run deploy"), ws),
+            manager
+                .fork()
+                .rule_action("bash", &bash("npm run deploy"), ws),
             Some(RuleAction::Deny)
         );
     }

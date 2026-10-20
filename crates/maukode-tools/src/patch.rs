@@ -205,7 +205,11 @@ pub fn touched_paths(ops: &[PatchOp]) -> Vec<String> {
 /// matches exactly, or else ignoring trailing whitespace, or else ignoring surrounding whitespace.
 pub fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
     let had_newline = content.ends_with('\n');
-    let eol = if content.contains("\r\n") { "\r\n" } else { "\n" };
+    let eol = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
     let mut pos = 0;
     for (n, hunk) in hunks.iter().enumerate() {
@@ -279,11 +283,14 @@ impl ApplyPatchTool {
         let mut summary = Vec::new();
         let mut seen = HashSet::new();
         for op in ops {
-            let (PatchOp::Add { path, .. } | PatchOp::Delete { path } | PatchOp::Update { path, .. }) =
-                op;
+            let (PatchOp::Add { path, .. }
+            | PatchOp::Delete { path }
+            | PatchOp::Update { path, .. }) = op;
             let target = self.jail.validate_path(path)?;
             if !seen.insert(target.clone()) {
-                return Err(fail(format!("`{path}` appears more than once in the patch")));
+                return Err(fail(format!(
+                    "`{path}` appears more than once in the patch"
+                )));
             }
             let original = tokio::fs::read_to_string(&target).await.ok();
             match op {
@@ -462,7 +469,9 @@ mod tests {
 
     #[test]
     fn rejects_malformed_patches() {
-        assert!(parse_patch("*** Add File: a\n+x").unwrap_err().contains("Begin Patch"));
+        assert!(parse_patch("*** Add File: a\n+x")
+            .unwrap_err()
+            .contains("Begin Patch"));
         assert!(parse_patch(&patch("*** Add File: a\nx"))
             .unwrap_err()
             .contains("must start with `+`"));
@@ -508,22 +517,33 @@ mod tests {
         let tool = ApplyPatchTool::with_jail(PathJail::new(root));
 
         // The second update does not match: nothing is written.
-        let bad = patch(
-            "*** Update File: keep.txt\n a\n-b\n+B\n*** Update File: old.txt\n-absent\n+x",
-        );
+        let bad =
+            patch("*** Update File: keep.txt\n a\n-b\n+B\n*** Update File: old.txt\n-absent\n+x");
         assert!(tool.execute(json!({ "patch": bad })).await.is_err());
-        assert_eq!(std::fs::read_to_string(root.join("keep.txt")).unwrap(), "a\nb\nc\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+            "a\nb\nc\n"
+        );
 
         let good = patch(
             "*** Update File: keep.txt\n a\n-b\n+B\n*** Delete File: gone.txt\n*** Add File: dir/new.txt\n+hi\n*** Update File: old.txt\n*** Move to: moved.txt\n-move me\n+moved",
         );
         let out = tool.execute(json!({ "patch": good })).await.unwrap();
         assert!(out.contains("M keep.txt") && out.contains("R old.txt -> moved.txt"));
-        assert_eq!(std::fs::read_to_string(root.join("keep.txt")).unwrap(), "a\nB\nc\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+            "a\nB\nc\n"
+        );
         assert!(!root.join("gone.txt").exists());
         assert!(!root.join("old.txt").exists());
-        assert_eq!(std::fs::read_to_string(root.join("dir/new.txt")).unwrap(), "hi\n");
-        assert_eq!(std::fs::read_to_string(root.join("moved.txt")).unwrap(), "moved\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("dir/new.txt")).unwrap(),
+            "hi\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("moved.txt")).unwrap(),
+            "moved\n"
+        );
     }
 
     #[tokio::test]

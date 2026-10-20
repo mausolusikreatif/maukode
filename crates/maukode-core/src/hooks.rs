@@ -130,7 +130,12 @@ impl Hooks {
             "tool_name": call.name,
             "tool_input": call.arguments,
         });
-        for hook in self.config.pre_tool_use.iter().filter(|h| h.applies_to(&call.name)) {
+        for hook in self
+            .config
+            .pre_tool_use
+            .iter()
+            .filter(|h| h.applies_to(&call.name))
+        {
             let outcome = self.run(hook, &event, session_id, Some(&call.name)).await;
             if !outcome.success {
                 return Err(format!(
@@ -160,7 +165,12 @@ impl Hooks {
             "is_error": is_error,
         });
         let mut feedback = Vec::new();
-        for hook in self.config.post_tool_use.iter().filter(|h| h.applies_to(&call.name)) {
+        for hook in self
+            .config
+            .post_tool_use
+            .iter()
+            .filter(|h| h.applies_to(&call.name))
+        {
             let outcome = self.run(hook, &event, session_id, Some(&call.name)).await;
             if !outcome.success {
                 feedback.push(format!(
@@ -199,7 +209,10 @@ impl Hooks {
             .arg("-c")
             .arg(&hook.command)
             .current_dir(&self.cwd)
-            .env("MAUKODE_HOOK_EVENT", event["event"].as_str().unwrap_or_default())
+            .env(
+                "MAUKODE_HOOK_EVENT",
+                event["event"].as_str().unwrap_or_default(),
+            )
             .env("MAUKODE_SESSION_ID", session_id)
             .env("MAUKODE_TOOL_NAME", tool_name.unwrap_or_default())
             .stdin(Stdio::piped())
@@ -288,7 +301,10 @@ mod tests {
                 pre_tool_use: vec![
                     hook(&["bash"], "echo no bash; exit 1"),
                     // The event arrives on stdin.
-                    hook(&["write_*"], "grep -q '\"path\":\"a.rs\"' && test \"$MAUKODE_TOOL_NAME\" = write_file"),
+                    hook(
+                        &["write_*"],
+                        "grep -q '\"path\":\"a.rs\"' && test \"$MAUKODE_TOOL_NAME\" = write_file",
+                    ),
                 ],
                 ..HooksConfig::default()
             },
@@ -314,7 +330,10 @@ mod tests {
             },
             dir.path(),
         );
-        assert_eq!(hooks.after_tool("s", &call("read_file"), "ok", false).await, None);
+        assert_eq!(
+            hooks.after_tool("s", &call("read_file"), "ok", false).await,
+            None
+        );
         assert!(dir.path().join("ran").exists());
         let feedback = hooks
             .after_tool("s", &call("edit_file"), "ok", false)

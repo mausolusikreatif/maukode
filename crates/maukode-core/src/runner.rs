@@ -1726,22 +1726,21 @@ mod turn_tests {
             path: None,
             action,
         };
-        let deny = PermissionManager::new(PermissionMode::Trust).with_rules(vec![
-            rule(RuleAction::Allow),
-            rule(RuleAction::Deny),
-        ]);
+        let deny = PermissionManager::new(PermissionMode::Trust)
+            .with_rules(vec![rule(RuleAction::Allow), rule(RuleAction::Deny)]);
         let (output, prompts) = run_echo(deny, None, dir.path()).await;
         assert!(output.contains("Blocked by a permission rule"), "{output}");
         assert_eq!(prompts, 0);
 
         // `ask` prompts even in trust mode.
-        let ask = PermissionManager::new(PermissionMode::Trust).with_rules(vec![rule(RuleAction::Ask)]);
+        let ask =
+            PermissionManager::new(PermissionMode::Trust).with_rules(vec![rule(RuleAction::Ask)]);
         let (output, prompts) = run_echo(ask, None, dir.path()).await;
         assert_eq!((output.as_str(), prompts), ("echoed", 1));
 
         // `allow` skips the prompt strict mode would show.
-        let allow =
-            PermissionManager::new(PermissionMode::Strict).with_rules(vec![rule(RuleAction::Allow)]);
+        let allow = PermissionManager::new(PermissionMode::Strict)
+            .with_rules(vec![rule(RuleAction::Allow)]);
         let (output, prompts) = run_echo(allow, None, dir.path()).await;
         assert_eq!((output.as_str(), prompts), ("echoed", 0));
     }
@@ -1765,7 +1764,10 @@ mod turn_tests {
             dir.path(),
         );
         let (output, _) = run_echo(trust(), Some(blocking), dir.path()).await;
-        assert!(output.contains("not now") && !output.contains("echoed"), "{output}");
+        assert!(
+            output.contains("not now") && !output.contains("echoed"),
+            "{output}"
+        );
 
         let reporting = Hooks::new(
             HooksConfig {
@@ -1776,7 +1778,10 @@ mod turn_tests {
             dir.path(),
         );
         let (output, _) = run_echo(trust(), Some(reporting), dir.path()).await;
-        assert!(output.starts_with("echoed") && output.contains("lint failed"), "{output}");
+        assert!(
+            output.starts_with("echoed") && output.contains("lint failed"),
+            "{output}"
+        );
         assert!(dir.path().join("turn-ended").exists());
     }
 
