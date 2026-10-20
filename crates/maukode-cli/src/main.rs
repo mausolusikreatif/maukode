@@ -1230,7 +1230,10 @@ fn usage_suffix(usage: &maukode_protocol::SessionUsage) -> String {
     }
     let mut out = format!(" · {tokens} tokens");
     if usage.cost_microusd > 0 || usage.unpriced_responses == 0 {
-        out.push_str(&format!(" · ${:.3}", usage.cost_microusd as f64 / 1_000_000.0));
+        out.push_str(&format!(
+            " · ${:.3}",
+            usage.cost_microusd as f64 / 1_000_000.0
+        ));
     }
     out
 }

@@ -369,7 +369,9 @@ impl ServerClient {
             .await?;
         if !resp.status().is_success() {
             let err = resp.text().await.unwrap_or_default();
-            return Err(anyhow!("Failed to set the session's permission mode: {err}"));
+            return Err(anyhow!(
+                "Failed to set the session's permission mode: {err}"
+            ));
         }
         Ok(())
     }

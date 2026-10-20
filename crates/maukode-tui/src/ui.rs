@@ -622,9 +622,15 @@ fn draw_mention_popup(f: &mut Frame, app: &App, input_area: Rect, above: Rect) {
         return;
     };
     let lines: Vec<Line> = if app.file_index.is_none() {
-        vec![Line::from(Span::styled(" Listing files…", theme::dim_style()))]
+        vec![Line::from(Span::styled(
+            " Listing files…",
+            theme::dim_style(),
+        ))]
     } else if popup.matches.is_empty() {
-        vec![Line::from(Span::styled(" No matching files", theme::dim_style()))]
+        vec![Line::from(Span::styled(
+            " No matching files",
+            theme::dim_style(),
+        ))]
     } else {
         popup
             .matches

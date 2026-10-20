@@ -93,7 +93,8 @@ impl RunReport {
 
     /// The turn failed (an error stopped it, or it never reported how it ended).
     pub fn failed(&self) -> bool {
-        self.stop_reason.is_none_or(|reason| reason == StopReason::Error)
+        self.stop_reason
+            .is_none_or(|reason| reason == StopReason::Error)
     }
 
     pub fn to_json(&self) -> Value {

@@ -116,7 +116,10 @@ mod tests {
         .iter()
         .map(|s| s.to_string())
         .collect();
-        assert_eq!(rank("main", &files, 2), ["src/main.rs", "docs/main-notes.md"]);
+        assert_eq!(
+            rank("main", &files, 2),
+            ["src/main.rs", "docs/main-notes.md"]
+        );
         assert_eq!(rank("tuiapp", &files, 5), ["crates/maukode-tui/src/app.rs"]);
         assert!(rank("zzz", &files, 5).is_empty());
         // An empty query lists the shortest paths.
