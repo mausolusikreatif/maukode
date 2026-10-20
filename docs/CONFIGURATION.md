@@ -169,9 +169,40 @@ to the host silently.
 | `consolidation.abstraction` | `false` | Also synthesize higher-level summaries. |
 | `consolidation.abstraction_min_memories` | `30` | Minimum memories before abstraction runs. |
 
-Context compaction is not configurable: older tool outputs are pruned to 2,000 characters, a
-warning appears at 75% of the model's context window, and history is compacted automatically at
-85% (or with `/compact`). The uncompacted history stays in the `messages_audit` table.
+Context compaction is not configurable: tool outputs over 30,000 characters are capped, older
+tool outputs are pruned to 2,000 characters once the context is 60% full, a warning appears at 75%
+of the model's context window, and history is compacted automatically at 85% (or with
+`/compact`). The uncompacted history stays in the `messages_audit` table. Until pruning starts,
+every request only appends to the previous one, so providers serve the earlier conversation from
+their prompt cache.
+
+## 🧠 Models: Thinking and Prices
+
+`models` holds per-model settings, keyed by the model id as configured (`active_model` or a
+session's model):
+
+```json
+"models": {
+  "claude-opus-5-5": { "thinking": { "effort": "high" } },
+  "claude-haiku-4-5": { "thinking": { "mode": "budget", "budget_tokens": 8000 } },
+  "my-gateway-model": { "pricing": { "input": 0.5, "output": 1.5 } }
+}
+```
+
+| Key | Default | Description |
+| :--- | :--- | :--- |
+| `thinking.mode` | `"auto"` | Anthropic extended thinking. `"auto"`: adaptive thinking on Claude 4.6 and later, none on older models. `"adaptive"`: the model decides how much to think. `"budget"`: a fixed `budget_tokens` (models before 4.6). `"off"`: do not request thinking; Claude 5 models always think, so this changes nothing there. |
+| `thinking.budget_tokens` | `4096` | Budget for `"budget"` mode (at least 1024; `max_tokens` is raised to fit it). |
+| `thinking.effort` | model default | `output_config.effort`: `low`, `medium`, `high`, `xhigh`, or `max`. |
+| `thinking.summarized` | `true` | Show a summary of the thinking (Claude 4.7 and later hide it unless asked). |
+| `pricing.input`, `pricing.output` | built in for Claude | US dollars per million tokens. |
+| `pricing.cache_read`, `pricing.cache_write` | 10% and 125% of `input` | Prices of cached input read and written. |
+
+Thinking blocks are sent back unchanged on later requests. On models that bind them to the
+conversation, MauKode asks the API to drop (rather than reject) a block whose earlier history
+changed, which happens after pruning starts or a compaction. Built-in prices are Anthropic's
+first-party rates for current Claude models (October 2026); set `pricing` for other models,
+gateways, or cloud platforms. Without a price, only token counts are shown.
 
 ---
 

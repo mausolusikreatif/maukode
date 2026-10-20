@@ -11,6 +11,9 @@ pub struct ContextUsage {
 
 pub struct TokenEstimator;
 
+/// Tokens an image costs at the providers' largest input size (about 1.15 megapixels).
+const IMAGE_TOKENS: usize = 1600;
+
 impl TokenEstimator {
     /// Estimate token count for arbitrary string using standard ~4 chars/token heuristic
     pub fn estimate_text(text: &str) -> usize {
@@ -49,6 +52,13 @@ impl TokenEstimator {
                         total += Self::estimate_text(&res.tool_name);
                         total += Self::estimate_text(&res.content);
                         total += 4; // result framing
+                    }
+                    ContentPart::Context { text } => {
+                        total += Self::estimate_text(text);
+                    }
+                    // Providers scale large images down; a full-size image costs about this much.
+                    ContentPart::Image { .. } => {
+                        total += IMAGE_TOKENS;
                     }
                 }
             }

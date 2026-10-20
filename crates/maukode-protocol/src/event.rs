@@ -55,6 +55,51 @@ pub struct TokenUsage {
     pub cache_write_tokens: Option<u64>,
 }
 
+/// Tokens a session has used so far, over all of its responses (subagents included), and what
+/// they cost where the model's price is known.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct SessionUsage {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub input_tokens: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub output_tokens: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub cache_read_tokens: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub cache_write_tokens: u64,
+    /// Cost in millionths of a US dollar, of the responses whose model has a known price.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub cost_microusd: u64,
+    /// Responses whose model had no known price; their tokens are counted, their cost is not.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub unpriced_responses: u64,
+}
+
+impl SessionUsage {
+    /// Add one response; `cost_usd` is `None` when its model has no known price.
+    pub fn add(&mut self, usage: &TokenUsage, cost_usd: Option<f64>) {
+        self.input_tokens += usage.input_tokens;
+        self.output_tokens += usage.output_tokens;
+        self.cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
+        self.cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
+        match cost_usd {
+            Some(cost) => self.cost_microusd += (cost * 1_000_000.0).round() as u64,
+            None => self.unpriced_responses += 1,
+        }
+    }
+
+    /// Add the totals of `other` (persisting a delta).
+    pub fn merge(&mut self, other: &SessionUsage) {
+        self.input_tokens += other.input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.cache_read_tokens += other.cache_read_tokens;
+        self.cache_write_tokens += other.cache_write_tokens;
+        self.cost_microusd += other.cost_microusd;
+        self.unpriced_responses += other.unpriced_responses;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
@@ -166,6 +211,8 @@ pub enum LLMEvent {
     PrivateToolResult(ToolResult),
     PermissionRequest(PermissionRequest),
     Usage(TokenUsage),
+    /// The session's totals after a `Usage` event (published by the daemon).
+    SessionUsage(SessionUsage),
     ContextWarning {
         current_tokens: usize,
         max_tokens: usize,

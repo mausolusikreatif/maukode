@@ -3,6 +3,7 @@ import type { Message } from "./Message";
 import type { PermissionRequest } from "./PermissionRequest";
 import type { SessionId } from "./SessionId";
 import type { SessionState } from "./SessionState";
+import type { SessionUsage } from "./SessionUsage";
 import type { WorktreeInfo } from "./WorktreeInfo";
 
 export type SessionDetailResponse = { id: SessionId, title: string | null, 
@@ -21,4 +22,8 @@ message_total: number,
 /**
  * Index in the full history of `messages[0]`.
  */
-messages_start: number, directory: string, state: SessionState, messages: Array<Message>, created_at: string, updated_at: string, queued_prompts: Array<string>, };
+messages_start: number, directory: string, state: SessionState, messages: Array<Message>, created_at: string, updated_at: string, queued_prompts: Array<string>, 
+/**
+ * Tokens and cost so far.
+ */
+usage: SessionUsage, };

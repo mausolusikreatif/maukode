@@ -42,7 +42,24 @@ pub enum ContentPart {
     },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
+    /// Context MauKode adds to a user message (current date, recalled memories). The model sees
+    /// it; the UIs do not show it. It stays in place on later requests, so the history remains
+    /// append-only.
+    Context {
+        text: String,
+    },
+    /// An image the user attached, base64-encoded (no `data:` prefix).
+    Image {
+        media_type: String,
+        data: String,
+    },
 }
+
+/// Image types every supported provider accepts.
+pub const IMAGE_MEDIA_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/// Largest image accepted, in bytes before base64 encoding (the Anthropic API's limit).
+pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -63,6 +80,16 @@ impl Message {
         Self {
             role: Role::User,
             parts: vec![ContentPart::Text { text: text.into() }],
+        }
+    }
+
+    /// A user message from text and attached images (images first, as providers recommend).
+    pub fn user_with_images(text: impl Into<String>, images: Vec<ContentPart>) -> Self {
+        let mut parts = images;
+        parts.push(ContentPart::Text { text: text.into() });
+        Self {
+            role: Role::User,
+            parts,
         }
     }
 

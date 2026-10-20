@@ -45,7 +45,7 @@ bodies with a 4xx/5xx status.
 | GET | `/events` | `?since=` / `Last-Event-ID` | global SSE feed |
 | PATCH | `/sessions/{id}` | `{title}` | blank/null restores auto title |
 | DELETE | `/sessions/{id}` | `?cleanup_worktree=true&delete_branch=false` | cancels running turn, removes data; removes the worktree checkout (branch kept unless `delete_branch`); 404 if unknown |
-| POST | `/sessions/{id}/prompt` | `{prompt}` | `409` if a turn is already running |
+| POST | `/sessions/{id}/prompt` | `{prompt, images?}` | `images`: `[{media_type, data}]`, base64 PNG/JPEG/GIF/WebP, at most 5 MB each and 20 per prompt (`400` otherwise); `409` if a turn is already running (the queue holds text only) |
 | POST | `/sessions/{id}/cancel` | | |
 | GET | `/sessions/{id}/events` | `?since=` or `Last-Event-ID` | SSE, below |
 | POST | `/sessions/{id}/permissions/{request_id}` | `{decision}` | `allow_once \| allow_session \| allow_private \| deny` |
@@ -85,7 +85,12 @@ progress is checkpointed to disk at most every 2 s during a turn and at its end.
 mid-turn after a crash loads as `interrupted`.
 
 ## Session snapshot (`GET /sessions/{id}`)
-`{id, title, directory, state, running, last_event_seq, pending_permissions[], provider, model, worktree, message_total, messages_start, messages[], created_at, updated_at}`
+`{id, title, directory, state, running, last_event_seq, pending_permissions[], provider, model, worktree, message_total, messages_start, messages[], created_at, updated_at, queued_prompts[], usage}`
+
+Message parts (`type`): `text`, `reasoning`, `tool_call`, `tool_result`, `image` (`media_type`,
+base64 `data`), `context` (date and recalled memories MauKode added to a prompt; sent to the model,
+not meant for display), and `provider_item` (provider data kept verbatim, such as Anthropic
+thinking blocks with their signature).
 
 Use it on (re)connect: render `messages`, show `pending_permissions` as prompts, then open SSE with
 `?since=last_event_seq` so nothing between snapshot and stream is lost or duplicated.
@@ -93,7 +98,11 @@ Use it on (re)connect: render `messages`, show `pending_permissions` as prompts,
 ## Events (SSE)
 Each message: `id: <seq>` and `data: <LLMEvent JSON>` (`type` tag: `text_delta`, `reasoning_delta`,
 `tool_call_start|delta|finish`, `tool_result`, `private_tool_result`, `permission_request`, `usage`,
-`context_warning`, `finish`, `error`, …). `seq` is per-session and monotonically increasing.
+`session_usage`, `context_warning`, `finish`, `error`, …). `seq` is per-session and monotonically
+increasing. `usage` describes one provider response (`input_tokens` includes cached tokens);
+`session_usage` follows it with the session's totals (subagents included) and `cost_microusd`, the
+cost of the responses whose model has a known price (`unpriced_responses` counts the others). The
+snapshot's `usage` field holds the same totals.
 
 - **A turn is over only at `turn_stopped {reason, message}`** (always the last event of a turn).
   `finish` events are per provider response — a turn has many — and `error` precedes

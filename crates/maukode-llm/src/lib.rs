@@ -8,4 +8,4 @@ pub use client::{LLMClient, LLMStream};
 pub use error::LLMError;
 pub use http::http_client;
 pub use protocols::{AnthropicClient, OpenAIClient};
-pub use request::LLMRequest;
+pub use request::{context_text, LLMRequest, ThinkingMode, ThinkingSettings};

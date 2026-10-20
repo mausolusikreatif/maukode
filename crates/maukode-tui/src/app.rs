@@ -126,6 +126,10 @@ pub fn chat_items_from_messages(messages: &[Message]) -> Vec<ChatItem> {
                             role: ChatRole::User,
                             content: text.clone(),
                         }),
+                        ContentPart::Image { media_type, .. } => items.push(ChatItem {
+                            role: ChatRole::User,
+                            content: format!("[image: {media_type}]"),
+                        }),
                         ContentPart::ToolResult(result) => items.push(ChatItem {
                             role: ChatRole::ToolResult {
                                 name: result.tool_name.clone(),
@@ -256,6 +260,10 @@ pub struct App {
     pub show_plan: bool,
     pub subagents: Vec<SubagentSessionState>,
     pub token_usage: Option<TokenUsage>,
+    /// The session's tokens and cost so far.
+    pub session_usage: maukode_protocol::SessionUsage,
+    /// The daemon reports totals (remote mode); otherwise they are added up here.
+    pub usage_from_server: bool,
     pub status_message: Option<(String, Instant)>,
     pub animation_frame: usize,
     pub should_quit: bool,
@@ -363,6 +371,18 @@ impl App {
             });
         }
 
+        let session_usage = match &server_client {
+            Some(client) => client
+                .get_session(initial_session.id)
+                .await
+                .map(|detail| detail.usage)
+                .unwrap_or_default(),
+            None => store
+                .session_usage(initial_session.id)
+                .await
+                .unwrap_or_default(),
+        };
+        let remote = server_client.is_some();
         let session = Arc::new(RwLock::new(initial_session));
 
         // Use the same conversion path for startup and later session switches.
@@ -404,6 +424,8 @@ impl App {
             show_plan: true,
             subagents: Vec::new(),
             token_usage: None,
+            usage_from_server: remote,
+            session_usage,
             status_message: None,
             animation_frame: 0,
             should_quit: false,
@@ -541,6 +563,8 @@ impl App {
     pub fn switch_to_new_session(&mut self) {
         let new_sess = Session::new(&self.cwd);
         self.session = Arc::new(RwLock::new(new_sess));
+        self.session_usage = maukode_protocol::SessionUsage::default();
+        self.token_usage = None;
         self.items.clear();
         self.items.push(ChatItem {
             role: ChatRole::System,
@@ -1075,6 +1099,7 @@ impl App {
             max_steps: self.config.agent.max_steps,
             max_tokens: Some(self.config.agent.max_tokens),
             temperature: None,
+            thinking: self.config.thinking_for(&self.config.active_model),
         };
 
         let runner = SessionRunner::new(session, llm_client, tools, context, runner_config)
@@ -1172,7 +1197,28 @@ impl App {
                 self.set_status("Private tool result — hidden from AI");
             }
             LLMEvent::Usage(usage) => {
+                if !self.usage_from_server {
+                    let cost = self.config.cost_of(&self.config.active_model, &usage);
+                    let mut delta = maukode_protocol::SessionUsage::default();
+                    delta.add(&usage, cost);
+                    self.session_usage.merge(&delta);
+                    // Without a daemon the totals are stored here.
+                    let session_id = self.session.try_read().map(|s| s.id).ok();
+                    let runtime = tokio::runtime::Handle::try_current().ok();
+                    if let (None, Some(id), Some(runtime)) =
+                        (&self.server_client, session_id, runtime)
+                    {
+                        let store = self.store.clone();
+                        runtime.spawn(async move {
+                            let _ = store.add_session_usage(id, &delta).await;
+                        });
+                    }
+                }
                 self.token_usage = Some(usage);
+            }
+            LLMEvent::SessionUsage(totals) => {
+                self.usage_from_server = true;
+                self.session_usage = totals;
             }
             LLMEvent::ContextWarning {
                 current_tokens,

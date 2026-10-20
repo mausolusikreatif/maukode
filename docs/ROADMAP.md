@@ -39,7 +39,10 @@ remove a feature, update its row in the same PR.
 | Feature | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | OpenAI-compatible streaming (OpenAI, OpenRouter, Ollama, DeepSeek, llm-kita, custom) | **done** | `protocols/openai.rs`, usage via `stream_options` |
-| Anthropic streaming | **done** | `protocols/anthropic.rs`; prompt caching (tools, system prompt, last message; the per-turn context follows the last breakpoint, so the history stays cached across turns), `Usage` events with cached tokens included in `input_tokens`, mid-stream `error` events fail the attempt; thinking blocks are dropped |
+| Anthropic streaming | **done** | `protocols/anthropic.rs`; prompt caching (tools, system prompt, last message) over an append-only history, `Usage` events with cached tokens included in `input_tokens`, mid-stream `error` events fail the attempt |
+| Extended thinking (Anthropic) | **done** | `thinking_param` in `protocols/anthropic.rs`, `models.<id>.thinking`; adaptive on Claude 4.6+, budget for older models, effort, summarized display; thinking blocks replayed verbatim with `drop_block` for stale ones |
+| Image input | **done** | `ContentPart::Image`; Anthropic, OpenAI-compatible and ChatGPT adapters; `POST /sessions/{id}/prompt` `images`; web UI attach/paste/drop in `ui/Composer.tsx`; not from `read_file`, the TUI, or `maukode run` |
+| Session usage and cost | **done** | `pricing.rs` (built-in Claude prices, `models.<id>.pricing`), `session_usage` table, `LLMEvent::SessionUsage`, snapshot `usage`; web UI composer, TUI status bar |
 | ChatGPT plan (Sign in with ChatGPT, Responses API) | **done** | `chatgpt_auth.rs`, `chatgpt_client.rs`, `maukode auth` |
 | ChatGPT credentials on a remote daemon | **planned** | — |
 
@@ -91,7 +94,7 @@ over; they are listed as **planned** again below.
 | Command palette and shortcut sheet | **planned** | only `shortcutsOpen` state remains in `state/store.ts` |
 | Open in editor / reveal in file manager | **planned** | removed with the Tauri shell |
 | Discard worktree from the review panel | **planned** | branch can be discarded when deleting the session |
-| Attachments (images, uploaded files, clipboard) | **planned** | — |
+| Attachments | **partial** | images (pick, paste, drop) in `ui/Composer.tsx`; no other file types |
 | Split/syntax-highlighted diff, line comments, per-hunk revert | **planned** | — |
 | Dev-server preview panel | **planned** | backend exists |
 
@@ -192,15 +195,15 @@ Remaining risks, by design or not yet addressed:
 
 ### Features
 
-1. Accurate usage and cost per session (needs the Anthropic `Usage` fix and caching).
-2. Extended thinking for Anthropic, including thinking-signature round trips.
-3. Image input (`ContentPart` is text-only).
-4. Multi-file edits (`apply_patch`).
-5. Hooks (e.g. format after edit) and pattern-based permission rules instead of exact-match
+Done in #89: usage and cost per session, extended thinking for Anthropic (with signature round
+trips), and image input. Remaining:
+
+1. Multi-file edits (`apply_patch`).
+2. Hooks (e.g. format after edit) and pattern-based permission rules instead of exact-match
    session whitelisting.
-6. A JSON output mode for `maukode run` for CI and scripts.
-7. TUI parity: steering/queueing and `@file` autocomplete (M2, M6).
-8. Restore web UI features lost in the rebuild (command palette, open in editor, archive).
+3. A JSON output mode for `maukode run` for CI and scripts.
+4. TUI parity: steering/queueing and `@file` autocomplete (M2, M6).
+5. Restore web UI features lost in the rebuild (command palette, open in editor, archive).
 
 ---
 

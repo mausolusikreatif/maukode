@@ -45,6 +45,8 @@ export type { SetLawangRequest } from "./generated/SetLawangRequest";
 export type { SecuritySettings } from "./generated/SecuritySettings";
 export type { SandboxMode } from "./generated/SandboxMode";
 export type { SessionDetailResponse } from "./generated/SessionDetailResponse";
+export type { SessionUsage } from "./generated/SessionUsage";
+export type { PromptImage } from "./generated/PromptImage";
 export type { SessionListItem } from "./generated/SessionListItem";
 export type { SetAgentConfigRequest } from "./generated/SetAgentConfigRequest";
 export type { SkillDefinition } from "./generated/SkillDefinition";

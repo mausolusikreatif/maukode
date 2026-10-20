@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures::{stream, StreamExt};
 use maukode_llm::{LLMClient, LLMError, LLMRequest, LLMStream};
-use maukode_protocol::{ContentPart, FinishReason, LLMEvent, Role, TokenUsage, ToolCall};
+use maukode_protocol::{ContentPart, FinishReason, LLMEvent, Message, Role, TokenUsage, ToolCall};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 
@@ -32,35 +32,70 @@ impl ChatGptClient {
     }
 }
 
+/// Text the model sees for a message: its text parts, then any MauKode context.
+fn message_text(message: &Message) -> String {
+    let mut text = message.text_content();
+    for part in &message.parts {
+        if let ContentPart::Context { text: context } = part {
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            text.push_str(&maukode_llm::context_text(context));
+        }
+    }
+    text
+}
+
 fn build_body(request: &LLMRequest) -> Value {
     let mut input = Vec::new();
     let mut instructions = request.system_prompt.clone().unwrap_or_default();
     for message in &request.messages {
         for part in &message.parts {
+            // Other providers' items (Anthropic thinking blocks) mean nothing here.
             if let ContentPart::ProviderItem { value } = part {
-                input.push(value.clone());
+                if !matches!(
+                    value["type"].as_str(),
+                    Some("thinking" | "redacted_thinking")
+                ) {
+                    input.push(value.clone());
+                }
             }
         }
-        let text = message.text_content();
-        if !text.is_empty() {
-            match message.role {
-                Role::System => {
-                    if !instructions.is_empty() {
-                        instructions.push_str("\n\n");
-                    }
-                    instructions.push_str(&text);
-                }
-                Role::User | Role::Assistant => input.push(json!({
-                    "role": if message.role == Role::User { "user" } else { "assistant" },
-                    "content": text,
+        let text = message_text(message);
+        let images: Vec<Value> = message
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::Image { media_type, data } => Some(json!({
+                    "type": "input_image",
+                    "image_url": format!("data:{media_type};base64,{data}"),
                 })),
+                _ => None,
+            })
+            .collect();
+        match message.role {
+            Role::System if !text.is_empty() => {
+                if !instructions.is_empty() {
+                    instructions.push_str("\n\n");
+                }
+                instructions.push_str(&text);
             }
+            Role::System => {}
+            Role::User if !images.is_empty() => {
+                let mut content = images;
+                if !text.is_empty() {
+                    content.push(json!({ "type": "input_text", "text": text }));
+                }
+                input.push(json!({ "role": "user", "content": content }));
+            }
+            Role::User | Role::Assistant if !text.is_empty() => input.push(json!({
+                "role": if message.role == Role::User { "user" } else { "assistant" },
+                "content": text,
+            })),
+            Role::User | Role::Assistant => {}
         }
         for part in &message.parts {
             match part {
-                ContentPart::Text { .. }
-                | ContentPart::Reasoning { .. }
-                | ContentPart::ProviderItem { .. } => {}
                 ContentPart::ToolCall(call) => input.push(json!({
                     "type": "function_call",
                     "call_id": call.id,
@@ -73,26 +108,8 @@ fn build_body(request: &LLMRequest) -> Value {
                     "call_id": result.tool_call_id,
                     "output": result.content,
                 })),
+                _ => {}
             }
-        }
-    }
-    // The per-turn context goes last so the instructions and the earlier input stay a cacheable
-    // prefix across turns. A conversation ending with an assistant message keeps it in the
-    // instructions instead.
-    if let Some(note) = request.turn_context_note() {
-        let ends_with_assistant = request
-            .messages
-            .last()
-            .is_some_and(|m| m.role == Role::Assistant);
-        if ends_with_assistant {
-            if let Some(suffix) = &request.system_suffix {
-                if !instructions.is_empty() {
-                    instructions.push('\n');
-                }
-                instructions.push_str(suffix);
-            }
-        } else {
-            input.push(json!({ "role": "user", "content": note }));
         }
     }
     let mut body = json!({
@@ -355,8 +372,7 @@ mod tests {
                 },
             ],
         )
-        .with_system_prompt("Be helpful")
-        .with_system_suffix("today");
+        .with_system_prompt("Be helpful");
         let body = build_body(&request);
         assert_eq!(body["store"], false);
         assert_eq!(body["stream"], true);
@@ -367,13 +383,48 @@ mod tests {
         assert_eq!(body["input"][2]["name"], "grep");
         assert_eq!(body["input"][2]["namespace"], "maukode");
         assert_eq!(body["input"][3]["type"], "function_call_output");
-        assert_eq!(body["input"][4]["role"], "user");
-        assert_eq!(
-            body["input"][4]["content"],
-            "<maukode-context>\ntoday\n</maukode-context>"
-        );
         assert!(body.get("temperature").is_none());
         assert!(body.get("max_output_tokens").is_none());
+    }
+
+    #[test]
+    fn images_context_and_foreign_thinking_blocks() {
+        let mut prompt = Message::user_with_images(
+            "what is this",
+            vec![ContentPart::Image {
+                media_type: "image/jpeg".into(),
+                data: "aGk=".into(),
+            }],
+        );
+        prompt.parts.push(ContentPart::Context {
+            text: "today".into(),
+        });
+        let request = LLMRequest::new(
+            "model",
+            vec![
+                prompt,
+                Message::assistant(vec![
+                    ContentPart::ProviderItem {
+                        value: json!({"type": "thinking", "thinking": "x", "signature": "s"}),
+                    },
+                    ContentPart::Text {
+                        text: "A cat".into(),
+                    },
+                ]),
+            ],
+        );
+        let body = build_body(&request);
+
+        let content = &body["input"][0]["content"];
+        assert_eq!(content[0]["type"], "input_image");
+        assert_eq!(content[0]["image_url"], "data:image/jpeg;base64,aGk=");
+        assert_eq!(
+            content[1]["text"],
+            "what is this\n\n<maukode-context>\ntoday\n</maukode-context>"
+        );
+        // The Anthropic thinking block is not sent; the assistant text is.
+        assert_eq!(body["input"][1]["content"], "A cat");
+        assert!(body["input"].get(2).is_none());
     }
 
     #[test]

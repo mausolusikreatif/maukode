@@ -1,6 +1,6 @@
 use crate::client::{LLMClient, LLMStream};
 use crate::error::LLMError;
-use crate::request::LLMRequest;
+use crate::request::{LLMRequest, ThinkingMode};
 use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures::{stream, StreamExt};
@@ -33,10 +33,78 @@ fn cache_breakpoint() -> Value {
     json!({ "type": "ephemeral" })
 }
 
+/// Beta that lets a request choose what happens to a thinking block whose conversation changed.
+const THINKING_BINDING_BETA: &str = "thinking-binding-controls-2026-08-01";
+
+/// `(major, minor)` of a Claude model id such as `claude-opus-4-6`, `claude-sonnet-5` or
+/// `anthropic/claude-haiku-5-5`. `None` for other forms, including the older
+/// `claude-3-5-sonnet-…` ids.
+fn claude_version(model: &str) -> Option<(u32, u32)> {
+    let name = model.rsplit('/').next()?.strip_prefix("claude-")?;
+    let mut words = name.split('-');
+    let family = words.next()?;
+    if family.chars().next()?.is_ascii_digit() {
+        return None;
+    }
+    let major = words.next()?.parse().ok()?;
+    // A date suffix (`-20250514`) is not a minor version.
+    let minor = words
+        .next()
+        .filter(|w| w.len() <= 2)
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(0);
+    Some((major, minor))
+}
+
+/// The `thinking` request parameter, if any. Claude 4.6 and later think adaptively; Claude 5 and
+/// later always think, so `Off` cannot turn it off there. Blocks from those models are bound to
+/// the conversation that produced them: when an earlier message changed (pruning, compaction),
+/// the API is asked to drop the stale blocks instead of rejecting the request.
+fn thinking_param(request: &LLMRequest) -> Option<Value> {
+    let version = claude_version(&request.model);
+    let adaptive_capable = version.is_some_and(|v| v >= (4, 6));
+    let mode = match request.thinking.mode {
+        ThinkingMode::Off if version.is_some_and(|v| v.0 >= 5) => ThinkingMode::Adaptive,
+        ThinkingMode::Auto if adaptive_capable => ThinkingMode::Adaptive,
+        ThinkingMode::Auto => ThinkingMode::Off,
+        mode => mode,
+    };
+    let mut thinking = match mode {
+        ThinkingMode::Adaptive => json!({ "type": "adaptive" }),
+        ThinkingMode::Budget => json!({
+            "type": "enabled",
+            "budget_tokens": thinking_budget(request),
+        }),
+        ThinkingMode::Auto | ThinkingMode::Off => return None,
+    };
+    // `display` arrived with Claude 4.7, whose default hides the thinking text.
+    if version.is_some_and(|v| v >= (4, 7)) {
+        let summarized = request.thinking.summarized.unwrap_or(true);
+        thinking["display"] = json!(if summarized { "summarized" } else { "omitted" });
+    }
+    if adaptive_capable {
+        thinking["block_binding"] = json!({ "prefix_mismatch_behavior": "drop_block" });
+    }
+    Some(thinking)
+}
+
+fn thinking_budget(request: &LLMRequest) -> u32 {
+    request.thinking.budget_tokens.unwrap_or(4096).max(1024)
+}
+
+/// Whether a stored provider item is an Anthropic thinking block (other providers' items, such
+/// as ChatGPT reasoning, are not sent here).
+fn is_thinking_block(value: &Value) -> bool {
+    matches!(
+        value["type"].as_str(),
+        Some("thinking" | "redacted_thinking")
+    )
+}
+
 /// Build the Messages API body. Three cache breakpoints are set, in prefix order: the last tool,
-/// the system prompt, and the last message. The per-turn context follows the last breakpoint (at
-/// the end of the last user message), so every step, and the first step of the next turn, reads
-/// the whole earlier conversation from the cache.
+/// the system prompt, and the last message. The history is append-only (per-turn context is
+/// stored in its turn's user message), so every step and every later turn reads the earlier
+/// conversation from the cache, and replayed thinking blocks stay valid.
 fn build_body(request: &LLMRequest) -> Value {
     let mut messages = Vec::new();
     for msg in &request.messages {
@@ -52,6 +120,21 @@ fn build_body(request: &LLMRequest) -> Value {
             match part {
                 ContentPart::Text { text } => {
                     contents.push(json!({ "type": "text", "text": text }));
+                }
+                ContentPart::Context { text } => {
+                    contents.push(json!({ "type": "text", "text": crate::context_text(text) }));
+                }
+                ContentPart::Image { media_type, data } => {
+                    contents.push(json!({
+                        "type": "image",
+                        "source": { "type": "base64", "media_type": media_type, "data": data },
+                    }));
+                }
+                // Thinking blocks go back unchanged, in their original position.
+                ContentPart::ProviderItem { value }
+                    if msg.role == Role::Assistant && is_thinking_block(value) =>
+                {
+                    contents.push(value.clone());
                 }
                 ContentPart::Reasoning { .. } | ContentPart::ProviderItem { .. } => {}
                 ContentPart::ToolCall(call) => {
@@ -75,23 +158,11 @@ fn build_body(request: &LLMRequest) -> Value {
 
         messages.push(json!({ "role": role, "content": contents }));
     }
-    let last_blocks = messages
-        .last_mut()
-        .filter(|m| m["role"] == "user")
-        .and_then(|m| m["content"].as_array_mut());
-    let mut system_suffix = request.system_suffix.as_deref();
-    if let Some(blocks) = last_blocks {
-        if let Some(block) = blocks.last_mut() {
-            block["cache_control"] = cache_breakpoint();
-        }
-        if let Some(note) = request.turn_context_note() {
-            blocks.push(json!({ "type": "text", "text": note }));
-            system_suffix = None;
-        }
-    } else if let Some(block) = messages
+    // Thinking blocks cannot carry a breakpoint.
+    if let Some(block) = messages
         .last_mut()
         .and_then(|m| m["content"].as_array_mut())
-        .and_then(|blocks| blocks.last_mut())
+        .and_then(|blocks| blocks.iter_mut().rev().find(|b| !is_thinking_block(b)))
     {
         block["cache_control"] = cache_breakpoint();
     }
@@ -111,34 +182,51 @@ fn build_body(request: &LLMRequest) -> Value {
         last["cache_control"] = cache_breakpoint();
     }
 
-    let mut system = Vec::new();
-    if let Some(prompt) = request.system_prompt.as_deref().filter(|p| !p.is_empty()) {
-        system.push(json!({ "type": "text", "text": prompt, "cache_control": cache_breakpoint() }));
-    }
-    if let Some(suffix) = system_suffix {
-        system.push(json!({ "type": "text", "text": suffix }));
+    let thinking = thinking_param(request);
+    let mut max_tokens = request.max_tokens.unwrap_or(4096);
+    if thinking.as_ref().is_some_and(|t| t["type"] == "enabled") {
+        // The budget is part of `max_tokens` and must leave room for the answer.
+        max_tokens = max_tokens.max(thinking_budget(request) + 1024);
     }
 
     let mut body = json!({
         "model": request.model,
         "messages": messages,
-        "max_tokens": request.max_tokens.unwrap_or(4096),
+        "max_tokens": max_tokens,
         "stream": true
     });
-    if !system.is_empty() {
-        body["system"] = json!(system);
+    if let Some(prompt) = request.system_prompt.as_deref().filter(|p| !p.is_empty()) {
+        body["system"] = json!([
+            { "type": "text", "text": prompt, "cache_control": cache_breakpoint() }
+        ]);
     }
     if !tools.is_empty() {
         body["tools"] = json!(tools);
     }
-    if let Some(temp) = request.temperature {
-        body["temperature"] = json!(temp);
+    if let Some(effort) = &request.thinking.effort {
+        body["output_config"] = json!({ "effort": effort });
+    }
+    match thinking {
+        Some(thinking) => body["thinking"] = thinking,
+        // Thinking does not accept a changed temperature.
+        None => {
+            if let Some(temp) = request.temperature {
+                body["temperature"] = json!(temp);
+            }
+        }
     }
     body
 }
 
+/// A thinking block being streamed: its text and signature, or a redacted block's data.
+enum ThinkingBlock {
+    Visible { text: String, signature: String },
+    Redacted { data: Value },
+}
+
 #[derive(Default)]
 struct StreamState {
+    thinking: Option<ThinkingBlock>,
     current_tool_id: Option<String>,
     current_tool_name: Option<String>,
     tool_args_buf: String,
@@ -168,8 +256,28 @@ impl StreamState {
             }
             "content_block_start" => {
                 let block = &val["content_block"];
-                if block["type"] != "tool_use" {
-                    return Vec::new();
+                match block["type"].as_str() {
+                    Some("thinking") => {
+                        let text = block["thinking"].as_str().unwrap_or_default().to_string();
+                        let signature = block["signature"].as_str().unwrap_or_default();
+                        self.thinking = Some(ThinkingBlock::Visible {
+                            text: text.clone(),
+                            signature: signature.to_string(),
+                        });
+                        return if text.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![Ok(LLMEvent::ReasoningDelta { text })]
+                        };
+                    }
+                    Some("redacted_thinking") => {
+                        self.thinking = Some(ThinkingBlock::Redacted {
+                            data: block["data"].clone(),
+                        });
+                        return Vec::new();
+                    }
+                    Some("tool_use") => {}
+                    _ => return Vec::new(),
                 }
                 let id = block["id"].as_str().unwrap_or("").to_string();
                 let name = block["name"].as_str().unwrap_or("").to_string();
@@ -184,6 +292,26 @@ impl StreamState {
                     "text_delta" => {
                         let text = delta["text"].as_str().unwrap_or("").to_string();
                         vec![Ok(LLMEvent::TextDelta { text })]
+                    }
+                    "thinking_delta" => {
+                        let more = delta["thinking"].as_str().unwrap_or_default();
+                        if let Some(ThinkingBlock::Visible { text, .. }) = &mut self.thinking {
+                            text.push_str(more);
+                        }
+                        if more.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![Ok(LLMEvent::ReasoningDelta {
+                                text: more.to_string(),
+                            })]
+                        }
+                    }
+                    "signature_delta" => {
+                        let more = delta["signature"].as_str().unwrap_or_default();
+                        if let Some(ThinkingBlock::Visible { signature, .. }) = &mut self.thinking {
+                            signature.push_str(more);
+                        }
+                        Vec::new()
                     }
                     "input_json_delta" => {
                         let partial = delta["partial_json"].as_str().unwrap_or("");
@@ -202,6 +330,20 @@ impl StreamState {
                 }
             }
             "content_block_stop" => {
+                // A finished thinking block is kept verbatim: it must go back unchanged.
+                if let Some(block) = self.thinking.take() {
+                    let item = match block {
+                        ThinkingBlock::Visible { text, signature } => json!({
+                            "type": "thinking",
+                            "thinking": text,
+                            "signature": signature,
+                        }),
+                        ThinkingBlock::Redacted { data } => {
+                            json!({ "type": "redacted_thinking", "data": data })
+                        }
+                    };
+                    return vec![Ok(LLMEvent::ProviderItem { item })];
+                }
                 let (Some(id), Some(name)) =
                     (self.current_tool_id.take(), self.current_tool_name.take())
                 else {
@@ -264,15 +406,16 @@ impl LLMClient for AnthropicClient {
     async fn stream(&self, request: LLMRequest) -> Result<LLMStream, LLMError> {
         let body = build_body(&request);
         let url = format!("{}/v1/messages", self.base_url);
-        let resp = self
+        let mut builder = self
             .http
             .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+            .header("content-type", "application/json");
+        if body["thinking"].get("block_binding").is_some() {
+            builder = builder.header("anthropic-beta", THINKING_BINDING_BETA);
+        }
+        let resp = builder.json(&body).send().await?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -319,6 +462,7 @@ impl LLMClient for AnthropicClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::request::ThinkingSettings;
     use maukode_protocol::Message;
 
     fn tool(name: &str) -> maukode_tools::ToolDefinition {
@@ -332,13 +476,13 @@ mod tests {
 
     #[test]
     fn request_marks_tools_stable_system_prompt_and_last_message_for_caching() {
-        let request = LLMRequest::new(
-            "model",
-            vec![Message::user("first"), Message::user("second")],
-        )
-        .with_system_prompt("stable")
-        .with_system_suffix("today")
-        .with_tools(vec![tool("a"), tool("b")]);
+        let mut first = Message::user("first");
+        first.parts.push(ContentPart::Context {
+            text: "today".into(),
+        });
+        let request = LLMRequest::new("model", vec![first, Message::user("second")])
+            .with_system_prompt("stable")
+            .with_tools(vec![tool("a"), tool("b")]);
         let body = build_body(&request);
 
         assert!(body["tools"][0].get("cache_control").is_none());
@@ -346,40 +490,143 @@ mod tests {
         assert_eq!(body["system"][0]["text"], "stable");
         assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
         assert!(body["system"].get(1).is_none());
-        assert!(body["messages"][0]["content"][0]
+        // The turn context stays in the message it was added to.
+        assert_eq!(
+            body["messages"][0]["content"][1]["text"],
+            "<maukode-context>\ntoday\n</maukode-context>"
+        );
+        assert!(body["messages"][0]["content"][1]
             .get("cache_control")
             .is_none());
         assert_eq!(
             body["messages"][1]["content"][0]["cache_control"]["type"],
             "ephemeral"
         );
-        // The per-turn context comes after the last breakpoint.
-        let note = &body["messages"][1]["content"][1];
-        assert_eq!(note["text"], "<maukode-context>\ntoday\n</maukode-context>");
-        assert!(note.get("cache_control").is_none());
     }
 
     #[test]
-    fn turn_context_follows_the_system_prompt_without_a_trailing_user_message() {
+    fn images_and_thinking_blocks_are_sent_in_place() {
+        let thinking = json!({"type": "thinking", "thinking": "hmm", "signature": "sig"});
         let request = LLMRequest::new(
-            "model",
+            "claude-opus-5-5",
             vec![
-                Message::user("question"),
-                Message::assistant_text("Partial"),
+                Message::user_with_images(
+                    "what is this",
+                    vec![ContentPart::Image {
+                        media_type: "image/png".into(),
+                        data: "aGk=".into(),
+                    }],
+                ),
+                Message::assistant(vec![
+                    ContentPart::ProviderItem {
+                        value: thinking.clone(),
+                    },
+                    ContentPart::Reasoning { text: "hmm".into() },
+                    ContentPart::Text { text: "A".into() },
+                    ContentPart::ProviderItem {
+                        value: json!({"type": "reasoning", "encrypted_content": "x"}),
+                    },
+                ]),
             ],
-        )
-        .with_system_prompt("stable")
-        .with_system_suffix("today");
+        );
         let body = build_body(&request);
 
-        assert_eq!(body["system"][1]["text"], "today");
+        let image = &body["messages"][0]["content"][0];
+        assert_eq!(image["type"], "image");
+        assert_eq!(image["source"]["media_type"], "image/png");
+        assert_eq!(image["source"]["data"], "aGk=");
+        let assistant = body["messages"][1]["content"].as_array().unwrap();
+        // The thinking block comes back unchanged and first; other providers' items are dropped.
+        assert_eq!(assistant.len(), 2);
+        assert_eq!(assistant[0], thinking);
+        assert_eq!(assistant[1]["text"], "A");
+        assert_eq!(assistant[1]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn thinking_follows_the_model_generation() {
+        let thinking = |model: &str, settings: ThinkingSettings| {
+            let mut request = LLMRequest::new(model, vec![Message::user("hi")]);
+            request.thinking = settings;
+            request.max_tokens = Some(2000);
+            build_body(&request)
+        };
+        let auto = ThinkingSettings::default();
+
+        let body = thinking("claude-opus-5-5", auto.clone());
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert_eq!(body["thinking"]["display"], "summarized");
         assert_eq!(
-            body["messages"][1]["content"].as_array().map(Vec::len),
-            Some(1)
+            body["thinking"]["block_binding"]["prefix_mismatch_behavior"],
+            "drop_block"
         );
+        // Claude 5 models always think: `off` keeps adaptive thinking.
+        let off = ThinkingSettings {
+            mode: ThinkingMode::Off,
+            ..ThinkingSettings::default()
+        };
         assert_eq!(
-            body["messages"][1]["content"][0]["cache_control"]["type"],
-            "ephemeral"
+            thinking("claude-sonnet-5-5", off.clone())["thinking"]["type"],
+            "adaptive"
+        );
+        assert!(thinking("claude-opus-4-8", off).get("thinking").is_none());
+        // 4.6 is adaptive but predates `display`.
+        let body = thinking("claude-sonnet-4-6", auto.clone());
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert!(body["thinking"].get("display").is_none());
+        // Older models think only with a budget, which must fit in `max_tokens`.
+        assert!(thinking("claude-haiku-4-5", auto).get("thinking").is_none());
+        let budget = ThinkingSettings {
+            mode: ThinkingMode::Budget,
+            budget_tokens: Some(3000),
+            effort: Some("high".into()),
+            ..ThinkingSettings::default()
+        };
+        let body = thinking("claude-haiku-4-5-20251001", budget);
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"], 3000);
+        assert!(body["thinking"].get("block_binding").is_none());
+        assert_eq!(body["max_tokens"], 4024);
+        assert_eq!(body["output_config"]["effort"], "high");
+    }
+
+    #[test]
+    fn model_versions_are_parsed_from_current_and_gateway_ids() {
+        assert_eq!(claude_version("claude-opus-4-6"), Some((4, 6)));
+        assert_eq!(claude_version("claude-sonnet-5"), Some((5, 0)));
+        assert_eq!(claude_version("claude-sonnet-4-20250514"), Some((4, 0)));
+        assert_eq!(claude_version("anthropic/claude-haiku-5-5"), Some((5, 5)));
+        assert_eq!(claude_version("claude-3-7-sonnet-latest"), None);
+        assert_eq!(claude_version("gpt-5"), None);
+    }
+
+    #[test]
+    fn thinking_blocks_are_streamed_as_reasoning_and_kept_verbatim() {
+        let mut state = StreamState::default();
+        state.consume(&json!({"type": "content_block_start", "content_block": {
+            "type": "thinking", "thinking": "", "signature": ""
+        }}));
+        let delta = state.consume(&json!({"type": "content_block_delta", "delta": {
+            "type": "thinking_delta", "thinking": "Let me see"
+        }}));
+        assert!(matches!(delta.as_slice(),
+            [Ok(LLMEvent::ReasoningDelta { text })] if text == "Let me see"));
+        state.consume(&json!({"type": "content_block_delta", "delta": {
+            "type": "signature_delta", "signature": "abc"
+        }}));
+        let done = state.consume(&json!({"type": "content_block_stop"}));
+        assert!(
+            matches!(done.as_slice(), [Ok(LLMEvent::ProviderItem { item })]
+            if *item == json!({"type": "thinking", "thinking": "Let me see", "signature": "abc"}))
+        );
+
+        state.consume(&json!({"type": "content_block_start", "content_block": {
+            "type": "redacted_thinking", "data": "opaque"
+        }}));
+        let done = state.consume(&json!({"type": "content_block_stop"}));
+        assert!(
+            matches!(done.as_slice(), [Ok(LLMEvent::ProviderItem { item })]
+            if *item == json!({"type": "redacted_thinking", "data": "opaque"}))
         );
     }
 

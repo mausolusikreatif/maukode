@@ -34,6 +34,13 @@ function Item({ item }: { item: ThreadItem }) {
           <div className="body">{item.text}</div>
         </div>
       );
+    case "image":
+      return (
+        <div className="row user">
+          <span className="gutter" />
+          <img className="thumb large" src={`data:${item.mediaType};base64,${item.data}`} alt="Gambar terlampir" />
+        </div>
+      );
     case "assistant":
       return (
         <div className="row">

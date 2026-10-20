@@ -12,10 +12,12 @@ pub use event::{
     Checkpoint, CodebaseMapResponse, CompactRequest, CompactResponse, DiffResponse, FileDiffEntry,
     FileDiffListResponse, FileDiffResponse, FileDiffStatus, FinishReason, GlobalEvent,
     InitProjectRequest, InitProjectResponse, LLMEvent, McpListResponse, McpServerStatus,
-    McpToolInfo, PermissionDecision, PermissionRequest, Plan, PlanStep, StepStatus, StopReason,
-    TokenUsage, UndoResponse,
+    McpToolInfo, PermissionDecision, PermissionRequest, Plan, PlanStep, SessionUsage, StepStatus,
+    StopReason, TokenUsage, UndoResponse,
 };
-pub use message::{ContentPart, Message, Role, ToolCall, ToolResult};
+pub use message::{
+    ContentPart, Message, Role, ToolCall, ToolResult, IMAGE_MEDIA_TYPES, MAX_IMAGE_BYTES,
+};
 pub use plugin::{PluginManifest, PluginMcpServerConfig};
 pub use preview::{PreviewInfo, PreviewRequest};
 pub use session::{SessionId, SessionMetadata, SessionState};

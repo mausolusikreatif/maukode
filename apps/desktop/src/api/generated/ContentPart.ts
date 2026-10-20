@@ -3,4 +3,4 @@ import type { ToolCall } from "./ToolCall";
 import type { ToolResult } from "./ToolResult";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type ContentPart = { "type": "text", text: string, } | { "type": "reasoning", text: string, } | { "type": "provider_item", value: JsonValue, } | { "type": "tool_call" } & ToolCall | { "type": "tool_result" } & ToolResult;
+export type ContentPart = { "type": "text", text: string, } | { "type": "reasoning", text: string, } | { "type": "provider_item", value: JsonValue, } | { "type": "tool_call" } & ToolCall | { "type": "tool_result" } & ToolResult | { "type": "context", text: string, } | { "type": "image", media_type: string, data: string, };

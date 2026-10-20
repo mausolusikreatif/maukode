@@ -129,6 +129,49 @@ pub struct UpdateSessionRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PromptRequest {
     pub prompt: String,
+    /// Images to send with the prompt (PNG, JPEG, GIF or WebP, at most 5 MB each).
+    #[serde(default)]
+    pub images: Vec<PromptImage>,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct PromptImage {
+    pub media_type: String,
+    /// Base64, without a `data:` prefix.
+    pub data: String,
+}
+
+/// Most images one prompt may carry.
+const MAX_PROMPT_IMAGES: usize = 20;
+
+/// The user message for a prompt, after checking its images.
+fn prompt_message(payload: PromptRequest) -> Result<Message, (StatusCode, String)> {
+    let bad = |message: String| (StatusCode::BAD_REQUEST, message);
+    if payload.images.len() > MAX_PROMPT_IMAGES {
+        return Err(bad(format!(
+            "At most {MAX_PROMPT_IMAGES} images can be sent with one prompt"
+        )));
+    }
+    let mut images = Vec::with_capacity(payload.images.len());
+    for image in payload.images {
+        if !maukode_protocol::IMAGE_MEDIA_TYPES.contains(&image.media_type.as_str()) {
+            return Err(bad(format!(
+                "Unsupported image type '{}' (use PNG, JPEG, GIF or WebP)",
+                image.media_type
+            )));
+        }
+        let data: String = image.data.split_whitespace().collect();
+        let decoded_len = data.len() / 4 * 3;
+        if data.is_empty() || decoded_len > maukode_protocol::MAX_IMAGE_BYTES {
+            return Err(bad("Each image must be non-empty and at most 5 MB".into()));
+        }
+        images.push(maukode_protocol::ContentPart::Image {
+            media_type: image.media_type,
+            data,
+        });
+    }
+    Ok(Message::user_with_images(payload.prompt, images))
 }
 
 #[derive(Debug, Serialize)]
@@ -156,6 +199,25 @@ pub struct SessionDetailResponse {
     pub updated_at: String,
     #[serde(default)]
     pub queued_prompts: Vec<String>,
+    /// Tokens and cost so far.
+    pub usage: maukode_protocol::SessionUsage,
+}
+
+/// Add one response to the session's usage totals, priced with the session's model, and
+/// publish the new totals.
+async fn record_usage(
+    state: &ServerState,
+    id: SessionId,
+    model: &str,
+    usage: &maukode_protocol::TokenUsage,
+) {
+    let cost = state.config.read().await.cost_of(model, usage);
+    let mut delta = maukode_protocol::SessionUsage::default();
+    delta.add(usage, cost);
+    match state.store.add_session_usage(id, &delta).await {
+        Ok(total) => state.publish_event(id, LLMEvent::SessionUsage(total)).await,
+        Err(error) => tracing::warn!(%error, "Failed to record session usage"),
+    }
 }
 
 /// Provider/model a session runs with: its pinned pair if the provider still exists, otherwise
@@ -354,6 +416,7 @@ pub async fn get_session(
         .limit
         .map_or(0, |limit| message_total.saturating_sub(limit.min(MAX_PAGE)));
     let queued_prompts = state.get_queued_prompts(id).await;
+    let usage = state.store.session_usage(id).await.unwrap_or_default();
     let detail = SessionDetailResponse {
         id: session.id,
         title,
@@ -371,6 +434,7 @@ pub async fn get_session(
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
         queued_prompts,
+        usage,
     };
 
     Ok(Json(detail))
@@ -404,6 +468,7 @@ pub async fn submit_prompt(
     Json(payload): Json<PromptRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let session_arc = load_session(&state, id).await?;
+    let prompt = prompt_message(payload)?;
 
     let cancellation_token = state.try_register_active_turn(id).await.ok_or_else(|| {
         (
@@ -417,7 +482,7 @@ pub async fn submit_prompt(
         Arc::clone(&state),
         id,
         session_arc,
-        payload.prompt,
+        prompt,
         cancellation_token,
     )
     .await
@@ -456,7 +521,7 @@ fn start_turn(
     state: Arc<ServerState>,
     id: SessionId,
     session_arc: Arc<tokio::sync::RwLock<Session>>,
-    prompt: String,
+    prompt: Message,
     cancellation_token: tokio_util::sync::CancellationToken,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), (StatusCode, String)>> + Send>> {
     Box::pin(async move {
@@ -489,6 +554,7 @@ fn start_turn(
                 max_steps: config_guard.agent.max_steps,
                 max_tokens: Some(config_guard.agent.max_tokens),
                 temperature: None,
+                thinking: config_guard.thinking_for(&model),
             };
 
             let jail = maukode_tools::PathJail::new(&session_dir)
@@ -597,7 +663,7 @@ fn start_turn(
         tokio::spawn(async move {
             let run_handle = tokio::spawn(async move {
                 runner
-                    .run_with_cancellation(Some(prompt), llm_tx, Some(cancellation_token))
+                    .run_message_with_cancellation(Some(prompt), llm_tx, Some(cancellation_token))
                     .await
             });
             let mut llm_rx = crate::coalesce::CoalescingReceiver::new(llm_rx);
@@ -613,7 +679,14 @@ fn start_turn(
                 }
                 let save_now = matches!(event, LLMEvent::ToolResult(_))
                     && last_save.elapsed() >= std::time::Duration::from_secs(2);
+                let usage = match &event {
+                    LLMEvent::Usage(usage) => Some(usage.clone()),
+                    _ => None,
+                };
                 state.publish_event(id, event).await;
+                if let Some(usage) = usage {
+                    record_usage(&state, id, &model, &usage).await;
+                }
                 // The first event means the runner has recorded the prompt: store it now so the
                 // session gets its title (derived from the first message) while it is still running.
                 if !titled {
@@ -673,7 +746,7 @@ fn start_turn(
                                 next_state.clone(),
                                 id,
                                 next_session,
-                                next_prompt,
+                                Message::user(next_prompt),
                                 next_token,
                             )
                             .await
@@ -731,7 +804,7 @@ pub async fn queue_prompt(
                 Arc::clone(&state),
                 id,
                 session_arc,
-                payload.prompt,
+                Message::user(payload.prompt),
                 cancellation_token,
             )
             .await
@@ -813,7 +886,7 @@ pub async fn steer_prompt(
                 Arc::clone(&state),
                 id,
                 session_arc,
-                payload.prompt,
+                Message::user(payload.prompt),
                 cancellation_token,
             )
             .await

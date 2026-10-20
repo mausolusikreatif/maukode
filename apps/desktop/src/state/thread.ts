@@ -6,6 +6,7 @@ import type {
   PermissionRequest,
   Plan,
   StopReason,
+  SessionUsage,
   SubagentStatus,
   TokenUsage,
 } from "../api/types";
@@ -35,6 +36,7 @@ export interface SubagentDetail {
 
 export type ThreadItem =
   | { kind: "user"; id: string; text: string }
+  | { kind: "image"; id: string; mediaType: string; data: string }
   | { kind: "assistant"; id: string; text: string }
   | { kind: "reasoning"; id: string; text: string }
   | { kind: "plan"; id: string; plan: Plan }
@@ -67,6 +69,8 @@ export interface ThreadState {
   /** Why the last turn ended; cleared when a new turn starts. */
   stop: { reason: StopReason; message: string | null } | null;
   usage: TokenUsage | null;
+  /** The session's tokens and cost so far. */
+  sessionUsage: SessionUsage | null;
   /** Active structured plan for the session, if one has been emitted. */
   plan: Plan | null;
   /** Queued prompts waiting for subsequent turns. */
@@ -88,6 +92,7 @@ export function emptyThread(): ThreadState {
     pending: [],
     stop: null,
     usage: null,
+    sessionUsage: null,
     plan: null,
     queue: [],
     subagents: {},
@@ -126,8 +131,16 @@ function appendText(state: ThreadState, kind: "assistant" | "reasoning", text: s
 }
 
 /** A user message the client just sent, shown before the server echoes anything back. */
-export function startTurn(state: ThreadState, prompt: string): ThreadState {
-  const next = pushItem(state, (id) => ({ kind: "user", id, text: prompt }));
+export function startTurn(
+  state: ThreadState,
+  prompt: string,
+  images: { media_type: string; data: string }[] = [],
+): ThreadState {
+  let next = state;
+  for (const image of images) {
+    next = pushItem(next, (id) => ({ kind: "image", id, mediaType: image.media_type, data: image.data }));
+  }
+  next = pushItem(next, (id) => ({ kind: "user", id, text: prompt }));
   return { ...next, notices: [], running: true, stop: null };
 }
 
@@ -172,6 +185,10 @@ export function applyEvent(state: ThreadState, event: LLMEvent, seq?: number): T
     case "usage": {
       const { type: _type, ...usage } = event;
       return { ...next, usage };
+    }
+    case "session_usage": {
+      const { type: _type, ...sessionUsage } = event;
+      return { ...next, sessionUsage };
     }
     case "plan_created":
       return { ...next, plan: event.plan, running: true };
@@ -363,7 +380,11 @@ function partsToItems(parts: ContentPart[], role: Message["role"], items: Thread
         }
         break;
       }
+      case "image":
+        if (role === "user") items.push({ kind: "image", id: nextId(), mediaType: part.media_type, data: part.data });
+        break;
       case "provider_item":
+      case "context":
         break;
     }
   }
@@ -388,6 +409,7 @@ export function threadFromSnapshot(
     queue?: string[];
     subagents?: Record<string, SubagentDetail>;
     selectedSubagentId?: string | null;
+    sessionUsage?: SessionUsage | null;
   },
 ): ThreadState {
   return {
@@ -400,5 +422,6 @@ export function threadFromSnapshot(
     queue: opts.queue ?? [],
     subagents: opts.subagents ?? {},
     selectedSubagentId: opts.selectedSubagentId ?? null,
+    sessionUsage: opts.sessionUsage ?? null,
   };
 }

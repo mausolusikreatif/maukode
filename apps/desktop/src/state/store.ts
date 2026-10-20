@@ -10,6 +10,7 @@ import type {
   PermissionDecision,
   PermissionRequest,
   PreviewInfo,
+  PromptImage,
   ProvidersListResponse,
   SessionDetailResponse,
   SessionListItem,
@@ -147,7 +148,7 @@ interface AppState {
   deleteSession: (id: string, opts?: { cleanupWorktree?: boolean; deleteBranch?: boolean }) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   setSessionModel: (id: string, model: string, providerId?: string) => Promise<void>;
-  send: (text: string) => Promise<void>;
+  send: (text: string, images?: PromptImage[]) => Promise<void>;
   steer: (text: string) => Promise<void>;
   queue: (text: string) => Promise<void>;
   clearQueue: () => Promise<void>;
@@ -540,6 +541,7 @@ export const useApp = create<AppState>((set, get) => {
               pending: d.pending_permissions,
               lastSeq: d.last_event_seq,
               queue: d.queued_prompts ?? [],
+              sessionUsage: d.usage ?? null,
             }),
           },
         }));
@@ -613,12 +615,12 @@ export const useApp = create<AppState>((set, get) => {
       }));
     },
 
-    send: async (text) => {
+    send: async (text, images = []) => {
       const { client, activeId } = get();
-      if (!client || !activeId || !text.trim()) return;
-      patchThread(activeId, (t) => startTurn(t, text));
+      if (!client || !activeId || (!text.trim() && images.length === 0)) return;
+      patchThread(activeId, (t) => startTurn(t, text, images));
       try {
-        await client.prompt(activeId, text);
+        await client.prompt(activeId, text, images);
       } catch (e) {
         patchThread(activeId, (t) => ({ ...addNotice(t, "error", errorText(e)), running: false }));
       }
