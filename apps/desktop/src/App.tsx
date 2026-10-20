@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "./state/store";
-import { getBootstrap } from "./platform";
+import { getBootstrap, isEditableTarget } from "./platform";
 import { Connect } from "./ui/Connect";
 import { Sidebar, type Tab } from "./ui/Sidebar";
 import { Home } from "./ui/Home";
@@ -9,6 +9,7 @@ import { Settings, type Section } from "./ui/Settings";
 import { Session } from "./ui/Session";
 import { Review } from "./ui/Review";
 import { useTheme } from "./ui/theme";
+import { Palette, Shortcuts } from "./ui/Palette";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Ringkasan" },
@@ -45,6 +46,26 @@ export default function App() {
   }, []);
 
   const connected = connection === "online" || connection === "reconnecting";
+
+  // Ctrl/Cmd+K opens the command palette anywhere; `?` the shortcut sheet outside text fields.
+  useEffect(() => {
+    if (!connected) return;
+    const onKey = (e: KeyboardEvent) => {
+      const app = useApp.getState();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        app.toggleCommandPalette();
+      } else if (e.key === "?" && !isEditableTarget(e.target)) {
+        e.preventDefault();
+        app.toggleShortcuts();
+      } else if (e.key === "Escape") {
+        app.closeCommandPalette();
+        app.closeShortcuts();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [connected]);
 
   // Push a history entry whenever the place changes, unless it already matches the current entry
   // (which is the case when the change came from Back/Forward).
@@ -108,6 +129,8 @@ export default function App() {
         )}
       </main>
       {showReview && <Review onClose={() => void useApp.getState().toggleReview()} />}
+      <Palette onGo={go} />
+      <Shortcuts />
       <nav className="tabbar" aria-label="Navigasi utama">
         {TABS.map((t) => (
           <button key={t.id} aria-current={!activeId && tab === t.id} onClick={() => go(t.id)}>

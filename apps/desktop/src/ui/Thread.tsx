@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ThreadItem, ThreadState } from "../state/thread";
+import { useApp } from "../state/store";
 
 function Md({ text }: { text: string }) {
   return (
@@ -22,6 +23,20 @@ function summarize(args: string): string {
     return typeof first === "string" ? first : "";
   } catch {
     return args.slice(0, 120);
+  }
+}
+
+/** Tools whose `path` argument is a file worth opening. */
+const FILE_TOOLS = new Set(["read_file", "write_file", "edit_file"]);
+
+/** The file a tool call worked on, if it names one. */
+function fileOf(tool: string, args: string): string | null {
+  if (!FILE_TOOLS.has(tool)) return null;
+  try {
+    const path = (JSON.parse(args) as Record<string, unknown>).path;
+    return typeof path === "string" && path ? path : null;
+  } catch {
+    return null;
   }
 }
 
@@ -67,6 +82,14 @@ function Item({ item }: { item: ThreadItem }) {
               <span className="name">{item.name}</span>
               <span className="sum trunc">{summarize(item.args)}</span>
             </summary>
+            {fileOf(item.name, item.args) && (
+              <button
+                className="btn quiet small" title="Buka di editor pada mesin tempat daemon berjalan"
+                onClick={() => void useApp.getState().openInEditor(fileOf(item.name, item.args) as string)}
+              >
+                Buka di editor
+              </button>
+            )}
             <pre>{item.args}</pre>
             {item.result && <pre>{item.result.length > 6000 ? `${item.result.slice(0, 6000)}\n… dipotong` : item.result}</pre>}
           </details>

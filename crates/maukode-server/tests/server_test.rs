@@ -67,6 +67,31 @@ async fn test_server_health_and_sessions() {
         detail.directory,
         temp_dir.path().to_string_lossy().to_string()
     );
+
+    // Archiving is stored with the session and shows in the list.
+    let http = reqwest::Client::new();
+    let archive = |archived: bool| {
+        http.put(format!("{url}/api/v1/sessions/{}/archive", meta.id))
+            .bearer_auth("secret123")
+            .json(&serde_json::json!({ "archived": archived }))
+            .send()
+    };
+    assert_eq!(archive(true).await.unwrap().status(), 200);
+    let sessions = client.list_sessions(Some(temp_dir.path()), false).await.unwrap();
+    assert!(sessions[0].archived);
+    assert_eq!(archive(false).await.unwrap().status(), 200);
+    let sessions = client.list_sessions(Some(temp_dir.path()), false).await.unwrap();
+    assert!(!sessions[0].archived);
+
+    // Opening a file in the editor stays inside the workspace.
+    let open = |path: &str| {
+        http.post(format!("{url}/api/v1/sessions/{}/open", meta.id))
+            .bearer_auth("secret123")
+            .json(&serde_json::json!({ "path": path }))
+            .send()
+    };
+    assert_eq!(open("../outside.txt").await.unwrap().status(), 400);
+    assert_eq!(open("missing.txt").await.unwrap().status(), 404);
 }
 
 #[tokio::test]

@@ -44,6 +44,8 @@ bodies with a 4xx/5xx status.
 | PUT | `/sessions/{id}/model` | `{provider_id?, model}` | pins provider/model to this session only |
 | GET | `/events` | `?since=` / `Last-Event-ID` | global SSE feed |
 | PATCH | `/sessions/{id}` | `{title}` | blank/null restores auto title |
+| PUT | `/sessions/{id}/archive` | `{archived}` | list items carry `archived`; archived sessions are still listed (clients hide them) |
+| POST | `/sessions/{id}/open` | `{path, line?}` | opens a workspace file with `editor.command` on the daemon's machine; `400` outside the workspace, `404` if missing |
 | DELETE | `/sessions/{id}` | `?cleanup_worktree=true&delete_branch=false` | cancels running turn, removes data; removes the worktree checkout (branch kept unless `delete_branch`); 404 if unknown |
 | POST | `/sessions/{id}/prompt` | `{prompt, images?}` | `images`: `[{media_type, data}]`, base64 PNG/JPEG/GIF/WebP, at most 5 MB each and 20 per prompt (`400` otherwise); `409` if a turn is already running (the queue holds text only) |
 | POST | `/sessions/{id}/cancel` | | |

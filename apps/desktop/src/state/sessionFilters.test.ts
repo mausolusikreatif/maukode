@@ -33,6 +33,7 @@ const mockSession = (overrides: Partial<SessionListItem> = {}): SessionListItem 
   model: "gpt-4o",
   updated_at: "2026-10-06T12:00:00Z",
   worktree_branch: null,
+  archived: false,
   running: false,
   pending_permission_count: 0,
   turn_started_at: null,
