@@ -24,6 +24,33 @@ describe("thread reducer", () => {
     expect(s.lastSeq).toBe(2);
   });
 
+  it("keeps session usage totals and shows attached images", () => {
+    const totals = {
+      input_tokens: 10, output_tokens: 2, cache_read_tokens: 0, cache_write_tokens: 0,
+      cost_microusd: 5, unpriced_responses: 0,
+    };
+    const s = run([{ type: "session_usage", ...totals }]);
+    expect(s.sessionUsage).toEqual(totals);
+
+    const started = startTurn(emptyThread(), "what is this", [{ media_type: "image/png", data: "aGk=" }]);
+    expect(started.items.map((i) => i.kind)).toEqual(["image", "user"]);
+
+    const history = itemsFromMessages([
+      {
+        role: "user",
+        parts: [
+          { type: "image", media_type: "image/png", data: "aGk=" },
+          { type: "text", text: "what is this" },
+          { type: "context", text: "Current date: 2026-10-21" },
+        ],
+      },
+    ]);
+    expect(history).toEqual([
+      { kind: "image", id: "h0", mediaType: "image/png", data: "aGk=" },
+      { kind: "user", id: "h1", text: "what is this" },
+    ]);
+  });
+
   it("assembles a tool call and attaches its result", () => {
     const s = run([
       { type: "tool_call_start", id: "c1", name: "write_file" },

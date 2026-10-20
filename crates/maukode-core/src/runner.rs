@@ -19,6 +19,7 @@ pub struct RunnerConfig {
     pub max_steps: usize,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    pub thinking: maukode_llm::ThinkingSettings,
 }
 
 impl Default for RunnerConfig {
@@ -32,6 +33,7 @@ impl Default for RunnerConfig {
             max_steps: 2000,
             max_tokens: Some(8192),
             temperature: None,
+            thinking: maukode_llm::ThinkingSettings::default(),
         }
     }
 }
@@ -49,6 +51,9 @@ const MAX_STREAM_ATTEMPTS: usize = 4;
 /// instead of regenerating (which would duplicate the visible output).
 const STREAM_RESUME_PROMPT: &str = "Your previous response was cut off by a connection error. \
     Continue exactly where you left off, without repeating what you already wrote.";
+
+/// Share of the context window from which older tool outputs are truncated (see `run_turn`).
+const PRUNE_FROM_USAGE: f32 = 0.6;
 
 /// Tools without side effects. When every call of a step is one of these they run concurrently.
 const READ_ONLY_TOOLS: &[&str] = &[
@@ -87,6 +92,24 @@ fn cancelled_results(calls: &[(String, String)], answered: &[ContentPart]) -> Ve
 
 fn stopped(reason: StopReason, message: Option<String>) -> LLMEvent {
     LLMEvent::TurnStopped { reason, message }
+}
+
+/// Append streamed text to the last part when it is of the same kind (reply text or reasoning),
+/// or start a new part.
+fn append_text(parts: &mut Vec<ContentPart>, delta: &str, reasoning: bool) {
+    let text = delta.to_string();
+    match parts.last_mut() {
+        Some(ContentPart::Text { text: last }) if !reasoning => last.push_str(delta),
+        Some(ContentPart::Reasoning { text: last }) if reasoning => last.push_str(delta),
+        _ if reasoning => parts.push(ContentPart::Reasoning { text }),
+        _ => parts.push(ContentPart::Text { text }),
+    }
+}
+
+/// An Anthropic thinking block kept from a reply.
+fn is_thinking_block(part: &ContentPart) -> bool {
+    matches!(part, ContentPart::ProviderItem { value }
+        if matches!(value["type"].as_str(), Some("thinking" | "redacted_thinking")))
 }
 
 /// Tokens the next request will occupy. With a provider-reported count for an earlier step
@@ -228,8 +251,23 @@ impl SessionRunner {
         event_tx: mpsc::UnboundedSender<LLMEvent>,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> anyhow::Result<()> {
+        self.run_message_with_cancellation(
+            user_prompt.map(Message::user),
+            event_tx,
+            cancellation_token,
+        )
+        .await
+    }
+
+    /// [`Self::run_with_cancellation`] with a user message that can carry images.
+    pub async fn run_message_with_cancellation(
+        &self,
+        user_message: Option<Message>,
+        event_tx: mpsc::UnboundedSender<LLMEvent>,
+        cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    ) -> anyhow::Result<()> {
         match self
-            .run_turn(user_prompt, event_tx.clone(), cancellation_token)
+            .run_turn(user_message, event_tx.clone(), cancellation_token)
             .await
         {
             Ok((reason, message)) => {
@@ -251,14 +289,25 @@ impl SessionRunner {
 
     async fn run_turn(
         &self,
-        user_prompt: Option<String>,
+        user_message: Option<Message>,
         event_tx: mpsc::UnboundedSender<LLMEvent>,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> anyhow::Result<(StopReason, Option<String>)> {
+        let prompt_text = user_message.as_ref().map(Message::text_content);
+        // The date and the memories recalled for this prompt are stored in the prompt's message
+        // rather than sent separately: the history stays append-only, so the provider cache and
+        // replayed thinking blocks stay valid on later steps and turns.
+        let turn_context = match prompt_text.as_deref() {
+            Some(prompt) => Some(self.context.render_turn_context(Some(prompt)).await),
+            None => None,
+        };
         let (session_id, session_id_str, mut turn_idx) = {
             let mut session = self.session.write().await;
-            if let Some(ref prompt) = user_prompt {
-                session.add_message(Message::user(prompt.clone()));
+            if let Some(mut message) = user_message {
+                if let Some(text) = turn_context.filter(|c| !c.trim().is_empty()) {
+                    message.parts.push(ContentPart::Context { text });
+                }
+                session.add_message(message);
             }
             session.state = SessionState::Running;
             (session.id, session.id.to_string(), session.messages.len())
@@ -272,20 +321,13 @@ impl SessionRunner {
 
         // Automatic pre-turn shadow git snapshot before any agent tool modifications
         if let Some(ref cm) = self.checkpoint_manager {
-            let desc = user_prompt.as_deref().unwrap_or("Pre-turn snapshot");
+            let desc = prompt_text.as_deref().unwrap_or("Pre-turn snapshot");
             if let Err(e) = cm.create_checkpoint(&session_id_str, turn_idx, desc).await {
                 tracing::warn!("Failed to capture shadow git checkpoint: {e}");
             }
         }
 
-        // The stable part is sent first so providers can cache it; the date and recalled
-        // memories follow it.
-        let system_prompt = self.context.render_system_context().await;
-        let system_suffix = self
-            .context
-            .render_turn_context(user_prompt.as_deref())
-            .await;
-        let estimated_system = format!("{system_prompt}\n{system_suffix}");
+        let mut system_prompt = self.session_system_prompt().await;
         let tool_defs = self.tools.definitions();
         let tool_schema_tokens = crate::compaction::TokenEstimator::estimate_text(
             &serde_json::to_string(&tool_defs).unwrap_or_default(),
@@ -323,15 +365,29 @@ impl SessionRunner {
             let current_messages = session_guard.messages.clone();
             drop(session_guard);
 
-            // Context pruning: non-destructively truncate older tool outputs in LLM prompt payload
+            // Context pruning: non-destructively truncate tool outputs in the request. Truncating
+            // older outputs rewrites earlier messages, which restarts the provider cache (and
+            // drops replayed thinking) from there, so it only starts once the context is filling
+            // up. Until then only oversized outputs are capped, the same way on every request.
             let pruner = crate::compaction::ContextPruner::default();
-            let mut pruned_messages = pruner.prune_messages(&current_messages);
+            let mut pruned_messages = pruner.cap_messages(&current_messages);
+            let capped_tokens = context_tokens(
+                &pruned_messages,
+                &system_prompt,
+                tool_schema_tokens,
+                reported_context,
+            );
+            if crate::compaction::TokenEstimator::usage_for(capped_tokens, &self.config.model).ratio
+                >= PRUNE_FROM_USAGE
+            {
+                pruned_messages = pruner.prune_messages(&current_messages);
+            }
 
             // Context window threshold monitoring
             let usage = crate::compaction::TokenEstimator::usage_for(
                 context_tokens(
                     &pruned_messages,
-                    &estimated_system,
+                    &system_prompt,
                     tool_schema_tokens,
                     reported_context,
                 ),
@@ -361,6 +417,7 @@ impl SessionRunner {
                 if usage.is_critical && current_messages.len() > 6 && grown_since_compaction {
                     tracing::info!("Context window critical ({}%). Triggering automatic conversation compaction.", pct);
                     let mut session_write = self.session.write().await;
+                    let mut compacted = false;
                     compaction_floor = Some(usage.estimated_tokens);
                     if let Ok(compact_res) = crate::compaction::ConversationCompactor::compact(
                         &mut session_write,
@@ -370,12 +427,13 @@ impl SessionRunner {
                     )
                     .await
                     {
-                        pruned_messages = pruner.prune_messages(&session_write.messages);
+                        compacted = true;
+                        pruned_messages = pruner.cap_messages(&session_write.messages);
                         // The provider's last count described the history before compaction.
                         reported_context = None;
                         compaction_floor = Some(context_tokens(
                             &pruned_messages,
-                            &estimated_system,
+                            &system_prompt,
                             tool_schema_tokens,
                             None,
                         ));
@@ -405,6 +463,11 @@ impl SessionRunner {
                                 .saturating_sub(compact_res.compacted_tokens)
                         );
                     }
+                    drop(session_write);
+                    // Compaction starts a new prefix: pick up the current instructions and map.
+                    if compacted {
+                        system_prompt = self.session_system_prompt().await;
+                    }
                 }
             }
 
@@ -423,7 +486,10 @@ impl SessionRunner {
 
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
-            let mut provider_items = Vec::new();
+            // The reply's parts in the order they arrived: thinking blocks must go back to the
+            // provider exactly where they were.
+            let mut assistant_parts: Vec<ContentPart> = Vec::new();
+            let mut resumed = false;
             let mut finish_reason = FinishReason::EndTurn;
             let mut step_tokens: Option<usize> = None;
 
@@ -436,10 +502,10 @@ impl SessionRunner {
             'attempts: loop {
                 let mut req = LLMRequest::new(&self.config.model, pruned_messages.clone())
                     .with_system_prompt(&system_prompt)
-                    .with_system_suffix(&system_suffix)
                     .with_tools(tool_defs.clone());
                 req.max_tokens = self.config.max_tokens;
                 req.temperature = self.config.temperature;
+                req.thinking = self.config.thinking.clone();
                 if !resume_suffix.is_empty() {
                     req.messages.extend(resume_suffix.clone());
                 }
@@ -479,16 +545,21 @@ impl SessionRunner {
                             match &event {
                                 LLMEvent::TextDelta { text } => {
                                     assistant_text.push_str(text);
+                                    append_text(&mut assistant_parts, text, false);
+                                }
+                                LLMEvent::ReasoningDelta { text } => {
+                                    append_text(&mut assistant_parts, text, true);
                                 }
                                 LLMEvent::ToolCallFinish { tool_call } => {
                                     saw_tool_activity = true;
                                     tool_calls.push(tool_call.clone());
+                                    assistant_parts.push(ContentPart::ToolCall(tool_call.clone()));
                                 }
                                 LLMEvent::ToolCallStart { .. } | LLMEvent::ToolCallDelta { .. } => {
                                     saw_tool_activity = true;
                                 }
                                 LLMEvent::ProviderItem { item } => {
-                                    provider_items.push(ContentPart::ProviderItem {
+                                    assistant_parts.push(ContentPart::ProviderItem {
                                         value: item.clone(),
                                     });
                                 }
@@ -521,6 +592,7 @@ impl SessionRunner {
                 if !saw_tool_activity && !assistant_text.is_empty() {
                     // Resume a text-only turn from the partial text instead of
                     // regenerating it (which would duplicate visible output).
+                    resumed = true;
                     resume_suffix = vec![
                         Message::assistant(vec![ContentPart::Text {
                             text: assistant_text.clone(),
@@ -532,7 +604,7 @@ impl SessionRunner {
                     // whose results don't exist yet): restart the step cleanly.
                     assistant_text.clear();
                     tool_calls.clear();
-                    provider_items.clear();
+                    assistant_parts.clear();
                     resume_suffix.clear();
                     saw_tool_activity = false;
                 }
@@ -542,16 +614,17 @@ impl SessionRunner {
                 }
             }
 
-            // Record assistant message
-            let mut assistant_parts = Vec::new();
-            assistant_parts.extend(provider_items);
-            if !assistant_text.is_empty() {
-                assistant_parts.push(ContentPart::Text {
-                    text: assistant_text,
-                });
+            // A resumed reply was produced by requests that ended with the resume prompt, which
+            // the history does not keep: its thinking blocks would not match the stored history.
+            if resumed {
+                assistant_parts.retain(|part| !is_thinking_block(part));
             }
-            for tc in &tool_calls {
-                assistant_parts.push(ContentPart::ToolCall(tc.clone()));
+            // Reasoning text alone is not a reply.
+            if assistant_parts
+                .iter()
+                .all(|part| matches!(part, ContentPart::Reasoning { .. }))
+            {
+                assistant_parts.clear();
             }
 
             // An empty assistant message is invalid for several providers and would poison the
@@ -913,6 +986,18 @@ impl SessionRunner {
         }
 
         Ok(stop)
+    }
+
+    /// The session's system prompt: built on its first turn (and again after a compaction) and
+    /// reused unchanged on every other request, so it stays a cacheable prefix and Anthropic
+    /// thinking blocks, which are bound to it, stay valid.
+    async fn session_system_prompt(&self) -> String {
+        if let Some(prompt) = self.session.read().await.system_prompt.clone() {
+            return prompt;
+        }
+        let prompt = self.context.render_system_context().await;
+        self.session.write().await.system_prompt = Some(prompt.clone());
+        prompt
     }
 
     /// Run the calls of a step concurrently when all of them only read, so none can miss a write
@@ -1373,6 +1458,114 @@ mod turn_tests {
             })
             .collect();
         assert_eq!(results, ["read", "read"]);
+    }
+
+    /// Replays scripted responses like [`ScriptedLlm`] and keeps every request it received.
+    struct RecordingLlm {
+        script: Mutex<VecDeque<Step>>,
+        requests: Mutex<Vec<LLMRequest>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LLMClient for RecordingLlm {
+        async fn stream(&self, request: LLMRequest) -> Result<LLMStream, LLMError> {
+            self.requests.lock().unwrap().push(request);
+            let step = self
+                .script
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("script exhausted");
+            step.map(|events| Box::pin(futures::stream::iter(events)) as LLMStream)
+        }
+    }
+
+    struct EchoTool;
+
+    #[async_trait::async_trait]
+    impl maukode_tools::Tool for EchoTool {
+        fn name(&self) -> &str {
+            "echo"
+        }
+        fn description(&self) -> &str {
+            "test"
+        }
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        async fn execute(&self, _args: serde_json::Value) -> Result<String, ToolError> {
+            Ok("echoed".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn requests_only_ever_append_to_the_history() {
+        let thinking = serde_json::json!({"type": "thinking", "thinking": "t", "signature": "s"});
+        let script: Vec<Step> = vec![
+            Ok(vec![
+                Ok(LLMEvent::ReasoningDelta { text: "t".into() }),
+                Ok(LLMEvent::ProviderItem {
+                    item: thinking.clone(),
+                }),
+                Ok(LLMEvent::TextDelta {
+                    text: "Look".into(),
+                }),
+                Ok(LLMEvent::TextDelta { text: "ing".into() }),
+                Ok(LLMEvent::ToolCallFinish {
+                    tool_call: ToolCall {
+                        id: "1".into(),
+                        name: "echo".into(),
+                        arguments: serde_json::json!({}),
+                    },
+                }),
+                Ok(LLMEvent::Finish {
+                    reason: FinishReason::ToolUse,
+                }),
+            ]),
+            text("done", FinishReason::EndTurn),
+            text("ok", FinishReason::EndTurn),
+        ];
+        let llm = Arc::new(RecordingLlm {
+            script: Mutex::new(script.into()),
+            requests: Mutex::new(Vec::new()),
+        });
+        let dir = std::env::temp_dir();
+        let session = Arc::new(RwLock::new(Session::new(&dir)));
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(EchoTool));
+        let runner = SessionRunner::new(
+            Arc::clone(&session),
+            Arc::clone(&llm) as Arc<dyn LLMClient>,
+            Arc::new(tools),
+            Arc::new(ContextManager::new(&dir)),
+            RunnerConfig {
+                max_steps: 5,
+                ..RunnerConfig::default()
+            },
+        );
+        for prompt in ["first", "second"] {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            runner
+                .run_with_cancellation(Some(prompt.into()), tx, None)
+                .await
+                .unwrap();
+        }
+
+        let requests = llm.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        for pair in requests.windows(2) {
+            assert_eq!(pair[0].system_prompt, pair[1].system_prompt);
+            assert_eq!(pair[0].messages, pair[1].messages[..pair[0].messages.len()]);
+        }
+        // The turn context is stored with its prompt.
+        assert!(matches!(&requests[0].messages[0].parts[..],
+            [ContentPart::Text { text }, ContentPart::Context { text: context }]
+            if text == "first" && context.contains("Current date:")));
+        // The reply keeps the order it streamed in.
+        assert!(matches!(&requests[1].messages[1].parts[..],
+            [ContentPart::Reasoning { .. }, ContentPart::ProviderItem { value },
+             ContentPart::Text { text }, ContentPart::ToolCall(_)]
+            if *value == thinking && text == "Looking"));
     }
 
     /// Stands in for an MCP tool: `ask` mode confirms its calls.

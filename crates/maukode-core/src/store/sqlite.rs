@@ -2,7 +2,7 @@ use crate::permission::PermissionMode;
 use crate::session::Session;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use maukode_protocol::{Message, PermissionDecision, SessionId, SessionState};
+use maukode_protocol::{Message, PermissionDecision, SessionId, SessionState, SessionUsage};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -98,6 +98,28 @@ fn retry_busy<T>(mut op: impl FnMut() -> rusqlite::Result<T>) -> rusqlite::Resul
 }
 
 /// Stable identity of a stored message: SHA-256 of its serialized role and parts.
+fn read_session_usage(conn: &Connection, id: SessionId) -> rusqlite::Result<SessionUsage> {
+    let usage = conn
+        .query_row(
+            "SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, \
+             cost_microusd, unpriced_responses FROM session_usage WHERE session_id = ?1",
+            params![id.to_string()],
+            |row| {
+                let get = |i: usize| row.get::<_, i64>(i).map(|v| v.max(0) as u64);
+                Ok(SessionUsage {
+                    input_tokens: get(0)?,
+                    output_tokens: get(1)?,
+                    cache_read_tokens: get(2)?,
+                    cache_write_tokens: get(3)?,
+                    cost_microusd: get(4)?,
+                    unpriced_responses: get(5)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(usage.unwrap_or_default())
+}
+
 fn content_hash(role_json: &str, parts_json: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -296,6 +318,17 @@ impl SqliteSessionStore {
                 new_mode TEXT NOT NULL,
                 source TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS session_usage (
+                session_id TEXT PRIMARY KEY,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_microusd INTEGER NOT NULL DEFAULT 0,
+                unpriced_responses INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
 
@@ -702,6 +735,43 @@ impl SqliteSessionStore {
         })
     }
 
+    /// Add `delta` to the session's usage totals and return the new totals.
+    pub async fn add_session_usage(
+        &self,
+        id: SessionId,
+        delta: &SessionUsage,
+    ) -> Result<SessionUsage> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO session_usage (session_id, input_tokens, output_tokens, \
+             cache_read_tokens, cache_write_tokens, cost_microusd, unpriced_responses) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT(session_id) DO UPDATE SET \
+             input_tokens = input_tokens + excluded.input_tokens, \
+             output_tokens = output_tokens + excluded.output_tokens, \
+             cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens, \
+             cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens, \
+             cost_microusd = cost_microusd + excluded.cost_microusd, \
+             unpriced_responses = unpriced_responses + excluded.unpriced_responses",
+            params![
+                id.to_string(),
+                delta.input_tokens as i64,
+                delta.output_tokens as i64,
+                delta.cache_read_tokens as i64,
+                delta.cache_write_tokens as i64,
+                delta.cost_microusd as i64,
+                delta.unpriced_responses as i64,
+            ],
+        )?;
+        Ok(read_session_usage(&conn, id)?)
+    }
+
+    /// The session's usage totals (zero for a session without any).
+    pub async fn session_usage(&self, id: SessionId) -> Result<SessionUsage> {
+        let conn = self.conn.lock().await;
+        Ok(read_session_usage(&conn, id)?)
+    }
+
     pub async fn set_session_model(
         &self,
         id: SessionId,
@@ -728,6 +798,7 @@ impl SqliteSessionStore {
             "permission_audit",
             "permission_mode_audit",
             "compaction_audit",
+            "session_usage",
         ] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE session_id = ?1"),
@@ -760,6 +831,7 @@ impl SqliteSessionStore {
             "permission_audit",
             "permission_mode_audit",
             "compaction_audit",
+            "session_usage",
         ] {
             tx.execute(
                 &format!(
@@ -960,6 +1032,7 @@ impl SqliteSessionStore {
             state,
             created_at,
             updated_at,
+            system_prompt: None,
         }))
     }
 
@@ -1174,6 +1247,45 @@ mod tests {
         assert_eq!(
             audit_after[1].text_content(),
             "Turn 1 assistant response with 500 lines of build output"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_usage_accumulates_and_goes_with_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(dir.path().join("db.sqlite")).unwrap();
+        let mut session = Session::new(dir.path());
+        session.add_message(Message::user("first"));
+        store.save_session(&session, "p", "m").await.unwrap();
+        assert_eq!(
+            store.session_usage(session.id).await.unwrap(),
+            SessionUsage::default()
+        );
+
+        let delta = SessionUsage {
+            input_tokens: 100,
+            output_tokens: 10,
+            cache_read_tokens: 80,
+            cache_write_tokens: 0,
+            cost_microusd: 500,
+            unpriced_responses: 0,
+        };
+        store.add_session_usage(session.id, &delta).await.unwrap();
+        let unpriced = SessionUsage {
+            input_tokens: 5,
+            unpriced_responses: 1,
+            ..SessionUsage::default()
+        };
+        let total = store.add_session_usage(session.id, &unpriced).await.unwrap();
+        assert_eq!(total.input_tokens, 105);
+        assert_eq!(total.cost_microusd, 500);
+        assert_eq!(total.unpriced_responses, 1);
+        assert_eq!(store.session_usage(session.id).await.unwrap(), total);
+
+        store.delete_session(session.id).await.unwrap();
+        assert_eq!(
+            store.session_usage(session.id).await.unwrap(),
+            SessionUsage::default()
         );
     }
 

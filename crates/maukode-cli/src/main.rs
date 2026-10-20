@@ -803,6 +803,7 @@ async fn main() -> anyhow::Result<()> {
             max_steps: cli.max_steps.unwrap_or(config.agent.max_steps),
             max_tokens: Some(config.agent.max_tokens),
             temperature: None,
+            thinking: config.thinking_for(&config.active_model),
         };
 
         let checkpoint_manager = Arc::new(maukode_core::CheckpointManager::new(&cwd).await?);
@@ -918,6 +919,7 @@ async fn main() -> anyhow::Result<()> {
                 max_steps: cli.max_steps.unwrap_or(config.agent.max_steps),
                 max_tokens: Some(config.agent.max_tokens),
                 temperature: None,
+                thinking: config.thinking_for(&config.active_model),
             },
         )
         .with_permission_manager(Arc::clone(&perm_mgr))

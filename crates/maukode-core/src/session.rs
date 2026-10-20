@@ -9,6 +9,10 @@ pub struct Session {
     pub state: SessionState,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// The system prompt built for the session's first turn and reused afterwards: it is part of
+    /// the cached prefix, and Anthropic thinking blocks are bound to it, so it must not change
+    /// mid-session. Reset by compaction; not persisted (a reloaded session builds a new one).
+    pub system_prompt: Option<String>,
 }
 
 impl Session {
@@ -21,6 +25,7 @@ impl Session {
             state: SessionState::Idle,
             created_at: now,
             updated_at: now,
+            system_prompt: None,
         }
     }
 
@@ -33,6 +38,7 @@ impl Session {
             state: SessionState::Idle,
             created_at: now,
             updated_at: now,
+            system_prompt: None,
         }
     }
 

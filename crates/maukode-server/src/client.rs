@@ -23,6 +23,8 @@ pub struct SessionDetail {
     pub messages: Vec<Message>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub usage: maukode_protocol::SessionUsage,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

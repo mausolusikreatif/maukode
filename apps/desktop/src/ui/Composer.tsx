@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../state/store";
 import type { ThreadState } from "../state/thread";
+import { usageText } from "../state/format";
 import {
   buildAutocompleteItems,
   estimateTokens,
@@ -13,6 +14,44 @@ import {
 const MENTION = /(?:^|\s)@([a-zA-Z0-9_\-./]*)$/;
 const NO_CODEBASE: ParsedCodebase = { files: [], folders: [], symbols: [] };
 
+/** Image types and size the daemon accepts (see `IMAGE_MEDIA_TYPES` / `MAX_IMAGE_BYTES`). */
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGES = 20;
+
+interface Attached {
+  id: string;
+  name: string;
+  media_type: string;
+  /** Base64 without the `data:` prefix. */
+  data: string;
+}
+
+function readImage(file: File): Promise<Attached> {
+  return new Promise((resolve, reject) => {
+    if (!IMAGE_TYPES.includes(file.type)) {
+      reject(new Error(`${file.name}: hanya PNG, JPEG, GIF, atau WebP`));
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      reject(new Error(`${file.name}: lebih dari 5 MB`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`${file.name}: gagal dibaca`));
+    reader.onload = () => {
+      const url = String(reader.result);
+      resolve({
+        id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
+        name: file.name || "gambar",
+        media_type: file.type,
+        data: url.slice(url.indexOf(",") + 1),
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export function Composer({ thread }: { thread: ThreadState }) {
   const { send, queue, steer, stop, clearQueue } = useApp.getState();
   const client = useApp((s) => s.client);
@@ -20,6 +59,9 @@ export function Composer({ thread }: { thread: ThreadState }) {
   const changed = useApp((s) => s.review.files);
   const [text, setText] = useState("");
   const [chips, setChips] = useState<ContextChip[]>([]);
+  const [images, setImages] = useState<Attached[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [codebase, setCodebase] = useState<ParsedCodebase>(NO_CODEBASE);
   // Which session the cached repo map belongs to (a ref: changing it must not re-run the loader).
   const loadedFor = useRef<string | null>(null);
@@ -79,6 +121,22 @@ export function Composer({ thread }: { thread: ThreadState }) {
 
   const tokens = estimateTokens(text, chips);
 
+  const attach = (files: Iterable<File>) => {
+    const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (list.length === 0) return;
+    setImageError(null);
+    void Promise.allSettled(list.map(readImage)).then((results) => {
+      const ok = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+      const failed = results.flatMap((r) => (r.status === "rejected" ? [String((r.reason as Error).message)] : []));
+      setImages((current) => {
+        const room = Math.max(0, MAX_IMAGES - current.length);
+        if (ok.length > room) failed.push(`Maksimal ${MAX_IMAGES} gambar per pesan`);
+        return [...current, ...ok.slice(0, room)];
+      });
+      if (failed.length > 0) setImageError(failed.join("; "));
+    });
+  };
+
   const onText = (value: string, cursor: number) => {
     setText(value);
     const m = MENTION.exec(value.slice(0, cursor));
@@ -104,20 +162,35 @@ export function Composer({ thread }: { thread: ThreadState }) {
 
   const submit = () => {
     const t = text.trim();
-    if (!t && chips.length === 0) return;
+    if (!t && chips.length === 0 && images.length === 0) return;
+    // Images go with a new turn only; the queue holds text.
+    if (running && images.length > 0) return;
     const tags = chips.map((c) => `@${c.value}`).join(" ");
     const body = tags ? (t ? `${tags}\n\n${t}` : tags) : t;
+    const attached = images.map(({ media_type, data }) => ({ media_type, data }));
     setText("");
     setChips([]);
+    setImages([]);
+    setImageError(null);
     setQuery(null);
     if (running) void queue(body);
-    else void send(body);
+    else void send(body, attached);
   };
 
-  const empty = !text.trim() && chips.length === 0;
+  const empty = !text.trim() && chips.length === 0 && images.length === 0;
+  const blocked = running && images.length > 0;
+  const usage = usageText(thread.sessionUsage);
 
   return (
-    <div className="composer">
+    <div
+      className="composer"
+      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
+      onDrop={(e) => {
+        if (e.dataTransfer.files.length === 0) return;
+        e.preventDefault();
+        attach(e.dataTransfer.files);
+      }}
+    >
       {thread.queue.length > 0 && (
         <div className="queue">
           <span>{thread.queue.length} pesan antre, dikirim setelah giliran ini</span>
@@ -134,6 +207,18 @@ export function Composer({ thread }: { thread: ThreadState }) {
           ))}
         </div>
       )}
+      {images.length > 0 && (
+        <div className="thumbs" aria-label="Gambar terlampir">
+          {images.map((img) => (
+            <span key={img.id} className="thumb-wrap">
+              <img className="thumb" src={`data:${img.media_type};base64,${img.data}`} alt={img.name} />
+              <button aria-label={`Lepas ${img.name}`} onClick={() => setImages((x) => x.filter((y) => y.id !== img.id))}>x</button>
+            </span>
+          ))}
+        </div>
+      )}
+      {imageError && <div className="small" style={{ color: "var(--red)" }}>{imageError}</div>}
+      {blocked && <div className="small muted">Gambar hanya bisa dikirim saat agent tidak sedang bekerja.</div>}
       <div className="mention-wrap">
         {query !== null && (
           <ul className="mention" role="listbox" aria-label="Rujukan konteks">
@@ -157,6 +242,12 @@ export function Composer({ thread }: { thread: ThreadState }) {
           ref={ref} rows={1} value={text} aria-label="Pesan untuk agent"
           placeholder={running ? "Agent sedang bekerja. Pesan baru masuk antrean." : "Tulis tugas. Ketik @ untuk melampirkan file, folder, atau perubahan."}
           onChange={(e) => onText(e.target.value, e.target.selectionStart)}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+            if (files.length === 0) return;
+            e.preventDefault();
+            attach(files);
+          }}
           onKeyDown={(e) => {
             if (query !== null && items.length > 0) {
               if (e.key === "ArrowDown") { e.preventDefault(); setPick((p) => (p + 1) % items.length); return; }
@@ -176,6 +267,7 @@ export function Composer({ thread }: { thread: ThreadState }) {
         <span className="small muted">
           {running ? "berjalan" : "siap"}
           {tokens.tokens > 0 ? `, ±${tokens.tokens} token` : ""}
+          {usage && <span title="Pemakaian sesi ini sejauh ini"> · sesi {usage}</span>}
         </span>
         <span style={{ display: "flex", gap: 6 }}>
           <button
@@ -183,6 +275,13 @@ export function Composer({ thread }: { thread: ThreadState }) {
             onClick={() => { const el = ref.current; const v = text.endsWith(" ") || text === "" ? `${text}@` : `${text} @`; onText(v, v.length); el?.focus(); }}
           >
             @
+          </button>
+          <input
+            ref={fileInput} type="file" accept={IMAGE_TYPES.join(",")} multiple hidden
+            onChange={(e) => { if (e.target.files) attach(e.target.files); e.target.value = ""; }}
+          />
+          <button className="btn" aria-label="Lampirkan gambar" title="Lampirkan gambar (atau tempel / seret ke sini)" onClick={() => fileInput.current?.click()}>
+            Gambar
           </button>
           {running && (
             <>
@@ -192,7 +291,7 @@ export function Composer({ thread }: { thread: ThreadState }) {
               <button className="btn deny" onClick={() => void stop()}>Hentikan</button>
             </>
           )}
-          <button className="btn send" disabled={empty} onClick={submit}>
+          <button className="btn send" disabled={empty || blocked} onClick={submit}>
             {running ? "Antre" : "Kirim"}
           </button>
         </span>

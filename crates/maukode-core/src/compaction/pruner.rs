@@ -43,6 +43,15 @@ impl ContextPruner {
         self
     }
 
+    /// Cap tool outputs longer than `emergency_max_chars`, wherever they are. A message always
+    /// comes out the same, so requests built from it keep a stable prefix.
+    pub fn cap_messages(&self, messages: &[Message]) -> Vec<Message> {
+        messages
+            .iter()
+            .map(|msg| self.prune_single_message(msg, false))
+            .collect()
+    }
+
     /// Prune messages non-destructively for an LLM request payload.
     /// Older tool execution outputs are trimmed with head/tail truncation.
     pub fn prune_messages(&self, messages: &[Message]) -> Vec<Message> {

@@ -18,6 +18,21 @@ pub struct CompactionResult {
 
 pub struct ConversationCompactor;
 
+fn without_thinking_blocks(message: &Message) -> Message {
+    Message {
+        role: message.role,
+        parts: message
+            .parts
+            .iter()
+            .filter(|part| {
+                !matches!(part, ContentPart::ProviderItem { value }
+                    if matches!(value["type"].as_str(), Some("thinking" | "redacted_thinking")))
+            })
+            .cloned()
+            .collect(),
+    }
+}
+
 impl ConversationCompactor {
     /// Compact an active session in-place.
     /// Returns the compaction statistics, summary, and the archived full-fidelity messages.
@@ -84,13 +99,17 @@ impl ConversationCompactor {
             ));
         }
 
-        new_messages.extend_from_slice(recent_messages);
+        // Anthropic thinking blocks are bound to the history before them, which is replaced here;
+        // replayed after the summary they would be dropped (or rejected) by the provider.
+        new_messages.extend(recent_messages.iter().map(without_thinking_blocks));
 
         let compacted_tokens = TokenEstimator::estimate_messages(&new_messages, "");
         let compacted_message_count = new_messages.len();
 
         session.messages = new_messages;
         session.updated_at = chrono::Utc::now();
+        // The cached prefix starts over anyway: the next request builds a fresh system prompt.
+        session.system_prompt = None;
 
         Ok(CompactionResult {
             original_message_count: total_messages,
@@ -289,6 +308,39 @@ impl ConversationCompactor {
 mod tests {
     use super::*;
     use maukode_protocol::ToolCall;
+
+    #[tokio::test]
+    async fn compaction_drops_thinking_blocks_from_kept_messages() {
+        let mut session = Session::new(std::env::temp_dir());
+        session.system_prompt = Some("old prompt".into());
+        for i in 0..8 {
+            session.add_message(Message::user(format!("question {i}")));
+            session.add_message(Message::assistant(vec![
+                ContentPart::ProviderItem {
+                    value: serde_json::json!({"type": "thinking", "thinking": "t", "signature": "s"}),
+                },
+                ContentPart::ProviderItem {
+                    value: serde_json::json!({"type": "reasoning", "encrypted_content": "e"}),
+                },
+                ContentPart::Text {
+                    text: format!("answer {i}"),
+                },
+            ]));
+        }
+
+        ConversationCompactor::compact(&mut session, None, "model", None)
+            .await
+            .unwrap();
+
+        assert!(session.system_prompt.is_none());
+        let kept: Vec<_> = session.messages.iter().flat_map(|m| &m.parts).collect();
+        assert!(kept.iter().any(|p| matches!(p, ContentPart::Text { text } if text == "answer 7")));
+        assert!(kept.iter().all(|p| !matches!(p, ContentPart::ProviderItem { value }
+            if value["type"] == "thinking")));
+        // Other providers' items are not bound to the history and stay.
+        assert!(kept.iter().any(|p| matches!(p, ContentPart::ProviderItem { value }
+            if value["type"] == "reasoning")));
+    }
 
     #[tokio::test]
     async fn test_heuristic_summary_extraction() {

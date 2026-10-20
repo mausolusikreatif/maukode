@@ -252,8 +252,10 @@ impl Tool for SubagentTool {
             }
         }
 
+        let child_model = resolve_child_model(&profile.model_tier, &config);
         let child_runner_config = RunnerConfig {
-            model: resolve_child_model(&profile.model_tier, &config),
+            thinking: config.thinking_for(&child_model),
+            model: child_model,
             max_steps: profile.max_turns,
             max_tokens: profile.max_tokens.map(|t| t as u32).or(Some(8192)),
             temperature: None,
@@ -293,6 +295,10 @@ impl Tool for SubagentTool {
                     }
                     LLMEvent::Usage(usage) => {
                         tokens = (usage.input_tokens + usage.output_tokens) as usize;
+                        // The session pays for its subagents' responses too.
+                        if let Some(ref tx) = event_sender_task {
+                            let _ = tx.send(LLMEvent::Usage(usage.clone()));
+                        }
                     }
                     // Only the parent session is visible to the user: its clients must see the
                     // subagent's approval prompts (answered through the shared permission manager)

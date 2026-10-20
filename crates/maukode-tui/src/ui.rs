@@ -203,12 +203,18 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         ),
     ];
 
-    if let Some(ref usage) = app.token_usage {
+    let usage = &app.session_usage;
+    if usage.input_tokens + usage.output_tokens > 0 {
+        let mut text = format!("{} tok", usage.input_tokens + usage.output_tokens);
+        if usage.cost_microusd > 0 || usage.unpriced_responses == 0 {
+            let partial = if usage.unpriced_responses > 0 { "+" } else { "" };
+            text.push_str(&format!(
+                " ${:.3}{partial}",
+                usage.cost_microusd as f64 / 1_000_000.0
+            ));
+        }
         left_spans.push(Span::styled(" │ ", theme::border_style()));
-        left_spans.push(Span::styled(
-            format!("{} tok", usage.input_tokens + usage.output_tokens),
-            theme::dim_style(),
-        ));
+        left_spans.push(Span::styled(text, theme::dim_style()));
     }
 
     if let Some((ref status, _)) = app.status_message {

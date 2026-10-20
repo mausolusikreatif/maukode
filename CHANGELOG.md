@@ -45,6 +45,16 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Riwayat percakapan kini benar-benar append-only**:
+  - Catatan konteks per-turn (tanggal dan memori) disimpan di pesan prompt-nya, tidak lagi
+    dipindah ke pesan terakhir di setiap langkah.
+  - System prompt dibekukan per sesi (dibangun ulang hanya setelah compaction).
+  - Pemangkasan output tool lama baru dimulai saat konteks terisi 60%.
+  - Akibatnya cache prompt tetap terpakai, dan blok thinking Claude tetap valid. Model baru menolak
+    blok thinking yang riwayatnya diubah.
+- **Compaction membuang blok thinking dari pesan yang dipertahankan**, karena blok itu terikat
+  pada riwayat yang sudah diganti ringkasan.
+
 - **Stream LLM yang macet tidak lagi menggantung turn**: semua client LLM punya connect timeout 30
   detik dan read timeout 300 detik; stream yang diam terlalu lama dicoba ulang.
 - **Adapter Anthropic**: event `error` di tengah stream (misalnya `overloaded_error`) kini menjadi
@@ -102,6 +112,19 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   menghapus project yang di-trust saat daemon berjalan.
 
 ### Added
+
+- **Pemakaian token dan biaya per sesi**: total token (input, output, cache read/write) dan biaya
+  setiap sesi disimpan, termasuk pemakaian subagen. Totalnya tampil di composer web UI dan status
+  bar TUI. Harga bawaan tersedia untuk model Claude terkini; model lain bisa diberi harga lewat
+  `models.<id>.pricing` di config. Daemon mengirim event `session_usage`, dan snapshot sesi kini
+  punya field `usage`.
+- **Extended thinking untuk Anthropic**: thinking adaptif aktif otomatis di Claude 4.6 ke atas,
+  dengan budget tetap untuk model yang lebih lama. Effort dan tampilan ringkasan bisa diatur per
+  model lewat `models.<id>.thinking`. Teks thinking tampil sebagai proses berpikir, dan blok
+  thinking beserta signature-nya dikirim balik utuh di langkah berikutnya.
+- **Input gambar**: gambar PNG, JPEG, GIF, atau WebP (maksimal 5 MB, 20 per pesan) bisa dilampirkan
+  di web UI lewat tombol, tempel, atau seret, lalu dikirim ke Anthropic, provider
+  OpenAI-compatible, dan paket ChatGPT. API: `images` di `POST /sessions/{id}/prompt`.
 
 - **Tempat perintah dijalankan bisa dipilih (`ExecBackend`)**: tool `bash` tidak lagi selalu
   menjalankan proses lokal. Pengaturan baru `execution` memilih **Host** (seperti biasa) atau

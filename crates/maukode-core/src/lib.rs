@@ -10,6 +10,7 @@ pub mod mcp;
 pub mod paths;
 pub mod permission;
 pub mod plugin;
+pub mod pricing;
 pub mod reflection;
 pub mod repo_map;
 pub mod rules;
@@ -27,8 +28,8 @@ pub use compaction::{
     CompactionResult, ContextPruner, ContextUsage, ConversationCompactor, TokenEstimator,
 };
 pub use config::{
-    AgentConfig, AppConfig, ExecutionBackendKind, ExecutionConfig, McpServerConfig, ProviderConfig,
-    ProviderKind, SecurityConfig, WebSearchConfig,
+    AgentConfig, AppConfig, ExecutionBackendKind, ExecutionConfig, McpServerConfig, ModelSettings,
+    ProviderConfig, ProviderKind, SecurityConfig, WebSearchConfig,
 };
 pub use consolidation::{ConsolidationConfig, ConsolidationEngine, ConsolidationReport};
 pub use context::{
@@ -39,6 +40,7 @@ pub use maukode_memory::{MemoryContext, MemoryStore, Scope};
 pub use mcp::{McpClient, McpManager, McpTool};
 pub use permission::{PermissionManager, PermissionMode};
 pub use plugin::PluginManager;
+pub use pricing::ModelPricing;
 pub use reflection::{ProposedSkill, ReflectionConfig, ReflectionEngine};
 pub use repo_map::{CodebaseMapTool, RepoMapGenerator};
 pub use rules::{

@@ -239,6 +239,20 @@ pub struct AppConfig {
     pub agent: AgentConfig,
     #[serde(default)]
     pub execution: ExecutionConfig,
+    /// Per-model settings (thinking, prices), keyed by model id.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub models: std::collections::BTreeMap<String, ModelSettings>,
+}
+
+/// Settings for one model.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ModelSettings {
+    /// Extended thinking (Anthropic models).
+    #[serde(default)]
+    pub thinking: maukode_llm::ThinkingSettings,
+    /// Prices in US dollars per million tokens, replacing the built-in ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<crate::pricing::ModelPricing>,
 }
 
 impl Default for AppConfig {
@@ -253,6 +267,7 @@ impl Default for AppConfig {
             mcp_servers: std::collections::HashMap::new(),
             web_search: WebSearchConfig::default(),
             execution: ExecutionConfig::default(),
+            models: std::collections::BTreeMap::new(),
             providers: vec![
                 ProviderConfig {
                     id: "llmkita".to_string(),
@@ -416,6 +431,28 @@ impl AppConfig {
             .and_then(|list| serde_json::from_value(list).ok())
             .unwrap_or_default();
         is_inside_any(dir, &roots)
+    }
+
+    /// Thinking settings for `model` (configured, or the defaults).
+    pub fn thinking_for(&self, model: &str) -> maukode_llm::ThinkingSettings {
+        self.models
+            .get(model)
+            .map(|settings| settings.thinking.clone())
+            .unwrap_or_default()
+    }
+
+    /// The price of `model`: configured, or built in for Claude models.
+    pub fn pricing_for(&self, model: &str) -> Option<crate::pricing::ModelPricing> {
+        self.models
+            .get(model)
+            .and_then(|settings| settings.pricing)
+            .or_else(|| crate::pricing::builtin_pricing(model))
+    }
+
+    /// What one response of `model` cost in US dollars, if its price is known.
+    pub fn cost_of(&self, model: &str, usage: &maukode_protocol::TokenUsage) -> Option<f64> {
+        self.pricing_for(model)
+            .map(|pricing| crate::pricing::cost(&pricing, model, usage))
     }
 
     pub fn get_provider(&self, id: &str) -> Option<&ProviderConfig> {

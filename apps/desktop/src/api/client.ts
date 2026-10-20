@@ -20,6 +20,7 @@ import type {
   PluginManifest,
   PreviewInfo,
   PreviewRequest,
+  PromptImage,
   ProviderConfig,
   ProvidersListResponse,
   ExecutionSettings,
@@ -121,8 +122,8 @@ export class ApiClient {
   renameSession(id: string, title: string | null) {
     return this.request<void>("PATCH", `/api/v1/sessions/${id}`, { title });
   }
-  prompt(id: string, prompt: string) {
-    return this.request<void>("POST", `/api/v1/sessions/${id}/prompt`, { prompt });
+  prompt(id: string, prompt: string, images: PromptImage[] = []) {
+    return this.request<void>("POST", `/api/v1/sessions/${id}/prompt`, { prompt, images });
   }
   queuePrompt(id: string, prompt: string) {
     return this.request<{ status: string; session_id: string; queue_len: number }>(
