@@ -191,7 +191,12 @@ impl TokenEstimator {
     /// Check conversation token usage against model context limit
     /// Default warning threshold is 75%, critical threshold is 85%.
     pub fn check_threshold(messages: &[Message], system_prompt: &str, model: &str) -> ContextUsage {
-        let estimated_tokens = Self::estimate_messages(messages, system_prompt);
+        Self::usage_for(Self::estimate_messages(messages, system_prompt), model)
+    }
+
+    /// Check a token count (estimated, or reported by the provider) against the model's context
+    /// limit, with the same thresholds as [`Self::check_threshold`].
+    pub fn usage_for(estimated_tokens: usize, model: &str) -> ContextUsage {
         let context_limit = Self::context_window_for_model(model);
         let ratio = if context_limit > 0 {
             (estimated_tokens as f32) / (context_limit as f32)

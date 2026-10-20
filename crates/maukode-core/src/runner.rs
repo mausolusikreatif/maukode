@@ -89,6 +89,24 @@ fn stopped(reason: StopReason, message: Option<String>) -> LLMEvent {
     LLMEvent::TurnStopped { reason, message }
 }
 
+/// Tokens the next request will occupy. With a provider-reported count for an earlier step
+/// (`reported`: tokens, and the number of messages it covered) only the messages added since are
+/// estimated; otherwise the whole request (system prompt, messages, tool schemas) is.
+fn context_tokens(
+    messages: &[Message],
+    system_prompt: &str,
+    tool_schema_tokens: usize,
+    reported: Option<(usize, usize)>,
+) -> usize {
+    use crate::compaction::TokenEstimator;
+    match reported {
+        Some((tokens, covered)) if covered <= messages.len() => {
+            tokens + TokenEstimator::estimate_messages(&messages[covered..], "")
+        }
+        _ => TokenEstimator::estimate_messages(messages, system_prompt) + tool_schema_tokens,
+    }
+}
+
 /// Backoff between transient-failure retries. Returns true when cancellation
 /// was requested while waiting.
 async fn sleep_or_cancelled(
@@ -268,6 +286,17 @@ impl SessionRunner {
             .render_turn_context(user_prompt.as_deref())
             .await;
         let estimated_system = format!("{system_prompt}\n{system_suffix}");
+        let tool_defs = self.tools.definitions();
+        let tool_schema_tokens = crate::compaction::TokenEstimator::estimate_text(
+            &serde_json::to_string(&tool_defs).unwrap_or_default(),
+        );
+        // Context size the provider reported for the last step (prompt plus reply), and how many
+        // session messages that covered. Later steps add an estimate for the newer messages only.
+        let mut reported_context: Option<(usize, usize)> = None;
+        // Context size right after the last automatic compaction (or failed attempt). Compacting
+        // again only helps once the conversation has grown well past it; without this, every
+        // following step would pay for another summary call.
+        let mut compaction_floor: Option<usize> = None;
         let mut step = 0;
         let mut continuations = 0usize;
         let mut stop: (StopReason, Option<String>) = (StopReason::Completed, None);
@@ -299,9 +328,13 @@ impl SessionRunner {
             let mut pruned_messages = pruner.prune_messages(&current_messages);
 
             // Context window threshold monitoring
-            let usage = crate::compaction::TokenEstimator::check_threshold(
-                &pruned_messages,
-                &estimated_system,
+            let usage = crate::compaction::TokenEstimator::usage_for(
+                context_tokens(
+                    &pruned_messages,
+                    &estimated_system,
+                    tool_schema_tokens,
+                    reported_context,
+                ),
                 &self.config.model,
             );
             if usage.exceeds_threshold {
@@ -323,9 +356,12 @@ impl SessionRunner {
                 });
 
                 // If critical (>85%) and session has >6 messages, automatically compact older history
-                if usage.is_critical && current_messages.len() > 6 {
+                let grown_since_compaction = compaction_floor
+                    .is_none_or(|floor| usage.estimated_tokens > floor + usage.context_limit / 10);
+                if usage.is_critical && current_messages.len() > 6 && grown_since_compaction {
                     tracing::info!("Context window critical ({}%). Triggering automatic conversation compaction.", pct);
                     let mut session_write = self.session.write().await;
+                    compaction_floor = Some(usage.estimated_tokens);
                     if let Ok(compact_res) = crate::compaction::ConversationCompactor::compact(
                         &mut session_write,
                         Some(self.llm.as_ref()),
@@ -335,6 +371,14 @@ impl SessionRunner {
                     .await
                     {
                         pruned_messages = pruner.prune_messages(&session_write.messages);
+                        // The provider's last count described the history before compaction.
+                        reported_context = None;
+                        compaction_floor = Some(context_tokens(
+                            &pruned_messages,
+                            &estimated_system,
+                            tool_schema_tokens,
+                            None,
+                        ));
                         if let Some(store) = &self.permission_store {
                             let audit = crate::store::sqlite::CompactionAuditRecord {
                                 session_id,
@@ -375,14 +419,13 @@ impl SessionRunner {
                 }
             }
 
-            let tool_defs = self.tools.definitions();
-
             debug!("Starting provider turn #{step}");
 
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
             let mut provider_items = Vec::new();
             let mut finish_reason = FinishReason::EndTurn;
+            let mut step_tokens: Option<usize> = None;
 
             // Retry state for transient stream failures within this step.
             let mut stream_attempt: usize = 0;
@@ -452,6 +495,12 @@ impl SessionRunner {
                                 LLMEvent::Finish { reason } => {
                                     finish_reason = reason.clone();
                                 }
+                                LLMEvent::Usage(usage) => {
+                                    step_tokens = usize::try_from(
+                                        usage.input_tokens + usage.output_tokens,
+                                    )
+                                    .ok();
+                                }
                                 _ => {}
                             }
                             let _ = event_tx.send(event);
@@ -509,9 +558,14 @@ impl SessionRunner {
             // An empty assistant message is invalid for several providers and would poison the
             // next request, so never store one.
             let empty_response = assistant_parts.is_empty();
-            if !empty_response {
+            {
                 let mut session = self.session.write().await;
-                session.add_message(Message::assistant(assistant_parts));
+                if !empty_response {
+                    session.add_message(Message::assistant(assistant_parts));
+                }
+                if let Some(tokens) = step_tokens {
+                    reported_context = Some((tokens, session.messages.len()));
+                }
             }
 
             // If the turn was cancelled mid-stream, stop after preserving partial output.
@@ -605,6 +659,12 @@ impl SessionRunner {
                 };
 
                 if let Some(ref perm_mgr) = self.permission_manager {
+                    // MCP tools: `ask` mode confirms them, and "allow for this session" then
+                    // covers the tool with any arguments.
+                    let confirms_every_call = self
+                        .tools
+                        .get(&call.name)
+                        .is_some_and(|tool| tool.requires_confirmation());
                     let whitelisted = match permission_key.as_deref() {
                         Some(key) => {
                             perm_mgr
@@ -631,7 +691,7 @@ impl SessionRunner {
                                         false
                                     }
                                 } else {
-                                    false
+                                    confirms_every_call
                                 }
                             }
                         }
@@ -653,11 +713,16 @@ impl SessionRunner {
                         } else {
                             let details = serde_json::to_string_pretty(&call.arguments)
                                 .unwrap_or_else(|_| call.arguments.to_string());
-                            (
-                                Some(details),
-                                "warning".to_string(),
-                                format!("Tool '{}' requires confirmation", call.name),
-                            )
+                            let description = if confirms_every_call {
+                                format!(
+                                    "External tool '{}' runs code MauKode cannot inspect; \
+                                     allowing it for the session covers any arguments",
+                                    call.name
+                                )
+                            } else {
+                                format!("Tool '{}' requires confirmation", call.name)
+                            };
+                            (Some(details), "warning".to_string(), description)
                         };
 
                         let perm_req = maukode_protocol::PermissionRequest {
@@ -731,7 +796,11 @@ impl SessionRunner {
                                 // Proceed with execution
                             }
                             maukode_protocol::PermissionDecision::AllowSession => {
-                                if let Some(ref key) = permission_key {
+                                if confirms_every_call {
+                                    perm_mgr
+                                        .whitelist_session_tool(&session_id_str, &call.name)
+                                        .await;
+                                } else if let Some(ref key) = permission_key {
                                     perm_mgr
                                         .whitelist_session_command(&session_id_str, &call.name, key)
                                         .await;
@@ -1305,5 +1374,94 @@ mod turn_tests {
             })
             .collect();
         assert_eq!(results, ["read", "read"]);
+    }
+
+    /// Stands in for an MCP tool: `ask` mode confirms its calls.
+    struct ExternalTool;
+
+    #[async_trait::async_trait]
+    impl maukode_tools::Tool for ExternalTool {
+        fn name(&self) -> &str {
+            "mcp__srv__run"
+        }
+        fn description(&self) -> &str {
+            "test"
+        }
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        fn requires_confirmation(&self) -> bool {
+            true
+        }
+        async fn execute(&self, _args: serde_json::Value) -> Result<String, ToolError> {
+            Ok("ran".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn ask_mode_confirms_external_tools_once_per_session() {
+        let call = |id: &str, n: i64| -> Step {
+            Ok(vec![
+                Ok(LLMEvent::ToolCallFinish {
+                    tool_call: ToolCall {
+                        id: id.into(),
+                        name: "mcp__srv__run".into(),
+                        arguments: serde_json::json!({ "n": n }),
+                    },
+                }),
+                Ok(LLMEvent::Finish {
+                    reason: FinishReason::ToolUse,
+                }),
+            ])
+        };
+        let script = vec![call("1", 1), call("2", 2), text("done", FinishReason::EndTurn)];
+        let dir = std::env::temp_dir();
+        let session = Arc::new(RwLock::new(Session::new(&dir)));
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(ExternalTool));
+        let manager = Arc::new(PermissionManager::new(PermissionMode::Ask));
+        let runner = SessionRunner::new(
+            Arc::clone(&session),
+            Arc::new(ScriptedLlm(Mutex::new(script.into()))),
+            Arc::new(tools),
+            Arc::new(ContextManager::new(&dir)),
+            RunnerConfig {
+                max_steps: 5,
+                ..RunnerConfig::default()
+            },
+        )
+        .with_permission_manager(Arc::clone(&manager));
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let answer = async {
+            let mut prompts = 0;
+            while let Some(event) = rx.recv().await {
+                if let LLMEvent::PermissionRequest(request) = event {
+                    prompts += 1;
+                    let decision = maukode_protocol::PermissionDecision::AllowSession;
+                    assert!(manager.respond(&request.request_id, decision).await);
+                }
+            }
+            prompts
+        };
+        let (result, prompts) = tokio::join!(
+            runner.run_with_cancellation(Some("go".into()), tx, None),
+            answer
+        );
+        result.unwrap();
+        // The second call has other arguments; the session approval covers it.
+        assert_eq!(prompts, 1);
+
+        let guard = session.read().await;
+        let results: Vec<_> = guard
+            .messages
+            .iter()
+            .flat_map(|m| &m.parts)
+            .filter_map(|p| match p {
+                ContentPart::ToolResult(r) => Some(r.content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results, ["ran", "ran"]);
     }
 }

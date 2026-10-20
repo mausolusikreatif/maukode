@@ -64,6 +64,26 @@ pub struct McpToolDefinition {
     pub description: Option<String>,
     #[serde(default, rename = "inputSchema")]
     pub input_schema: serde_json::Value,
+    #[serde(default)]
+    pub annotations: Option<McpToolAnnotations>,
+}
+
+impl McpToolDefinition {
+    /// Whether the server marks the tool as not modifying its environment (`readOnlyHint`).
+    pub fn is_read_only(&self) -> bool {
+        self.annotations
+            .as_ref()
+            .and_then(|a| a.read_only_hint)
+            .unwrap_or(false)
+    }
+}
+
+/// Hints a server gives about a tool. They come from the server, so they are only as
+/// trustworthy as the server the user chose to run.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpToolAnnotations {
+    #[serde(default, rename = "readOnlyHint")]
+    pub read_only_hint: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

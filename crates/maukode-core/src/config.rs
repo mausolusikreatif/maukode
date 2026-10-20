@@ -364,14 +364,47 @@ impl AppConfig {
         default
     }
 
+    /// Write the configuration, except `security.trusted_projects`: that list belongs to
+    /// `maukode trust` ([`Self::save_trusted_projects`]), and the copy on disk is kept, so a
+    /// long-running daemon saving its older in-memory configuration cannot undo a `trust` or
+    /// `trust --revoke` made while it was running.
     pub fn save(&self) -> Result<()> {
+        let mut value = serde_json::to_value(self)?;
+        if let Some(on_disk) = Self::trusted_projects_on_disk() {
+            value["security"]["trusted_projects"] = on_disk;
+        }
+        Self::write_config_value(&value)
+    }
+
+    /// Replace `security.trusted_projects` on disk with this configuration's list, leaving the
+    /// rest of the file as it is.
+    pub fn save_trusted_projects(&self) -> Result<()> {
+        let mut value = std::fs::read_to_string(Self::config_path())
+            .ok()
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+            .filter(|value| value["security"].is_object())
+            .map_or_else(|| serde_json::to_value(self), Ok)?;
+        value["security"]["trusted_projects"] =
+            serde_json::to_value(&self.security.trusted_projects)?;
+        Self::write_config_value(&value)
+    }
+
+    fn write_config_value(value: &serde_json::Value) -> Result<()> {
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(self)?;
-        write_owner_only(&path, &json)?;
+        write_owner_only(&path, &serde_json::to_string_pretty(value)?)?;
         Ok(())
+    }
+
+    /// `security.trusted_projects` as written in the configuration file, if it has one.
+    fn trusted_projects_on_disk() -> Option<serde_json::Value> {
+        let content = std::fs::read_to_string(Self::config_path()).ok()?;
+        let value = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+        value["security"]["trusted_projects"]
+            .is_array()
+            .then(|| value["security"]["trusted_projects"].clone())
     }
 
     /// Whether `dir` is a trusted project according to the configuration file on disk.
@@ -379,20 +412,8 @@ impl AppConfig {
     /// A running daemon keeps its configuration in memory; this lets `maukode trust` take effect
     /// without a restart.
     pub fn is_trusted_project_on_disk(dir: &Path) -> bool {
-        let Ok(content) = std::fs::read_to_string(Self::config_path()) else {
-            return false;
-        };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
-            return false;
-        };
-        let roots: Vec<PathBuf> = value["security"]["trusted_projects"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|v| v.as_str().map(PathBuf::from))
-                    .collect()
-            })
+        let roots: Vec<PathBuf> = Self::trusted_projects_on_disk()
+            .and_then(|list| serde_json::from_value(list).ok())
             .unwrap_or_default();
         is_inside_any(dir, &roots)
     }

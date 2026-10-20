@@ -10,6 +10,7 @@ pub struct McpTool {
     description: String,
     parameters: serde_json::Value,
     client: Arc<McpClient>,
+    read_only: bool,
 }
 
 impl McpTool {
@@ -34,7 +35,15 @@ impl McpTool {
             description,
             parameters,
             client,
+            read_only: false,
         }
+    }
+
+    /// Mark the tool as read-only (the server's `readOnlyHint`): `ask` mode then runs it without
+    /// confirmation.
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
     }
 }
 
@@ -54,6 +63,10 @@ impl Tool for McpTool {
 
     fn source(&self) -> ToolSource {
         ToolSource::Mcp
+    }
+
+    fn requires_confirmation(&self) -> bool {
+        !self.read_only
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<String, ToolError> {

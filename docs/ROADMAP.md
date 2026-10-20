@@ -28,7 +28,7 @@ remove a feature, update its row in the same PR.
 | Context pruning and automatic/manual compaction | **done** | `compaction/`; `/compact` |
 | Tree-Sitter repo map (Rust, TS/JS, Python, Go) | **done** | `repo_map/`; `get_codebase_map`; `/map` |
 | `AGENTS.md` discovery and `maukode init` | **done** | `rules/` |
-| MCP client (stdio) | **done** | `mcp/`; `/mcp` |
+| MCP client (stdio) | **done** | `mcp/`; `/mcp`; tool lists refreshed after `notifications/tools/list_changed`, server `ping` answered |
 | Subagents | **done** | `subagent.rs`; `invoke_subagent` |
 | Skills and plugins | **partial** | `skills.rs`, `plugin.rs`, `/api/v1/skills`, `/api/v1/plugins`; web UI Settings can enable/disable plugins and list skills; no skill authoring or slash-command use |
 | Post-turn reflection and memory consolidation | **done** (opt-in) | `reflection.rs`, `consolidation.rs`; `agent.reflection`, `agent.consolidation` |
@@ -39,7 +39,7 @@ remove a feature, update its row in the same PR.
 | Feature | Status | Evidence / gaps |
 | :--- | :--- | :--- |
 | OpenAI-compatible streaming (OpenAI, OpenRouter, Ollama, DeepSeek, llm-kita, custom) | **done** | `protocols/openai.rs`, usage via `stream_options` |
-| Anthropic streaming | **done** | `protocols/anthropic.rs`; prompt caching (tools, stable system prompt, last message), `Usage` events, mid-stream `error` events fail the attempt (#87); thinking blocks are dropped |
+| Anthropic streaming | **done** | `protocols/anthropic.rs`; prompt caching (tools, system prompt, last message; the per-turn context follows the last breakpoint, so the history stays cached across turns), `Usage` events with cached tokens included in `input_tokens`, mid-stream `error` events fail the attempt; thinking blocks are dropped |
 | ChatGPT plan (Sign in with ChatGPT, Responses API) | **done** | `chatgpt_auth.rs`, `chatgpt_client.rs`, `maukode auth` |
 | ChatGPT credentials on a remote daemon | **planned** | — |
 
@@ -50,6 +50,7 @@ remove a feature, update its row in the same PR.
 | File tools with path jail | **done** | `file.rs`, `grep.rs`, `security.rs` (`PathJail`) |
 | Bash risk assessment and approval prompts | **partial** | `assess_bash_command` (inspects `bash -c`, `eval`, subshells, wrappers, `find -exec`); pattern-based, unknown commands are treated as safe (see backlog) |
 | Word-by-word `bash_whitelist`, per-tool session approvals | **done** | `bash_whitelist_allows`, `PermissionManager::is_whitelisted` (#86) |
+| MCP tools confirmed in `ask` mode | **done** | `Tool::requires_confirmation`, `McpTool::with_read_only` (`readOnlyHint` skips the prompt), `PermissionManager::whitelist_session_tool` |
 | Subagent tool calls go through the parent's permissions | **done** | `SubagentTool::with_permission_manager` (#86) |
 | Repo-supplied MCP servers require a trusted project | **done** | `security.trusted_projects`, `maukode trust` (#86) |
 | Private tool results (`[p]`) | **done** | `PermissionDecision::AllowPrivate`, `PrivateToolResult` |
@@ -128,19 +129,25 @@ Fixed in #87:
   workspace-relative paths;
 - `read_file` returns at most 2000 lines (and 2000 characters per line) unless `end_line` is given.
 
+Fixed in #88:
+- the per-turn context (date, recalled memories) is sent after the conversation, appended to the
+  last user message as a `<maukode-context>` note, so on Anthropic, OpenAI-compatible providers
+  and the ChatGPT plan the whole earlier history stays a cached prefix across turns;
+- the context-window check uses the size the provider reported for the previous step plus an
+  estimate for newer messages only, and the full estimate includes the tool schemas; Anthropic's
+  `input_tokens` now includes cached tokens, as with the other providers;
+- after an automatic compaction (or a failed attempt) the next one waits until the conversation
+  has grown by 10% of the context window, instead of running again on every step;
+- the daemon merges consecutive text, reasoning and tool-argument deltas for up to 50 ms before
+  publishing them (fewer SSE frames, and the 2000-event replay log covers much longer replies);
+  the TUI redraws streamed text on its 50 ms tick instead of once per delta;
+- MCP tool lists are fetched again after a server sends `notifications/tools/list_changed`.
+
 Remaining:
 
-1. The tool registry itself is still rebuilt every turn (cheap now that the expensive parts are
-   cached). MCP tool lists are not refreshed when a server reports `tools/list_changed`.
-2. Recalled memories change the system prompt between turns, so on Anthropic the cached messages
-   of the previous turn are not reused across turns (within a turn every step is a cache hit).
-3. A failed automatic compaction is retried on every following step (one extra LLM call each).
-4. Token estimation uses a chars/4 heuristic and ignores tool schemas; use the provider's reported
-   `input_tokens` when available.
-5. Streaming text is published one delta per event into a 500-slot broadcast channel; coalesce
-   deltas to reduce SSE and redraw load. In the TUI, the streaming message is re-parsed on every
-   frame.
-6. Identical messages in one session are stored once in `messages_audit` (it deduplicates by
+1. The tool registry is rebuilt every turn. The expensive parts (MCP connections and tool lists,
+   the workspace context) are cached, so this costs little.
+2. Identical messages in one session are stored once in `messages_audit` (it deduplicates by
    content hash, as it did by text before).
 
 ### Reliability
@@ -149,10 +156,12 @@ Fixed in #87: LLM clients have a 30 s connect timeout and a 300 s read timeout (
 is retried instead of hanging the turn); the Anthropic adapter reports mid-stream `error` events,
 rejects malformed tool-argument JSON, and emits `LLMEvent::Usage`.
 
-Remaining:
-
-1. Around 400 `unwrap()`/`expect()` calls in non-test-looking code paths (rough count); audit
-   against the `AGENTS.md` rule.
+Fixed in #88: the earlier estimate of about 400 `unwrap()`/`expect()` calls counted test code.
+Outside tests there were 13: the HTML-to-Markdown regexes in `web.rs`, compiled again on every
+call (and `strip_html_tags` once per link and list item), and a constant address parse. The
+regexes are now compiled once (`static_regex!`); the remaining `expect` is on constant patterns
+covered by the tests. MCP servers that send a request (such as `ping`) now get an answer instead
+of having it mistaken for a response.
 
 ### Security
 
@@ -163,18 +172,23 @@ daemons, non-loopback binds without a token, non-constant-time token comparison,
 origins, repositories starting their own MCP servers, `fetch_web_content` reaching metadata
 addresses and the daemon API, and a world-readable `config.json`.
 
+Fixed in #88: MCP tools are confirmed in `ask` mode (unless marked `readOnlyHint`), with "allow
+for this session" covering the tool; only `maukode trust` writes `security.trusted_projects`, so
+a daemon saving its configuration no longer drops a trust added while it ran.
+
 Remaining risks, by design or not yet addressed:
 
 1. **The risk assessment is a prompt filter, not a sandbox.** In `ask` mode a command it does not
    recognize runs without a prompt, including a script the agent wrote itself (`bash x.sh`,
    `cargo run`, `npm test`). Use `strict`/`review`, a bubblewrap sandbox, or a lawang cell when
    that matters.
-2. **MCP tools never prompt in `ask` mode** (only `bash` is assessed); trusted projects and the
-   global configuration decide which MCP servers exist.
-3. **`fetch_web_content` can reach private LAN addresses** (only link-local/metadata addresses and
-   the daemon API are blocked) and runs without a prompt.
-4. The daemon and the CLI both rewrite `config.json`; a daemon saving its in-memory configuration
-   can drop a `trusted_projects` entry that `maukode trust` added while it was running.
+2. **`fetch_web_content` can reach private LAN addresses** (only link-local/metadata addresses and
+   the daemon API are blocked) and runs without a prompt. Blocking it alone would not help while
+   `curl` in `bash` reaches the same addresses without a prompt; the fix is the planned network
+   capability controls.
+3. **`readOnlyHint` comes from the MCP server.** A server that marks a mutating tool read-only
+   skips the `ask` prompt; which servers run is still decided by the global configuration and
+   trusted projects.
 
 ### Features
 

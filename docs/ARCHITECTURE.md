@@ -74,18 +74,22 @@ When a user submits a prompt, `maukode-core::runner::SessionRunner` executes an 
 
 1. **Context Assembly**:
    - Gathers project instructions from `AGENTS.md` (or `MAUKODE.md` / `RULES.md`).
-   - Injects the Tree-Sitter AST codebase skeleton map and knowledge recalled for the prompt.
-   - Evaluates context window usage and applies token pruning/compaction if necessary.
-   - In the daemon, the tool registry, MCP tools, and context manager are currently built anew for
-     every turn (see the backlog in [ROADMAP.md](./ROADMAP.md)).
+   - Builds a stable system prompt (instructions, environment, repo map) and a per-turn context
+     (date, knowledge recalled for the prompt). Providers receive the per-turn context at the end
+     of the last user message, so everything before it stays a cacheable prefix across turns.
+   - Evaluates context window usage (the provider's reported size of the previous step plus an
+     estimate for newer messages) and applies token pruning/compaction if necessary.
+   - In the daemon, the tool registry is built anew for every turn; MCP connections and tool
+     lists, and each workspace's context manager and memory store, are reused across turns.
 2. **Pre-Turn Shadow Checkpoint**:
    - Creates a shadow git checkpoint of the working directory before any mutating actions are taken.
 3. **Streaming LLM Call**:
    - Streams text deltas and tool call arguments via Server-Sent Events (SSE) back to the user interface in real time.
 4. **Tool Permission & Risk Assessment**:
    - Applies the permission mode. In `ask` mode, `bash` commands flagged by the pattern-based risk
-     assessment (`rm -rf`, `sudo`, destructive git, secret access, …) pause the turn and emit a
-     permission request; `strict` and `review` ask for every tool call; `trust` never asks.
+     assessment (`rm -rf`, `sudo`, destructive git, secret access, …) and MCP tools not marked
+     `readOnlyHint` pause the turn and emit a permission request; `strict` and `review` ask for
+     every tool call; `trust` never asks.
 5. **Tool Execution**:
    - Runs the approved tools one after another. File tools are confined by the path jail; `bash`
      runs through the configured `ExecBackend` (host process, bubblewrap, or a lawang cell).

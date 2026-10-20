@@ -168,13 +168,15 @@ impl McpManager {
                                 }
                             }
 
+                            let read_only = t.is_read_only();
                             let tool = McpTool::new(
                                 &name,
                                 t.name,
                                 t.description,
                                 t.input_schema,
                                 Arc::clone(&client),
-                            );
+                            )
+                            .with_read_only(read_only);
                             registry.register(Arc::new(tool));
                             registered_count += 1;
                         }
@@ -471,5 +473,81 @@ for line in sys.stdin:
             .await
             .unwrap();
         assert!(exec_res.contains("Result of 10 + 32 is 42"));
+    }
+
+    #[tokio::test]
+    async fn tool_list_is_cached_until_the_server_reports_a_change() {
+        let dir = tempdir().unwrap();
+        let cwd = dir.path();
+
+        // Pings the client during the handshake, lists one more tool after every change, and
+        // reports a change whenever a tool is called.
+        let mock_server_py = r#"
+import sys, json
+
+def send(message):
+    sys.stdout.write(json.dumps(message) + "\n")
+    sys.stdout.flush()
+
+lists = 0
+pinged = False
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    msg_id = msg.get("id")
+    if method is None:
+        if msg_id == "srv-1" and msg.get("result") == {}:
+            pinged = True
+        continue
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": "srv-1", "method": "ping"})
+        send({"jsonrpc": "2.0", "id": msg_id, "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {"listChanged": True}},
+            "serverInfo": {"name": "mock-mcp", "version": "1.0"}}})
+    elif method == "tools/list":
+        lists += 1
+        names = ["tool%d" % i for i in range(lists)]
+        if pinged:
+            names.append("pinged")
+        send({"jsonrpc": "2.0", "id": msg_id, "result": {
+            "tools": [{"name": n, "inputSchema": {"type": "object"}} for n in names]}})
+    elif method == "tools/call":
+        send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+        send({"jsonrpc": "2.0", "id": msg_id, "result": {
+            "content": [{"type": "text", "text": "ok"}], "isError": False}})
+"#;
+        let script_path = cwd.join("mock_mcp.py");
+        tokio::fs::write(&script_path, mock_server_py)
+            .await
+            .unwrap();
+        let cfg = McpServerConfig {
+            command: "python3".to_string(),
+            args: vec![script_path.display().to_string()],
+            env: HashMap::new(),
+        };
+        let client = McpClient::connect("mock", &cfg, cwd, SandboxMode::Off)
+            .await
+            .unwrap();
+        let names = |tools: Vec<protocol::McpToolDefinition>| -> Vec<String> {
+            tools.into_iter().map(|t| t.name).collect()
+        };
+
+        // The ping was answered before the first listing.
+        assert_eq!(names(client.list_tools().await.unwrap()), ["tool0", "pinged"]);
+        // No change reported: served from the cache, not listed again.
+        assert_eq!(names(client.list_tools().await.unwrap()), ["tool0", "pinged"]);
+
+        client
+            .call_tool("tool0", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            names(client.list_tools().await.unwrap()),
+            ["tool0", "tool1", "pinged"]
+        );
     }
 }

@@ -26,6 +26,22 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   atas 1 MB, dan menampilkan path relatif terhadap workspace.
 - **`read_file` tanpa `end_line` mengembalikan paling banyak 2000 baris** (dan 2000 karakter per
   baris), dengan petunjuk cara membaca sisanya.
+- **Cache prompt bertahan antar-turn**: konteks per-turn (tanggal dan memori yang di-recall) kini
+  dikirim di akhir pesan user terakhir sebagai catatan `<maukode-context>`, bukan di system prompt.
+  Riwayat percakapan sebelumnya tetap menjadi prefix yang ter-cache di Anthropic, provider
+  OpenAI-compatible, dan paket ChatGPT.
+- **Estimasi ukuran konteks lebih akurat**: pemeriksaan context window memakai ukuran yang
+  dilaporkan provider untuk langkah sebelumnya, ditambah estimasi untuk pesan yang lebih baru saja;
+  estimasi penuh kini ikut menghitung skema tool. `input_tokens` dari Anthropic kini sudah termasuk
+  token yang ter-cache, sama seperti provider lain.
+- **Compaction otomatis tidak diulang di setiap langkah**: setelah compaction (berhasil atau gagal),
+  compaction berikutnya menunggu sampai percakapan bertambah 10% dari context window.
+- **Delta streaming digabung**: daemon menggabungkan delta teks, reasoning, dan argumen tool yang
+  berurutan (maksimal 50 ms) sebelum dipublikasikan, sehingga frame SSE jauh lebih sedikit dan log
+  replay mencakup balasan yang jauh lebih panjang. TUI menggambar teks streaming pada tick 50 ms,
+  bukan sekali per delta.
+- **Regex HTML ke Markdown dikompilasi sekali** di `fetch_web_content`, bukan di setiap panggilan
+  (dan per link atau item list).
 
 ### Fixed
 
@@ -35,6 +51,8 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   error (dan dicoba ulang bila sementara) alih-alih dianggap selesai; JSON argumen tool yang rusak
   menjadi error alih-alih `{}`; pemakaian token (termasuk cache read/write) dilaporkan lewat event
   `Usage`.
+- **MCP**: daftar tool diambil ulang setelah server mengirim `notifications/tools/list_changed`, dan
+  permintaan dari server (misalnya `ping`) kini dijawab alih-alih dianggap sebagai respons.
 
 ### Security
 
@@ -74,6 +92,14 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   (`169.254.169.254`, `fe80::/10`), alamat metadata lain, dan `localhost/api/…` ditolak, termasuk
   lewat redirect dan nama DNS. Body dibaca bertahap dan berhenti di batas 2 MB.
 - **`config.json` kini hanya bisa dibaca pemiliknya** (0600) karena berisi API key.
+- **Tool MCP kini meminta persetujuan di mode `ask`**: tool MCP menjalankan kode yang tidak bisa
+  diperiksa MauKode, jadi setiap panggilannya kini meminta izin, kecuali tool yang ditandai server
+  dengan `readOnlyHint`. "Izinkan untuk sesi ini" berlaku untuk tool tersebut dengan argumen apa
+  pun.
+- **`maukode trust` tidak lagi bisa dibatalkan diam-diam oleh daemon**: hanya `maukode trust` yang
+  menulis `security.trusted_projects`. Penyimpanan lain (API pengaturan daemon, CLI) mempertahankan
+  daftar yang ada di disk, sehingga daemon yang menyimpan konfigurasi lamanya dari memori tidak lagi
+  menghapus project yang di-trust saat daemon berjalan.
 
 ### Added
 
