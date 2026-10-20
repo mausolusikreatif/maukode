@@ -33,6 +33,9 @@ pub struct SubagentTool {
     /// Where the parent session runs its commands. A subagent must use the same place: otherwise a
     /// "mutating" subagent would run `bash` on the host even though the session is sandboxed.
     exec_backend: Option<Arc<dyn maukode_tools::ExecBackend>>,
+    /// The parent session's permissions. Without it a subagent's tool calls would never ask for
+    /// approval, whatever the session's permission mode.
+    permission_manager: Option<Arc<crate::PermissionManager>>,
 }
 
 impl SubagentTool {
@@ -59,7 +62,15 @@ impl SubagentTool {
             mcp_manager: None,
             app_config: None,
             exec_backend: None,
+            permission_manager: None,
         }
+    }
+
+    /// Ask for approval of the subagent's tool calls like for the parent's: same permission mode
+    /// and whitelist, with the prompts forwarded to the parent session's event stream.
+    pub fn with_permission_manager(mut self, manager: Arc<crate::PermissionManager>) -> Self {
+        self.permission_manager = Some(manager);
+        self
     }
 
     /// Run the subagent's commands through the same backend as the parent session.
@@ -248,17 +259,21 @@ impl Tool for SubagentTool {
             temperature: None,
         };
 
-        let child_runner = SessionRunner::new(
+        let mut child_runner = SessionRunner::new(
             Arc::clone(&child_session),
             Arc::clone(&self.llm),
             Arc::new(child_tools),
             child_context,
             child_runner_config,
         );
+        if let Some(manager) = &self.permission_manager {
+            child_runner = child_runner.with_permission_manager(Arc::clone(manager));
+        }
 
         let (child_tx, mut child_rx) = mpsc::unbounded_channel::<LLMEvent>();
         let event_sender_task = event_sender.clone();
         let sub_id_task = child_subagent_id.clone();
+        let parent_id = self.parent_session_id.to_string();
 
         let progress_tracker = tokio::spawn(async move {
             let mut step = 0;
@@ -278,6 +293,22 @@ impl Tool for SubagentTool {
                     }
                     LLMEvent::Usage(usage) => {
                         tokens = (usage.input_tokens + usage.output_tokens) as usize;
+                    }
+                    // Only the parent session is visible to the user: its clients must see the
+                    // subagent's approval prompts (answered through the shared permission manager)
+                    // and the results the user chose to keep private.
+                    LLMEvent::PermissionRequest(request) => {
+                        if let Some(ref tx) = event_sender_task {
+                            let mut request = request.clone();
+                            request.session_id = parent_id.clone();
+                            request.description = format!("Subagent: {}", request.description);
+                            let _ = tx.send(LLMEvent::PermissionRequest(request));
+                        }
+                    }
+                    LLMEvent::PrivateToolResult(_) => {
+                        if let Some(ref tx) = event_sender_task {
+                            let _ = tx.send(event.clone());
+                        }
                     }
                     _ => {}
                 }
@@ -345,6 +376,63 @@ mod tests {
                 .expect("script exhausted");
             step.map(|events| Box::pin(futures::stream::iter(events)) as LLMStream)
         }
+    }
+
+    #[tokio::test]
+    async fn subagent_tool_calls_ask_the_parent_session_for_permission() {
+        let script = vec![
+            Ok(vec![
+                Ok(LLMEvent::ToolCallFinish {
+                    tool_call: maukode_protocol::ToolCall {
+                        id: "call-1".to_string(),
+                        name: "read_file".to_string(),
+                        arguments: json!({ "path": "missing.txt" }),
+                    },
+                }),
+                Ok(LLMEvent::Finish {
+                    reason: FinishReason::ToolUse,
+                }),
+            ]),
+            Ok(vec![
+                Ok(LLMEvent::TextDelta {
+                    text: "done".to_string(),
+                }),
+                Ok(LLMEvent::Finish {
+                    reason: FinishReason::EndTurn,
+                }),
+            ]),
+        ];
+        let llm = Arc::new(ScriptedLlm(Mutex::new(script.into())));
+        let dir = std::env::temp_dir();
+        let jail = PathJail::new(&dir);
+        let parent_id = SessionId::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let manager = Arc::new(crate::PermissionManager::new(crate::PermissionMode::Strict));
+        let tool = SubagentTool::new(parent_id, dir, jail, llm, Some(tx))
+            .with_permission_manager(Arc::clone(&manager));
+        let run = tokio::spawn(async move {
+            tool.execute(json!({ "profile": "codebase-researcher", "goal": "Read a file" }))
+                .await
+        });
+
+        let request = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                match rx.recv().await {
+                    Some(LLMEvent::PermissionRequest(request)) => return request,
+                    Some(_) => continue,
+                    None => panic!("event stream ended without a permission request"),
+                }
+            }
+        })
+        .await
+        .expect("the subagent's tool call did not ask for permission");
+        assert_eq!(request.session_id, parent_id.to_string());
+        assert_eq!(request.tool_name, "read_file");
+        let deny = maukode_protocol::PermissionDecision::Deny;
+        assert!(manager.respond(&request.request_id, deny).await);
+
+        let summary = run.await.unwrap().unwrap();
+        assert!(summary.contains("done"));
     }
 
     #[tokio::test]

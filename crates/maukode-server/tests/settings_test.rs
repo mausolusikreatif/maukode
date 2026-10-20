@@ -262,8 +262,9 @@ async fn default_approval_mode_persists_and_applies_to_new_sessions_only() {
     assert!(v["servers"].is_array());
 }
 
-/// Listing MCP servers is a GET and must never run the configured command (a project's
-/// `.maukode/mcp.json` is untrusted until an agent — or an explicit POST — connects it).
+/// A project's `.maukode/mcp.json` defines commands, so it is ignored until the user trusts the
+/// folder. Even then, listing MCP servers is a GET and must never run the configured command;
+/// only an agent turn or an explicit POST connects it.
 #[tokio::test]
 async fn listing_mcp_servers_never_spawns_them_but_connect_does() {
     let _serial = SERIAL.lock().await;
@@ -290,6 +291,26 @@ async fn listing_mcp_servers_never_spawns_them_but_connect_does() {
         .await;
     assert_eq!(s, 200, "{v}");
     let id = v["id"].as_str().unwrap().to_string();
+
+    // Untrusted: the project's server is neither listed nor started, even on an explicit connect.
+    let (s, v) = app
+        .call(M::GET, &format!("/api/v1/sessions/{id}/mcp"), None)
+        .await;
+    assert_eq!(s, 200);
+    let listed = v["servers"].as_array().unwrap();
+    assert!(!listed.iter().any(|x| x["name"] == "probe"), "{v}");
+    let (_, _) = app
+        .call(M::POST, &format!("/api/v1/sessions/{id}/mcp"), None)
+        .await;
+    assert!(!marker.exists(), "an untrusted project must not start its MCP servers");
+
+    // `maukode trust` writes the folder to the configuration file.
+    let mut config = maukode_core::AppConfig::load();
+    config
+        .security
+        .trusted_projects
+        .push(project.path().to_path_buf());
+    config.save().unwrap();
 
     let (s, v) = app
         .call(M::GET, &format!("/api/v1/sessions/{id}/mcp"), None)

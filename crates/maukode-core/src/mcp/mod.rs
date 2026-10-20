@@ -62,8 +62,21 @@ impl McpManager {
             }
         }
 
-        // 2. Project-local .maukode/mcp.json or mcp.json
+        // 2. Project-local .maukode/mcp.json or mcp.json. These start programs named by the
+        //    repository itself, so they only load for projects the user trusts.
         let local_candidates = [cwd.join(".maukode").join("mcp.json"), cwd.join("mcp.json")];
+        let trusted = app_config.security.is_trusted_project(cwd)
+            || AppConfig::is_trusted_project_on_disk(cwd);
+        if !trusted {
+            if local_candidates.iter().any(|path| path.is_file()) {
+                tracing::warn!(
+                    project = %cwd.display(),
+                    "Ignoring this project's MCP servers because the folder is not trusted; \
+                     run `maukode trust` in it to allow them"
+                );
+            }
+            return combined;
+        }
 
         for path in local_candidates {
             if path.is_file() {
@@ -337,6 +350,12 @@ mod tests {
             .await
             .unwrap();
 
+        // An untrusted project's own servers are ignored.
+        let loaded = McpManager::load_server_configs(cwd, &app_config).await;
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded.contains_key("srv_a"));
+
+        app_config.security.trusted_projects = vec![cwd.to_path_buf()];
         let loaded = McpManager::load_server_configs(cwd, &app_config).await;
         assert_eq!(loaded.len(), 2);
         assert!(loaded.contains_key("srv_a"));

@@ -588,7 +588,11 @@ impl SessionRunner {
 
                 if let Some(ref perm_mgr) = self.permission_manager {
                     let whitelisted = match permission_key.as_deref() {
-                        Some(key) => perm_mgr.is_whitelisted(&session_id_str, key).await,
+                        Some(key) => {
+                            perm_mgr
+                                .is_whitelisted(&session_id_str, &call.name, key)
+                                .await
+                        }
                         None => false,
                     };
                     let needs_permission = if whitelisted {
@@ -711,7 +715,7 @@ impl SessionRunner {
                             maukode_protocol::PermissionDecision::AllowSession => {
                                 if let Some(ref key) = permission_key {
                                     perm_mgr
-                                        .whitelist_session_command(&session_id_str, key)
+                                        .whitelist_session_command(&session_id_str, &call.name, key)
                                         .await;
                                 }
                             }

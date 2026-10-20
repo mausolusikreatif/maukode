@@ -37,18 +37,14 @@ fn authority_host(authority: &str) -> String {
 }
 
 fn is_loopback_name(host: &str) -> bool {
-    matches!(
-        host,
-        "localhost" | "127.0.0.1" | "[::1]" | "tauri.localhost"
-    )
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]")
 }
 
-/// Origins that may talk to a token-less (local-only) server: loopback pages and desktop shells.
+/// Origins that may talk to a token-less (local-only) server: pages served from loopback.
 fn is_local_origin(origin: &str) -> bool {
     let rest = origin
         .strip_prefix("http://")
-        .or_else(|| origin.strip_prefix("https://"))
-        .or_else(|| origin.strip_prefix("tauri://"));
+        .or_else(|| origin.strip_prefix("https://"));
     rest.is_some_and(|r| is_loopback_name(&authority_host(r)))
 }
 

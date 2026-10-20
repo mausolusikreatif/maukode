@@ -37,6 +37,20 @@ impl Default for ServerConfig {
     }
 }
 
+/// Refuse to expose the agent beyond this machine without authentication. A token-less server
+/// relies on the loopback-only Host and Origin checks, which `run_server` turns off for other
+/// addresses, so anyone who can reach the port could run commands as this user.
+fn check_bind_auth(bind_addr: SocketAddr, token: Option<&str>) -> Result<()> {
+    if !bind_addr.ip().is_loopback() && token.is_none() {
+        anyhow::bail!(
+            "Refusing to listen on {bind_addr} without authentication: anyone who can reach this \
+             address could run commands on this machine. Pass --token <secret> (or set \
+             MAUKODE_AUTH_TOKEN), or bind to 127.0.0.1."
+        );
+    }
+    Ok(())
+}
+
 /// Auto-discover the pre-built web UI directory (`apps/desktop/dist/`) relative to common starting
 /// points: the current working directory, the server binary's location, and the default workspace
 /// directory. Returns `None` if no `index.html` is found.
@@ -77,7 +91,10 @@ fn discover_web_dir() -> Option<PathBuf> {
 }
 
 pub async fn run_server(config: ServerConfig) -> Result<()> {
-    let mut state = ServerState::new(config.auth_token.clone(), config.default_dir).await?;
+    // An empty token would accept `Bearer ` and switch off the local-only checks.
+    let auth_token = config.auth_token.filter(|t| !t.trim().is_empty());
+    check_bind_auth(config.bind_addr, auth_token.as_deref())?;
+    let mut state = ServerState::new(auth_token.clone(), config.default_dir).await?;
     if !config.bind_addr.ip().is_loopback() {
         state.enforce_local_host = false;
     }
@@ -104,10 +121,27 @@ pub async fn run_server(config: ServerConfig) -> Result<()> {
         "🚀 MauKode Server listening on http://{}",
         listener.local_addr()?
     );
-    if config.auth_token.is_some() {
+    if auth_token.is_some() {
         info!("🔒 Bearer authentication enabled");
     }
 
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_bind_auth;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn non_loopback_bind_requires_a_token() {
+        let addr = |s: &str| s.parse::<SocketAddr>().unwrap();
+        assert!(check_bind_auth(addr("0.0.0.0:4096"), None).is_err());
+        assert!(check_bind_auth(addr("192.168.1.5:4096"), None).is_err());
+        assert!(check_bind_auth(addr("[::]:4096"), None).is_err());
+        assert!(check_bind_auth(addr("0.0.0.0:4096"), Some("secret")).is_ok());
+        assert!(check_bind_auth(addr("127.0.0.1:4096"), None).is_ok());
+        assert!(check_bind_auth(addr("[::1]:4096"), None).is_ok());
+    }
 }

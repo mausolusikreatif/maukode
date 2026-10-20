@@ -554,7 +554,8 @@ fn start_turn(
             Some(llm_tx.clone()),
         )
         .with_mcp_manager(Arc::clone(&state.mcp_manager))
-        .with_app_config(Arc::clone(&state.config));
+        .with_app_config(Arc::clone(&state.config))
+        .with_permission_manager(Arc::clone(&permission_mgr));
         // A subagent runs commands where its parent does.
         if let Some(backend) = &exec_backend {
             subagent = subagent.with_exec_backend(Arc::clone(backend));

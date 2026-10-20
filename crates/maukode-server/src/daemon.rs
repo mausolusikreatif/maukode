@@ -148,6 +148,13 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
         return Ok(info);
     }
 
+    // Never start a daemon without a token: on loopback, any local user or process could
+    // otherwise drive the agent. The generated token is saved in the owner-only daemon file,
+    // where local clients pick it up.
+    let token = token
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| Some(generate_token()));
+
     // 2. Resolve current executable
     let current_exe = std::env::current_exe()?;
     let bind_addr = format!("127.0.0.1:{default_port}");
@@ -238,6 +245,20 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
     write_private(&daemon_file, &json)?;
 
     Ok(info)
+}
+
+/// A random bearer token (two v4 UUIDs: 244 random bits).
+fn generate_token() -> String {
+    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+}
+
+/// Browser address of the daemon's web UI, with the token in the fragment (never sent to the
+/// server in a request line, so it does not end up in access logs).
+pub fn web_ui_url(info: &DaemonInfo) -> String {
+    match &info.token {
+        Some(token) => format!("{}#token={token}", info.url),
+        None => info.url.clone(),
+    }
 }
 
 /// Write a file only the current user can read: it holds the daemon's bearer token.

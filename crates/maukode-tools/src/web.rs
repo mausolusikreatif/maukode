@@ -3,6 +3,8 @@ use async_trait::async_trait;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Structured search result entry
@@ -365,6 +367,71 @@ impl Tool for WebSearchTool {
     }
 }
 
+/// Addresses a fetched URL must never reach: link-local ranges (cloud metadata services such as
+/// 169.254.169.254, `fe80::/10`), well-known metadata addresses outside them, and unspecified or
+/// broadcast addresses. Other private addresses stay reachable so local docs servers still work.
+fn is_forbidden_fetch_ip(ip: IpAddr) -> bool {
+    const ALIBABA_METADATA: Ipv4Addr = Ipv4Addr::new(100, 100, 100, 200);
+    const AWS_METADATA_V6: Ipv6Addr = Ipv6Addr::new(0xfd00, 0xec2, 0, 0, 0, 0, 0, 0x254);
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast() || v4 == ALIBABA_METADATA
+        }
+        IpAddr::V6(v6) => {
+            v6.is_unspecified()
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                || v6 == AWS_METADATA_V6
+                || v6.to_ipv4_mapped().is_some_and(|v4| is_forbidden_fetch_ip(IpAddr::V4(v4)))
+        }
+    }
+}
+
+/// Why `url` must not be fetched, if it must not. Besides the addresses above, this blocks the
+/// local MauKode daemon API: instructions on a fetched page could otherwise make the agent read
+/// other sessions through it.
+fn fetch_block_reason(url: &reqwest::Url) -> Option<String> {
+    let host = url.host_str()?;
+    let literal_ip = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<IpAddr>()
+        .ok();
+    if let Some(ip) = literal_ip.filter(|ip| is_forbidden_fetch_ip(*ip)) {
+        return Some(format!("{ip} is a link-local or metadata address"));
+    }
+    let loopback = literal_ip.map_or_else(
+        || host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost"),
+        |ip| ip.is_loopback(),
+    );
+    if loopback && url.path().starts_with("/api/") {
+        return Some("the local MauKode daemon API is not reachable from this tool".to_string());
+    }
+    None
+}
+
+/// DNS resolution that drops forbidden addresses, so a host name (or a redirect to one) cannot be
+/// pointed at a metadata service either.
+struct GuardedResolver;
+
+impl reqwest::dns::Resolve for GuardedResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(resolve_allowed(name.as_str().to_string()))
+    }
+}
+
+async fn resolve_allowed(
+    host: String,
+) -> Result<reqwest::dns::Addrs, Box<dyn std::error::Error + Send + Sync>> {
+    let allowed: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+        .await?
+        .filter(|addr| !is_forbidden_fetch_ip(addr.ip()))
+        .collect();
+    if allowed.is_empty() {
+        return Err(format!("{host} resolves only to blocked addresses").into());
+    }
+    Ok(Box::new(allowed.into_iter()))
+}
+
 /// Fetch web content tool for downloading web pages and converting HTML to clean Markdown
 pub struct FetchWebContentTool {
     client: reqwest::Client,
@@ -376,7 +443,16 @@ impl Default for FetchWebContentTool {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-            .redirect(reqwest::redirect::Policy::limited(5))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    attempt.error("too many redirects")
+                } else if let Some(reason) = fetch_block_reason(attempt.url()) {
+                    attempt.error(reason)
+                } else {
+                    attempt.follow()
+                }
+            }))
+            .dns_resolver(Arc::new(GuardedResolver))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -438,7 +514,15 @@ impl Tool for FetchWebContentTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(25000) as usize;
 
-        let resp = self
+        let parsed = reqwest::Url::parse(url)
+            .map_err(|e| ToolError::InvalidParameters(format!("Invalid URL '{url}': {e}")))?;
+        if let Some(reason) = fetch_block_reason(&parsed) {
+            return Err(ToolError::PermissionDenied(format!(
+                "Refusing to fetch '{url}': {reason}"
+            )));
+        }
+
+        let mut resp = self
             .client
             .get(url)
             .header(
@@ -463,17 +547,29 @@ impl Tool for FetchWebContentTool {
             .unwrap_or("text/html")
             .to_string();
 
-        let raw_bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| ToolError::Execution(format!("Failed to read response body: {e}")))?;
-
-        if raw_bytes.len() > self.max_download_bytes {
-            return Err(ToolError::Execution(format!(
-                "Content length ({} bytes) exceeds maximum download limit of {} bytes",
-                raw_bytes.len(),
+        // Stop reading at the limit instead of buffering whatever the server sends.
+        let too_large = || {
+            ToolError::Execution(format!(
+                "Content exceeds maximum download limit of {} bytes",
                 self.max_download_bytes
-            )));
+            ))
+        };
+        if resp
+            .content_length()
+            .is_some_and(|len| len > self.max_download_bytes as u64)
+        {
+            return Err(too_large());
+        }
+        let mut raw_bytes = Vec::new();
+        while let Some(chunk) = resp
+            .chunk()
+            .await
+            .map_err(|e| ToolError::Execution(format!("Failed to read response body: {e}")))?
+        {
+            if raw_bytes.len() + chunk.len() > self.max_download_bytes {
+                return Err(too_large());
+            }
+            raw_bytes.extend_from_slice(&chunk);
         }
 
         let body = String::from_utf8_lossy(&raw_bytes).to_string();
@@ -872,5 +968,21 @@ let (tx, mut rx1) = broadcast::channel(16);
         assert!(results[0]
             .snippet
             .contains("runtime for writing reliable network applications"));
+    }
+
+    #[test]
+    fn fetch_refuses_metadata_addresses_and_the_daemon_api() {
+        let blocked = |url: &str| fetch_block_reason(&reqwest::Url::parse(url).unwrap()).is_some();
+        assert!(blocked("http://169.254.169.254/latest/meta-data/"));
+        assert!(blocked("http://[fe80::1]/"));
+        assert!(blocked("http://[fd00:ec2::254]/"));
+        assert!(blocked("http://100.100.100.200/"));
+        assert!(blocked("http://0.0.0.0:8080/"));
+        assert!(blocked("http://[::ffff:169.254.169.254]/"));
+        assert!(blocked("http://127.0.0.1:4096/api/v1/sessions"));
+        assert!(blocked("http://localhost:4096/api/v1/config"));
+        assert!(!blocked("https://docs.rs/tokio/latest/tokio/"));
+        assert!(!blocked("http://localhost:3000/docs"));
+        assert!(!blocked("http://192.168.1.10/"));
     }
 }
