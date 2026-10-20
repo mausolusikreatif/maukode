@@ -227,7 +227,9 @@ mod tests {
     async fn session_whitelist_is_per_tool_and_exact() {
         let manager = PermissionManager::new(PermissionMode::Strict);
         let id = r#"{"id":1}"#;
-        manager.whitelist_session_command("s", "memory_get", id).await;
+        manager
+            .whitelist_session_command("s", "memory_get", id)
+            .await;
         assert!(manager.is_whitelisted("s", "memory_get", id).await);
         assert!(!manager.is_whitelisted("s", "memory_delete", id).await);
         assert!(!manager.is_whitelisted("other", "memory_get", id).await);

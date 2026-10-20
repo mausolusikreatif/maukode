@@ -459,12 +459,19 @@ pub fn bash_whitelist_allows(pattern: &str, command: &str) -> bool {
     };
     // The first `n` pattern words equal the first `n` command words.
     let fixed_match = |n: usize| {
-        words.len() >= n && pattern[..n].iter().zip(&words).all(|(p, w)| *p == w.as_str())
+        words.len() >= n
+            && pattern[..n]
+                .iter()
+                .zip(&words)
+                .all(|(p, w)| *p == w.as_str())
     };
     if *last == "*" {
         fixed_match(fixed.len())
     } else if let Some(prefix) = last.strip_suffix('*') {
-        fixed_match(fixed.len()) && words.get(fixed.len()).is_some_and(|w| w.starts_with(prefix))
+        fixed_match(fixed.len())
+            && words
+                .get(fixed.len())
+                .is_some_and(|w| w.starts_with(prefix))
     } else {
         words.len() == pattern.len() && fixed_match(pattern.len())
     }
@@ -486,13 +493,34 @@ const SHELL_KEYWORDS: &[&str] = &[
 
 /// Commands that run (part of) their arguments as another command.
 const WRAPPERS: &[&str] = &[
-    "builtin", "command", "exec", "nohup", "env", "nice", "ionice", "timeout", "stdbuf", "setsid",
-    "xargs", "watch", "unbuffer", "flock", "chronic", "busybox", "parallel", "strace", "ltrace",
-    "taskset", "chrt", "caffeinate",
+    "builtin",
+    "command",
+    "exec",
+    "nohup",
+    "env",
+    "nice",
+    "ionice",
+    "timeout",
+    "stdbuf",
+    "setsid",
+    "xargs",
+    "watch",
+    "unbuffer",
+    "flock",
+    "chronic",
+    "busybox",
+    "parallel",
+    "strace",
+    "ltrace",
+    "taskset",
+    "chrt",
+    "caffeinate",
 ];
 
 /// Shells whose `-c` argument is shell code.
-const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh"];
+const SHELLS: &[&str] = &[
+    "sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh",
+];
 
 /// Interpreters and the short options that take inline code (`python -c`, `node -e`, …).
 const INTERPRETERS: &[(&str, &[char])] = &[
@@ -571,7 +599,10 @@ fn is_redirection(word: &str) -> bool {
 /// The operator part of a redirection word (`2>>file` → `>>`), or `None`.
 fn redirection_operator(word: &str) -> Option<&str> {
     let rest = word.trim_start_matches(|c: char| c.is_ascii_digit() || c == '&');
-    let op_len = rest.chars().take_while(|c| matches!(c, '<' | '>' | '|' | '&')).count();
+    let op_len = rest
+        .chars()
+        .take_while(|c| matches!(c, '<' | '>' | '|' | '&'))
+        .count();
     (op_len > 0).then_some(&rest[..op_len])
 }
 
@@ -969,7 +1000,9 @@ fn assess_segment(tokens: &[String], depth: usize) -> RiskAssessment {
                 }) {
                     return RiskAssessment {
                         level: RiskLevel::Danger,
-                        reason: "Destructive git operation that deletes uncommitted files (git clean)".to_string(),
+                        reason:
+                            "Destructive git operation that deletes uncommitted files (git clean)"
+                                .to_string(),
                     };
                 }
             }
@@ -977,7 +1010,9 @@ fn assess_segment(tokens: &[String], depth: usize) -> RiskAssessment {
                 if remaining_tokens.iter().any(|t| t == "--hard") {
                     return RiskAssessment {
                         level: RiskLevel::Danger,
-                        reason: "Destructive git reset that deletes uncommitted work (git reset --hard)".to_string(),
+                        reason:
+                            "Destructive git reset that deletes uncommitted work (git reset --hard)"
+                                .to_string(),
                     };
                 }
             }
@@ -1126,11 +1161,7 @@ fn assess_segment(tokens: &[String], depth: usize) -> RiskAssessment {
         }
     }
 
-    if bin_name == "iptables"
-        || bin_name == "ufw"
-        || bin_name == "nft"
-        || bin_name == "firewalld"
-    {
+    if bin_name == "iptables" || bin_name == "ufw" || bin_name == "nft" || bin_name == "firewalld" {
         return RiskAssessment {
             level: RiskLevel::Danger,
             reason: "Firewall / network routing modification".to_string(),
@@ -1221,7 +1252,9 @@ fn assess_shell(args: &[String], shell: &str, depth: usize) -> RiskAssessment {
         // The script's contents are not visible here.
         return safe("Runs a shell script");
     }
-    warning(format!("{shell} reads commands from stdin, which cannot be inspected"))
+    warning(format!(
+        "{shell} reads commands from stdin, which cannot be inspected"
+    ))
 }
 
 /// Interpreters running inline code (`python -c`, `node -e`, `perl -e`) or code from stdin.
@@ -1246,12 +1279,16 @@ fn assess_interpreter(bin_name: &str, args: &[String]) -> Option<RiskAssessment>
     let deno_eval = *name == "deno" && args.first().is_some_and(|a| a == "eval");
     let here_string = args.iter().any(|a| redirection_operator(a) == Some("<<<"));
     if inline_option || deno_eval || here_string {
-        return Some(warning(format!("Runs inline {name} code that cannot be inspected")));
+        return Some(warning(format!(
+            "Runs inline {name} code that cannot be inspected"
+        )));
     }
 
     let informational = args.iter().any(|a| INFO_FLAGS.contains(&a.as_str()));
     if positional_args(args).is_empty() && !informational {
-        return Some(warning(format!("{name} reads code from stdin, which cannot be inspected")));
+        return Some(warning(format!(
+            "{name} reads code from stdin, which cannot be inspected"
+        )));
     }
     None
 }

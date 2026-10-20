@@ -381,7 +381,9 @@ fn is_forbidden_fetch_ip(ip: IpAddr) -> bool {
             v6.is_unspecified()
                 || (v6.segments()[0] & 0xffc0) == 0xfe80
                 || v6 == AWS_METADATA_V6
-                || v6.to_ipv4_mapped().is_some_and(|v4| is_forbidden_fetch_ip(IpAddr::V4(v4)))
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| is_forbidden_fetch_ip(IpAddr::V4(v4)))
         }
     }
 }

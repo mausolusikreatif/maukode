@@ -303,7 +303,10 @@ async fn main() -> anyhow::Result<()> {
         } else {
             config.security.trusted_projects.push(dir.clone());
             config.save()?;
-            println!("Trusted {}: its mcp.json may now start MCP servers.", dir.display());
+            println!(
+                "Trusted {}: its mcp.json may now start MCP servers.",
+                dir.display()
+            );
         }
         return Ok(());
     }

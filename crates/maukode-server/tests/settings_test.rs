@@ -302,7 +302,10 @@ async fn listing_mcp_servers_never_spawns_them_but_connect_does() {
     let (_, _) = app
         .call(M::POST, &format!("/api/v1/sessions/{id}/mcp"), None)
         .await;
-    assert!(!marker.exists(), "an untrusted project must not start its MCP servers");
+    assert!(
+        !marker.exists(),
+        "an untrusted project must not start its MCP servers"
+    );
 
     // `maukode trust` writes the folder to the configuration file.
     let mut config = maukode_core::AppConfig::load();

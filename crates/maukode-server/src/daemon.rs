@@ -249,7 +249,11 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
 
 /// A random bearer token (two v4 UUIDs: 244 random bits).
 fn generate_token() -> String {
-    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 /// Browser address of the daemon's web UI, with the token in the fragment (never sent to the
