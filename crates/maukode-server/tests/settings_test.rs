@@ -313,7 +313,7 @@ async fn listing_mcp_servers_never_spawns_them_but_connect_does() {
         .security
         .trusted_projects
         .push(project.path().to_path_buf());
-    config.save().unwrap();
+    config.save_trusted_projects().unwrap();
 
     let (s, v) = app
         .call(M::GET, &format!("/api/v1/sessions/{id}/mcp"), None)
