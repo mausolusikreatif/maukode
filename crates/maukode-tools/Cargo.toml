@@ -15,6 +15,7 @@ which = "7"
 thiserror.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
+ignore.workspace = true
 regex.workspace = true
 similar.workspace = true
 reqwest.workspace = true

@@ -97,6 +97,64 @@ fn retry_busy<T>(mut op: impl FnMut() -> rusqlite::Result<T>) -> rusqlite::Resul
     }
 }
 
+/// Stable identity of a stored message: SHA-256 of its serialized role and parts.
+fn content_hash(role_json: &str, parts_json: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(role_json.as_bytes());
+    hasher.update([0]);
+    hasher.update(parts_json.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// Older databases deduplicated `messages_audit` with `UNIQUE(session_id, parts_json)`, which
+/// indexes the full text of every message. Rebuild such a table keyed by content hash instead.
+fn migrate_messages_audit(conn: &mut Connection) -> rusqlite::Result<()> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let migrated = tx
+        .prepare("SELECT 1 FROM pragma_table_info('messages_audit') WHERE name = 'content_hash';")?
+        .exists([])?;
+    if migrated {
+        return tx.commit();
+    }
+    tx.execute_batch(
+        "CREATE TABLE messages_audit_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            parts_json TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(session_id, content_hash)
+        );",
+    )?;
+    {
+        let mut read = tx.prepare(
+            "SELECT session_id, role, parts_json, created_at FROM messages_audit ORDER BY id;",
+        )?;
+        let mut write = tx.prepare(
+            "INSERT OR IGNORE INTO messages_audit_v2
+                (session_id, role, parts_json, content_hash, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5);",
+        )?;
+        let mut rows = read.query([])?;
+        while let Some(row) = rows.next()? {
+            let session_id: String = row.get(0)?;
+            let role: String = row.get(1)?;
+            let parts: String = row.get(2)?;
+            let created_at: String = row.get(3)?;
+            let hash = content_hash(&role, &parts);
+            write.execute(params![session_id, role, parts, hash, created_at])?;
+        }
+    }
+    tx.execute_batch(
+        "DROP TABLE messages_audit;
+         ALTER TABLE messages_audit_v2 RENAME TO messages_audit;
+         CREATE INDEX IF NOT EXISTS idx_messages_audit_session_id ON messages_audit(session_id);",
+    )?;
+    tx.commit()
+}
+
 /// Structured provenance for a session, newest records first.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -148,7 +206,7 @@ impl SqliteSessionStore {
             std::fs::create_dir_all(parent)?;
         }
 
-        let conn = Connection::open(&db_path)
+        let mut conn = Connection::open(&db_path)
             .with_context(|| format!("Failed to open sqlite database at {}", db_path.display()))?;
 
         // Several agents (and CLI/TUI processes) share this file: WAL lets readers run during a
@@ -182,6 +240,7 @@ impl SqliteSessionStore {
                 session_id TEXT NOT NULL,
                 role TEXT NOT NULL,
                 parts_json TEXT NOT NULL,
+                content_hash TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
@@ -193,8 +252,9 @@ impl SqliteSessionStore {
                 session_id TEXT NOT NULL,
                 role TEXT NOT NULL,
                 parts_json TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                UNIQUE(session_id, parts_json)
+                UNIQUE(session_id, content_hash)
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_audit_session_id ON messages_audit(session_id);
@@ -265,6 +325,7 @@ impl SqliteSessionStore {
             "ALTER TABLE sessions ADD COLUMN project_dir TEXT;",
             "ALTER TABLE sessions ADD COLUMN worktree_branch TEXT;",
             "ALTER TABLE sessions ADD COLUMN base_commit TEXT;",
+            "ALTER TABLE messages ADD COLUMN content_hash TEXT;",
         ] {
             match retry_busy(|| conn.execute(ddl, [])) {
                 Ok(_) => {}
@@ -278,6 +339,7 @@ impl SqliteSessionStore {
                 [],
             )
         })?;
+        retry_busy(|| migrate_messages_audit(&mut conn))?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -285,9 +347,10 @@ impl SqliteSessionStore {
         })
     }
 
+    /// Persist the session. Only messages that changed since the last save are written: stored
+    /// rows are compared by content hash, rows after the first difference are replaced, and
+    /// unchanged rows keep their `created_at`. Runs on a blocking thread.
     pub async fn save_session(&self, session: &Session, provider: &str, model: &str) -> Result<()> {
-        let mut conn = self.conn.lock().await;
-
         let title = session
             .messages
             .first()
@@ -301,62 +364,91 @@ impl SqliteSessionStore {
             })
             .unwrap_or_else(|| "New Session".to_string());
 
-        let tx = conn.transaction()?;
+        let rows = session
+            .messages
+            .iter()
+            .map(|msg| {
+                let role = serde_json::to_string(&msg.role)?;
+                let parts = serde_json::to_string(&msg.parts)?;
+                let hash = content_hash(&role, &parts);
+                Ok((role, parts, hash))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let state_str = serde_json::to_string(&session.state)?;
         let id_str = session.id.to_string();
         let directory_str = session.directory.to_string_lossy().to_string();
         let created_at_str = session.created_at.to_rfc3339();
         let updated_at_str = session.updated_at.to_rfc3339();
+        let provider = provider.to_string();
+        let model = model.to_string();
 
-        tx.execute(
-            "INSERT INTO sessions (id, directory, title, provider, model, state, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(id) DO UPDATE SET
-                directory = excluded.directory,
-                title = excluded.title,
-                provider = excluded.provider,
-                model = excluded.model,
-                state = excluded.state,
-                updated_at = excluded.updated_at;",
-            params![
-                id_str,
-                directory_str,
-                title,
-                provider,
-                model,
-                state_str,
-                created_at_str,
-                updated_at_str,
-            ],
-        )?;
-
-        // Replace messages
-        tx.execute(
-            "DELETE FROM messages WHERE session_id = ?1;",
-            params![id_str],
-        )?;
-
-        for msg in &session.messages {
-            let role_str = serde_json::to_string(&msg.role)?;
-            let parts_json = serde_json::to_string(&msg.parts)?;
-            let now = Utc::now().to_rfc3339();
-
+        let mut conn = Arc::clone(&self.conn).lock_owned().await;
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let tx = conn.transaction()?;
             tx.execute(
-                "INSERT INTO messages (session_id, role, parts_json, created_at)
-                 VALUES (?1, ?2, ?3, ?4);",
-                params![id_str, role_str, parts_json, now],
+                "INSERT INTO sessions (id, directory, title, provider, model, state, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(id) DO UPDATE SET
+                    directory = excluded.directory,
+                    title = excluded.title,
+                    provider = excluded.provider,
+                    model = excluded.model,
+                    state = excluded.state,
+                    updated_at = excluded.updated_at;",
+                params![
+                    id_str,
+                    directory_str,
+                    title,
+                    provider,
+                    model,
+                    state_str,
+                    created_at_str,
+                    updated_at_str,
+                ],
             )?;
 
-            // Retain full uncompressed message in messages_audit for historical auditing
-            let _ = tx.execute(
-                "INSERT OR IGNORE INTO messages_audit (session_id, role, parts_json, created_at)
-                 VALUES (?1, ?2, ?3, ?4);",
-                params![id_str, role_str, parts_json, now],
-            );
-        }
+            let stored: Vec<(i64, Option<String>)> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id, content_hash FROM messages WHERE session_id = ?1 ORDER BY id ASC;",
+                )?;
+                let stored = stmt.query_map(params![id_str], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                stored.collect::<rusqlite::Result<_>>()?
+            };
+            let kept = stored
+                .iter()
+                .zip(&rows)
+                .take_while(|((_, stored_hash), (_, _, hash))| {
+                    stored_hash.as_deref() == Some(hash.as_str())
+                })
+                .count();
+            if let Some((first_stale, _)) = stored.get(kept) {
+                tx.execute(
+                    "DELETE FROM messages WHERE session_id = ?1 AND id >= ?2;",
+                    params![id_str, first_stale],
+                )?;
+            }
 
-        tx.commit()?;
-        Ok(())
+            let now = Utc::now().to_rfc3339();
+            for (role, parts, hash) in &rows[kept..] {
+                tx.execute(
+                    "INSERT INTO messages (session_id, role, parts_json, content_hash, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5);",
+                    params![id_str, role, parts, hash, now],
+                )?;
+                // Keep every message ever stored, so compaction never loses the original history.
+                tx.execute(
+                    "INSERT OR IGNORE INTO messages_audit
+                        (session_id, role, parts_json, content_hash, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5);",
+                    params![id_str, role, parts, hash, now],
+                )?;
+            }
+
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .context("save_session task failed")?
     }
 
     pub async fn archive_session_messages(
@@ -369,12 +461,14 @@ impl SqliteSessionStore {
         for msg in messages {
             let role_str = serde_json::to_string(&msg.role)?;
             let parts_json = serde_json::to_string(&msg.parts)?;
+            let hash = content_hash(&role_str, &parts_json);
             let now = Utc::now().to_rfc3339();
 
             let _ = conn.execute(
-                "INSERT OR IGNORE INTO messages_audit (session_id, role, parts_json, created_at)
-                 VALUES (?1, ?2, ?3, ?4);",
-                params![id_str, role_str, parts_json, now],
+                "INSERT OR IGNORE INTO messages_audit
+                    (session_id, role, parts_json, content_hash, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5);",
+                params![id_str, role_str, parts_json, hash, now],
             );
         }
         Ok(())
@@ -1081,6 +1175,86 @@ mod tests {
             audit_after[1].text_content(),
             "Turn 1 assistant response with 500 lines of build output"
         );
+    }
+
+    #[tokio::test]
+    async fn save_session_appends_only_new_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(dir.path().join("db.sqlite")).unwrap();
+        let mut session = Session::new(dir.path());
+        session.add_message(Message::user("first"));
+        session.add_message(Message::assistant_text("reply"));
+        store.save_session(&session, "p", "m").await.unwrap();
+
+        let rows = |store: SqliteSessionStore, id: String| async move {
+            let conn = store.conn.lock().await;
+            let mut stmt = conn
+                .prepare("SELECT id, created_at FROM messages WHERE session_id = ?1 ORDER BY id")
+                .unwrap();
+            let mapped = stmt
+                .query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap();
+            mapped
+                .collect::<rusqlite::Result<Vec<(i64, String)>>>()
+                .unwrap()
+        };
+        let before = rows(store.clone(), session.id.to_string()).await;
+
+        session.add_message(Message::user("second"));
+        store.save_session(&session, "p", "m").await.unwrap();
+        let after = rows(store.clone(), session.id.to_string()).await;
+
+        assert_eq!(after.len(), 3);
+        assert_eq!(
+            after[..2],
+            before[..],
+            "unchanged rows must not be rewritten"
+        );
+        let loaded = store.load_session(session.id).await.unwrap().unwrap();
+        assert_eq!(loaded.messages[2].text_content(), "second");
+
+        // A rewritten history (e.g. after compaction) replaces the rows from the first change.
+        session.messages[1] = Message::assistant_text("edited");
+        session.messages.truncate(2);
+        store.save_session(&session, "p", "m").await.unwrap();
+        let loaded = store.load_session(session.id).await.unwrap().unwrap();
+        let texts: Vec<_> = loaded.messages.iter().map(|m| m.text_content()).collect();
+        assert_eq!(texts, ["first", "edited"]);
+        let rewritten = rows(store.clone(), session.id.to_string()).await;
+        assert_eq!(rewritten[0], before[0]);
+    }
+
+    #[test]
+    fn old_audit_table_is_rebuilt_with_content_hashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE messages_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    parts_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(session_id, parts_json)
+                );
+                INSERT INTO messages_audit (session_id, role, parts_json, created_at)
+                    VALUES ('s', '\"user\"', '[]', 't');",
+            )
+            .unwrap();
+        }
+        let store = SqliteSessionStore::new(&path).unwrap();
+        let conn = store.conn.blocking_lock();
+        let (count, hash): (i64, String) = conn
+            .query_row(
+                "SELECT COUNT(*), MAX(content_hash) FROM messages_audit",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(hash, content_hash("\"user\"", "[]"));
     }
 
     #[tokio::test]

@@ -20,7 +20,7 @@ impl ChatGptClient {
     pub fn new(auth: ChatGptAuth) -> Self {
         Self {
             auth,
-            http: reqwest::Client::new(),
+            http: maukode_llm::http_client(),
             responses_url: "https://api.openai.com/v1/responses".into(),
         }
     }
@@ -34,7 +34,7 @@ impl ChatGptClient {
 
 fn build_body(request: &LLMRequest) -> Value {
     let mut input = Vec::new();
-    let mut instructions = request.system_prompt.clone().unwrap_or_default();
+    let mut instructions = request.full_system_prompt().unwrap_or_default();
     for message in &request.messages {
         for part in &message.parts {
             if let ContentPart::ProviderItem { value } = part {

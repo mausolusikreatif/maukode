@@ -175,7 +175,7 @@ impl OpenAIClient {
         Self {
             api_key: api_key.into(),
             base_url: "https://api.openai.com".to_string(),
-            http: reqwest::Client::new(),
+            http: crate::http_client(),
         }
     }
 
@@ -219,7 +219,7 @@ impl LLMClient for OpenAIClient {
     async fn stream(&self, request: LLMRequest) -> Result<LLMStream, LLMError> {
         let mut messages = Vec::new();
 
-        if let Some(ref sys) = request.system_prompt {
+        if let Some(sys) = request.full_system_prompt() {
             messages.push(json!({
                 "role": "system",
                 "content": sys

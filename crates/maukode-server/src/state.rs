@@ -1,7 +1,9 @@
 use crate::activity::SessionActivity;
 use anyhow::Result;
-use maukode_core::CheckpointManager;
-use maukode_core::{AppConfig, PermissionManager, Session, SqliteSessionStore};
+use maukode_core::{
+    AppConfig, CheckpointManager, ContextManager, MemoryBinding, PermissionManager, Session,
+    SqliteSessionStore,
+};
 use maukode_protocol::{GlobalEvent, LLMEvent, PermissionRequest, SessionId, SessionState};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -9,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tokio_util::sync::CancellationToken;
+
+/// A workspace's context manager and, when the memory store opened, its knowledge binding.
+pub type ProjectContext = (Arc<ContextManager>, Option<MemoryBinding>);
 
 pub struct PreviewProcess {
     pub child: tokio::process::Child,
@@ -153,6 +158,9 @@ pub struct ServerState {
     pub permission_manager: Arc<PermissionManager>,
     /// One shadow-git manager per workspace root (worktree sessions each have their own).
     pub checkpoint_managers: Arc<RwLock<HashMap<PathBuf, Arc<CheckpointManager>>>>,
+    /// Context manager and knowledge store per workspace root, kept across turns so the repo map
+    /// is not parsed again and the memory database not reopened for every prompt.
+    pub project_contexts: Arc<RwLock<HashMap<PathBuf, ProjectContext>>>,
     /// Cross-session activity feed for dashboards.
     pub global_events: Arc<EventChannel<GlobalEvent>>,
     pub mcp_manager: Arc<maukode_core::McpManager>,
@@ -205,6 +213,7 @@ impl ServerState {
             queued_prompts: Arc::new(RwLock::new(HashMap::new())),
             permission_manager,
             checkpoint_managers: Arc::new(RwLock::new(HashMap::new())),
+            project_contexts: Arc::new(RwLock::new(HashMap::new())),
             global_events: Arc::new(EventChannel::new()),
             mcp_manager,
             skill_manager,
@@ -442,6 +451,25 @@ impl ServerState {
         let manager = Arc::new(CheckpointManager::new(&key).await?);
         managers.insert(key, Arc::clone(&manager));
         Ok(manager)
+    }
+
+    /// The cached context for the workspace a session runs in (see `project_contexts`). A
+    /// workspace whose memory store could not be opened is not cached, so it is retried.
+    pub async fn project_context_for(&self, dir: &Path) -> ProjectContext {
+        let key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        if let Some(entry) = self.project_contexts.read().await.get(&key) {
+            return entry.clone();
+        }
+        let mut contexts = self.project_contexts.write().await;
+        if let Some(entry) = contexts.get(&key) {
+            return entry.clone();
+        }
+        let (context, memory) = maukode_core::project_context(dir);
+        let entry = (Arc::new(context), memory);
+        if entry.1.is_some() {
+            contexts.insert(key, entry.clone());
+        }
+        entry
     }
 
     pub async fn pending_permissions_for(&self, id: SessionId) -> Vec<PermissionRequest> {

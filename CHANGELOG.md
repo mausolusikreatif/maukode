@@ -7,6 +7,35 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Performance
+
+- **Prompt caching benar-benar terpakai**: urutan definisi tool kini tetap (diurutkan menurut nama),
+  waktu saat ini tidak lagi ada di awal system prompt (cukup tanggal, di bagian akhir bersama memori
+  yang di-recall), dan adapter Anthropic memasang `cache_control` di tool terakhir, system prompt
+  yang stabil, dan pesan terakhir. Dalam satu turn, setiap langkah membaca request sebelumnya dari
+  cache.
+- **Kerja per prompt berkurang**: daemon menyimpan `ContextManager` (beserta cache parse repo map) dan
+  memory store per workspace antar-turn, sehingga repo tidak di-parse ulang setiap prompt. Daftar
+  tool MCP diambil sekali per koneksi.
+- **`save_session` hanya menulis pesan yang berubah** (dibandingkan lewat hash isi), di thread
+  blocking, dan `created_at` pesan lama tidak lagi di-reset. `messages_audit` kini diindeks dengan
+  hash isi, bukan teks lengkap; database lama dimigrasikan otomatis saat dibuka.
+- **Tool read-only berjalan paralel**: bila semua tool call dalam satu langkah hanya membaca
+  (`read_file`, `grep`, `glob`, `web_search`, …), semuanya dijalankan bersamaan.
+- **`grep` tidak lagi memblokir runtime**, menghormati `.gitignore`, melewati file biner dan file di
+  atas 1 MB, dan menampilkan path relatif terhadap workspace.
+- **`read_file` tanpa `end_line` mengembalikan paling banyak 2000 baris** (dan 2000 karakter per
+  baris), dengan petunjuk cara membaca sisanya.
+
+### Fixed
+
+- **Stream LLM yang macet tidak lagi menggantung turn**: semua client LLM punya connect timeout 30
+  detik dan read timeout 300 detik; stream yang diam terlalu lama dicoba ulang.
+- **Adapter Anthropic**: event `error` di tengah stream (misalnya `overloaded_error`) kini menjadi
+  error (dan dicoba ulang bila sementara) alih-alih dianggap selesai; JSON argumen tool yang rusak
+  menjadi error alih-alih `{}`; pemakaian token (termasuk cache read/write) dilaporkan lewat event
+  `Usage`.
+
 ### Security
 
 - **Whitelist bash tidak bisa lagi ditumpangi perintah lain**: entri `bash_whitelist` dulu dicocokkan
