@@ -537,9 +537,15 @@ for line in sys.stdin:
         };
 
         // The ping was answered before the first listing.
-        assert_eq!(names(client.list_tools().await.unwrap()), ["tool0", "pinged"]);
+        assert_eq!(
+            names(client.list_tools().await.unwrap()),
+            ["tool0", "pinged"]
+        );
         // No change reported: served from the cache, not listed again.
-        assert_eq!(names(client.list_tools().await.unwrap()), ["tool0", "pinged"]);
+        assert_eq!(
+            names(client.list_tools().await.unwrap()),
+            ["tool0", "pinged"]
+        );
 
         client
             .call_tool("tool0", serde_json::json!({}))

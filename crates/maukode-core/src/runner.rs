@@ -496,10 +496,9 @@ impl SessionRunner {
                                     finish_reason = reason.clone();
                                 }
                                 LLMEvent::Usage(usage) => {
-                                    step_tokens = usize::try_from(
-                                        usage.input_tokens + usage.output_tokens,
-                                    )
-                                    .ok();
+                                    step_tokens =
+                                        usize::try_from(usage.input_tokens + usage.output_tokens)
+                                            .ok();
                                 }
                                 _ => {}
                             }
@@ -1414,7 +1413,11 @@ mod turn_tests {
                 }),
             ])
         };
-        let script = vec![call("1", 1), call("2", 2), text("done", FinishReason::EndTurn)];
+        let script = vec![
+            call("1", 1),
+            call("2", 2),
+            text("done", FinishReason::EndTurn),
+        ];
         let dir = std::env::temp_dir();
         let session = Arc::new(RwLock::new(Session::new(&dir)));
         let mut tools = ToolRegistry::new();

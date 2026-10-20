@@ -346,7 +346,10 @@ async fn a_daemon_saving_its_config_keeps_projects_trusted_while_it_ran() {
     // `maukode trust` runs in another process while the daemon is up.
     let project = tempfile::tempdir().unwrap();
     let mut cli_config = maukode_core::AppConfig::load();
-    cli_config.security.trusted_projects.push(project.path().to_path_buf());
+    cli_config
+        .security
+        .trusted_projects
+        .push(project.path().to_path_buf());
     cli_config.save_trusted_projects().unwrap();
 
     // The daemon then saves its older in-memory configuration.
@@ -358,7 +361,9 @@ async fn a_daemon_saving_its_config_keeps_projects_trusted_while_it_ran() {
         )
         .await;
     assert_eq!(s, 200);
-    assert!(maukode_core::AppConfig::is_trusted_project_on_disk(project.path()));
+    assert!(maukode_core::AppConfig::is_trusted_project_on_disk(
+        project.path()
+    ));
 
     // Revoking works the same way.
     cli_config.security.trusted_projects.clear();
@@ -369,5 +374,7 @@ async fn a_daemon_saving_its_config_keeps_projects_trusted_while_it_ran() {
         Some(json!({ "permission_mode": "ask" })),
     )
     .await;
-    assert!(!maukode_core::AppConfig::is_trusted_project_on_disk(project.path()));
+    assert!(!maukode_core::AppConfig::is_trusted_project_on_disk(
+        project.path()
+    ));
 }

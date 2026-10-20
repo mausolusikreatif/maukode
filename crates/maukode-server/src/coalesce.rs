@@ -14,7 +14,9 @@ pub const DELTA_WINDOW: Duration = Duration::from_millis(50);
 fn is_delta(event: &LLMEvent) -> bool {
     matches!(
         event,
-        LLMEvent::TextDelta { .. } | LLMEvent::ReasoningDelta { .. } | LLMEvent::ToolCallDelta { .. }
+        LLMEvent::TextDelta { .. }
+            | LLMEvent::ReasoningDelta { .. }
+            | LLMEvent::ToolCallDelta { .. }
     )
 }
 

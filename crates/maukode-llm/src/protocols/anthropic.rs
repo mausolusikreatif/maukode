@@ -363,14 +363,20 @@ mod tests {
     fn turn_context_follows_the_system_prompt_without_a_trailing_user_message() {
         let request = LLMRequest::new(
             "model",
-            vec![Message::user("question"), Message::assistant_text("Partial")],
+            vec![
+                Message::user("question"),
+                Message::assistant_text("Partial"),
+            ],
         )
         .with_system_prompt("stable")
         .with_system_suffix("today");
         let body = build_body(&request);
 
         assert_eq!(body["system"][1]["text"], "today");
-        assert_eq!(body["messages"][1]["content"].as_array().map(Vec::len), Some(1));
+        assert_eq!(
+            body["messages"][1]["content"].as_array().map(Vec::len),
+            Some(1)
+        );
         assert_eq!(
             body["messages"][1]["content"][0]["cache_control"]["type"],
             "ephemeral"

@@ -771,7 +771,9 @@ pub fn html_to_clean_markdown(html: &str, url: &str) -> String {
 
 /// Helper to strip HTML tags while leaving inner text
 fn strip_html_tags(input: &str) -> String {
-    static_regex!(r"<[^>]+>").replace_all(input, " ").to_string()
+    static_regex!(r"<[^>]+>")
+        .replace_all(input, " ")
+        .to_string()
 }
 
 /// Helper to decode HTML entities
