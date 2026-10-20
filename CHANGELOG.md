@@ -29,6 +29,22 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   - Batasan: server MCP tetap berjalan di host; CLI/TUI belum memakai backend ini; pengaturan
     berlaku untuk semua sesi sekaligus.
 
+### Changed
+
+- **Dokumentasi dirapikan agar sesuai kode**: README ditulis ulang (crate `maukode-memory`, web UI,
+  memori, subagen, backend eksekusi lawang, daftar tool dan slash command lengkap, penjelasan
+  keamanan yang jujur: path jail hanya untuk tool file, bukan sandbox untuk `bash`).
+  - Status fitur kini hanya ada di `docs/ROADMAP.md`, termasuk backlog hasil audit kode
+    (performa, keandalan, keamanan, fitur). `docs/ROADMAP_AUDIT.md` dihapus.
+  - `docs/DESKTOP_ROADMAP.md` menjadi `docs/WEB_UI_ROADMAP.md`, tanpa sisa Tauri.
+  - `docs/CONFIGURATION.md` mengikuti skema asli (`providers` berupa list dengan `kind`, blok
+    `agent` dan `execution`; blok `compaction` yang tidak pernah ada dihapus).
+  - `docs/ARCHITECTURE.md`, `docs/TUI_ROADMAP.md`, `docs/CI_TEST_PLAN.md`, dan
+    `apps/desktop/README.md` diperbarui; skill rilis di `.maukode/skills/learned/` tidak lagi
+    menyuruh mengubah file Tauri.
+  - `AGENTS.md` mencatat aturan bahasa dokumentasi dan bahwa status fitur dicatat di
+    `docs/ROADMAP.md`.
+
 ## [0.4.0] - 2026-10-15
 
 Minor release. Default langkah agent 50 → 2000, perbaikan pengiriman CLI `--max-steps`, dan retry stream llm-kita.

@@ -53,8 +53,10 @@ refused. Deleting a worktree session offers to keep (default) or discard its bra
   (output/step limit or error), *running*, *recent*. The window title shows `(N) MauKode` while
   N sessions wait for approval.
 - **Notifications** (Settings → General) are sent for approvals and finished turns of sessions you
-  are not currently looking at. Cancelling a turn never notifies. In the Tauri shell the webview's
-  Notification API may need `tauri-plugin-notification`; not wired yet.
-- **Settings**: default approval mode and agent limits (persisted by the daemon), providers
-  (keys are write-only), ChatGPT sign-in, and read-only views of MCP servers and security.
+  are not currently looking at. Cancelling a turn never notifies. Browsers only allow notifications
+  on a secure origin (`https://` or `localhost`/`127.0.0.1`).
+- **Settings** (persisted by the daemon): approval mode, sandbox mode and execution backend
+  (host or lawang cell), agent limits, reflection and memory consolidation, providers (keys are
+  write-only), ChatGPT sign-in, plugin toggles, read-only lists of MCP servers and skills, and the
+  theme.
 - **Audit** (session header) shows approval decisions, mode changes and compactions.

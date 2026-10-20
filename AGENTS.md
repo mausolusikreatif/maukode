@@ -47,7 +47,20 @@ cargo fmt --all
 - **Clippy**: Ensure code passes `cargo clippy --all-targets` without warnings (verified in CI).
 
 ## Key Directories
-- `crates/`: Core project components
+- `crates/`: Core project components (Rust workspace members)
+- `apps/desktop/`: Web UI (React + TypeScript), served by the daemon; there is no desktop shell
+- `docs/`: Architecture, configuration, API, and roadmap documents
+- `packaging/linux/`: Release tarball installer
+
+## Documentation
+- **Language**: `README.md`, `docs/`, code comments, and commit messages are written in English.
+  `CHANGELOG.md` entries are written in Indonesian. The web UI's user-facing strings are Indonesian.
+- **Feature status** lives only in `docs/ROADMAP.md` (**done** / **partial** / **backend only** /
+  **planned**, with a file, route, or symbol as evidence). When a PR ships, changes, or removes a
+  feature, update its row in the same PR. `docs/WEB_UI_ROADMAP.md` and `docs/TUI_ROADMAP.md`
+  describe direction and design; do not add status tracking there.
+- **Accuracy over marketing**: describe what the code does. In particular, do not describe the
+  path jail as a sandbox for `bash`.
 
 ## Agent Guidelines
 - **Strictly No Local Builds or Tests**: NEVER run `cargo test`, `cargo build`, `cargo clippy`, `cargo check`, `npm test`, or any test runners/compilers locally. Always rely on GitHub CI for build, lint, and test execution.

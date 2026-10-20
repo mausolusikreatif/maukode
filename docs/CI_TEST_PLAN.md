@@ -1,38 +1,61 @@
 # CI test plan
 
-## Current baseline (2026-10-03)
+All builds and tests run in GitHub CI (`.github/workflows/ci.yml`); agents must not run them
+locally (see `AGENTS.md`).
 
-The `Rust CI` workflow runs `cargo test --workspace --locked` and Clippy on
-`ubuntu-latest` for every push and pull request. All 56 current tests pass:
+## Current baseline (2026-10-20)
 
-| Crate | Tests | Current coverage |
+The `Rust CI` workflow runs on a self-hosted runner (`[self-hosted, rekarta]`) for every push to
+`master` and every pull request:
+
+1. `cargo fmt --all --check`
+2. `cargo test --workspace --locked`
+3. TypeScript bindings check: `export_bindings` tests with the `ts` features, then a check that
+   `apps/desktop/src/api/generated` has no diff.
+4. `cargo clippy --all-targets --all-features -- -D warnings`
+
+The web UI job (`npm ci`, `npm run typecheck`, `npm test` in `apps/desktop`) only runs on a manual
+`workflow_dispatch` with `run_desktop` enabled. `linux-build.yml` builds the release tarball on
+`v*` tags and `claude/**` branches.
+
+Test functions per crate (counted from `#[test]`/`#[tokio::test]` attributes):
+
+| Crate | Tests | Main coverage |
 | --- | ---: | --- |
-| `maukode-core` | 30 | Compaction, memory discovery, repository map parsing, MCP mock handshake, checkpoint and audit retention, local OAuth callback/token/JWKS/refresh/logout fixtures and credential locking, Responses SSE errors and tool replay |
-| `maukode-tools` | 10 | Command risk classification, basic path jail, registry aliases and unknown names, HTML parsing |
-| `maukode-server` | 3 | Health/auth and session creation, unknown permission reply, selected read endpoints |
-| `maukode-tui` | 9 | Chat wrap/scroll, input and dialog wrap, event-to-render path, tool-call completion, streaming smoke budget |
-| `maukode-llm` | 4 | OpenAI-compatible fragmented names/arguments, multiple calls, invalid arguments, local SSE fixture |
+| `maukode-core` | 80 | Runner turns with a scripted LLM, compaction, repo map, MCP handshake, checkpoints, ChatGPT auth fixtures, SQLite store |
+| `maukode-tools` | 41 | Bash risk classification, path jail, registry, web parsing, exec backends (`tests/lawang_e2e.rs`) |
+| `maukode-server` | 40 | Auth, sessions, SSE, settings, preview, exec backend (`tests/`) |
+| `maukode-memory` | 23 | Knowledge store, links, consolidation |
+| `maukode-tui` | 20 | Chat wrap/scroll, dialogs, event-to-render path, streaming smoke budget |
+| `maukode-llm` | 10 | OpenAI-compatible SSE fragments, multiple tool calls, EOF after finish, `stream_options` retry |
 | `maukode-protocol`, `maukode-cli` | 0 | No direct tests |
 
-The server tests bind ephemeral loopback ports before starting the router, so
-they do not depend on fixed ports or startup sleeps. `ServerState` and the TUI
-construct config/database paths from the user's XDG directories. Tests should
-isolate these paths to avoid shared state. No test should require a live LLM
-account.
+The web UI has unit tests for the SSE parser, thread reducer, session filters, diff parser,
+notifications, and composer context (`*.test.ts`).
 
-The audit found preexisting formatting drift in
-`crates/maukode-core/src/compaction/estimator.rs` and
-`crates/maukode-core/src/store/sqlite.rs`. The companion tool-call fix formats
-those files so `cargo fmt --all --check` can become a required CI check.
+No test may require a live LLM account or the public internet. Server tests bind ephemeral loopback
+ports and isolate config and data with `MAUKODE_HOME`.
 
-Code review also found three concrete cases to capture in tests. The
-OpenAI-compatible adapter previously took only the first item after collecting
-tool results; the companion fix now emits all of them and tests fragmented
-tool names and arguments. SQLite builds
-a generated title with a byte slice (`&text[..40]`), which can panic when the
-boundary cuts a multibyte character. The Anthropic adapter accumulates usage
-but does not appear to emit an `LLMEvent::Usage`. These are code-level findings,
-not failures reproduced by the current suite.
+### TUI tests
+
+The TUI tests use Ratatui's in-memory `TestBackend` and deterministic chat chunks; they need no
+terminal, API key, LLM, or fake HTTP server. They cover word wrapping in chat, the multi-row input
+and dialogs, top and bottom of a 2,000-message scrollback, and burst streaming (4,000 chunks with
+40 redraws). An end-to-end TUI test sends keyboard and LLM events through the app, then inspects a
+full virtual terminal at narrow and wide sizes, including permission-command scrolling and provider
+URL entry. Generous time limits in the stream tests catch severe regressions; use a dedicated
+benchmark runner for precise latency comparisons.
+
+The viewport uses Ratatui's own wrapped-line count to calculate scroll limits. The `Paragraph`
+scroll API takes a `u16` row offset, so histories beyond 65,535 visual rows need a separate
+windowing implementation to reach the newest rows reliably.
+
+### Known gaps found by code review
+
+- The Anthropic adapter accumulates usage but does not emit `LLMEvent::Usage`, and it has no SSE
+  fixture tests.
+- Bash approval bypasses (`bash -c`, prefix-matched `bash_whitelist`) have no tests; see the
+  security backlog in [ROADMAP.md](./ROADMAP.md).
 
 ## P0: required before merging behavior changes
 
@@ -60,7 +83,7 @@ not failures reproduced by the current suite.
 
 ## CI execution policy
 
-1. **Every PR:** formatting check (after current formatting is fixed), `cargo test --workspace --locked`, `cargo clippy --all-targets --all-features -- -D warnings`, and a locked workspace build. Tests above use fake clients, fixture HTTP/SSE servers, `TestBackend`, and temporary directories.
+1. **Every PR:** formatting check, `cargo test --workspace --locked`, `cargo clippy --all-targets --all-features -- -D warnings`, and a locked workspace build. Tests above use fake clients, fixture HTTP/SSE servers, `TestBackend`, and temporary directories.
 2. **Scheduled or release CI:** a platform matrix for Linux/macOS/Windows where supported, the documented minimum Rust version, and larger TUI/stream/SQLite performance workloads. Use dedicated, stable benchmark hardware for tight latency limits; the current wall-clock TUI smoke limit is only a regression guard.
 3. **Manual opt-in:** live-provider contract smoke tests with secrets. Do not make external API availability, quotas, or public websites a PR gate.
 
