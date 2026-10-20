@@ -1,8 +1,8 @@
 # Terminal UI (TUI) Roadmap & Subagent Experience 🖥️
 
-> Implementation status was last audited on October 7, 2026 in
-> [ROADMAP_AUDIT.md](./ROADMAP_AUDIT.md). In particular, M1, M4, and M5 are implemented even though
-> the milestone table below is retained as the original execution plan.
+> **Implementation status is tracked in [ROADMAP.md](./ROADMAP.md).** This document describes the
+> direction and interaction design of the TUI; the short status labels below are kept in sync with
+> that file.
 
 This document details the roadmap and implementation phases for **MauKode TUI** (`crates/maukode-tui`), our terminal-native, keyboard-first developer interface built with [Ratatui](https://ratatui.rs) and [crossterm](https://github.com/crossterm-rs/crossterm).
 
@@ -14,7 +14,9 @@ MauKode TUI is a first-class client in the MauKode workspace, built for develope
 
 ### Core Principles
 
-- **0% Idle CPU & Zero Flicker**: Non-blocking asynchronous event loop (`tokio::sync::mpsc`) and intelligent differential rendering. Redraws occur exclusively when events arrive.
+- **Near-Idle CPU & Zero Flicker**: Non-blocking asynchronous event loop (`tokio::sync::mpsc`) and
+  differential rendering. While idle, the input thread polls every 100 ms and a 50 ms tick runs,
+  but the screen is only redrawn when an event changes something or a turn is running.
 - **High-Density Keyboard Ergonomics**: Every action is reachable via single-key hotkeys, vim-style navigation, or Telescope-style floating search modals.
 - **Client-Server Transparency**: Connects seamlessly to the local background daemon (`http://127.0.0.1:4096`) or remote VPS instances with bearer token authentication.
 - **Subagent & Plan Clarity**: Complex multi-step reasoning, plans, and subagent traces are rendered compactly with clean disclosure controls, avoiding terminal scrollback pollution.
@@ -32,14 +34,14 @@ The current TUI implementation in `crates/maukode-tui` provides:
 - **Markdown & Code Highlighting**: Syntax-highlighted code fences, inline code styles, and list
   formatting (`markdown.rs`).
 - **Interactive Modals**: `/model`, `/provider`, `/sessions`, `/diff`, `/map`, `/mcp`, `/audit`,
-  `/plan`, `/subagents`, and permission decisions for high-risk actions (`[a]` allow once, `[s]` allow
-  session, `[p]` run privately, `[d]` deny) are implemented.
+  `/plan`, `/subagents`, and permission decisions (`[y]`/Enter allow once, `[a]` allow for the
+  session, `[p]` run privately, `[n]`/Esc deny) are implemented.
 - **Structured plans and subagents**: plan steps, in-stream subagent cards, and the child trace
   inspector are shipped; concurrent switching and split-pane layout remain planned.
 - **Daemon integration**: resumable session events, checkpoints/undo, worktree review, provider/model
   selection, MCP status, and session audit are available.
 
-The TUI does not yet provide desktop parity for steering/queueing, pin/archive session organization,
+The TUI does not yet provide web UI parity for steering/queueing, pin/archive session organization,
 or `@file`/`#symbol` context autocomplete. Phase 2 and Phase 3 status is tracked below rather than
 calling all daemon capabilities "integrated".
 
@@ -48,9 +50,9 @@ calling all daemon capabilities "integrated".
 ## 3. Phase 2: Daemon Feature Parity
 
 Recent updates to `maukode-protocol` and `maukode-server` introduced powerful capabilities that are
-integrated at different levels. Status below distinguishes the daemon, the desktop client, and the
-TUI, because a backend endpoint is not yet a terminal feature. See
-[ROADMAP_AUDIT.md](./ROADMAP_AUDIT.md) for the evidence behind each label.
+integrated at different levels. Status below distinguishes the daemon, the web UI, and the TUI,
+because a backend endpoint is not yet a terminal feature. See [ROADMAP.md](./ROADMAP.md) for the
+evidence behind each label.
 
 ### Track 2.1: Live Plan Timeline Widget — **done in TUI**
 
@@ -73,9 +75,9 @@ TUI, because a backend endpoint is not yet a terminal feature. See
 - **Remaining work**: a dedicated side-panel layout on wide viewports and additional headless
   `TestBackend` coverage for failed-step and multi-plan transitions.
 
-### Track 2.2: Mid-Turn Steering & Prompt Queuing — **desktop done, TUI planned**
+### Track 2.2: Mid-Turn Steering & Prompt Queuing — **web UI done, TUI planned**
 
-The daemon exposes `/api/v1/sessions/{id}/steer` and queueing routes, and the desktop composer already
+The daemon exposes `/api/v1/sessions/{id}/steer` and queueing routes, and the web UI composer already
 uses them. The TUI, however, still rejects submission while `App::is_running` is true, so this track
 is unfinished terminal work, not a shipped feature. Planned TUI affordances:
 
@@ -88,13 +90,13 @@ is unfinished terminal work, not a shipped feature. Planned TUI affordances:
 
 `ActiveModal::SessionSelector` currently provides a filtered session list for switching. It does not
 yet implement the proposed `p`/`a` hotkeys, status filter chip cycling, or pinned/archived badges.
-Desktop clients have related organization behavior, but its pin/archive state is currently persisted
+The web UI has related organization behavior, but its pin state is currently persisted
 in client `localStorage`; the TUI must not treat that as shared daemon state.
 
-### Track 2.4: Inline Context Autocomplete (`@file`, `#symbol`) — **desktop done, TUI planned**
+### Track 2.4: Inline Context Autocomplete (`@file`, `#symbol`) — **web UI done, TUI planned**
 
-The desktop composer has file, folder, and symbol suggestions with context chips. There is no
-equivalent `@`/`#` popup picker or prompt-buffer injection in `crates/maukode-tui`.
+The web UI composer has `@` suggestions for files, folders, symbols, and changes, with context
+chips. There is no equivalent `@`/`#` popup picker or prompt-buffer injection in `crates/maukode-tui`.
 
 ---
 
@@ -154,8 +156,8 @@ subagent panes. Preserve the proposed 60/40 layout as a future interaction desig
 | Milestone | Deliverables | Verification |
 | :--- | :--- | :--- |
 | **M1: Plan Widget & Events** | **Done** — `PlanCreated`/`PlanStepUpdated` consumer, `/plan`, F2, and widget rendering | Add more `TestBackend` coverage for failed and repeated plans |
-| **M2: Steering & Queueing** | **Backend/desktop only** — no TUI handlers or badge | Terminal key/event integration tests |
+| **M2: Steering & Queueing** | **Backend/web UI only** — no TUI handlers or badge | Terminal key/event integration tests |
 | **M3: Session Explorer Modal** | **Basic only** — filtered TUI selector; no pin/archive/filter chips | Modal hotkey and state integration tests |
 | **M4: Subagent Stream Widgets** | **Done** — cards and `Subagent*` event reduction/rendering | Expand SSE simulation coverage and cancellation UX |
 | **M5: Subagent Trace Modal** | **Done** — `ActiveModal::SubagentViewer`, scrolling, and virtual-terminal coverage | Add concurrent-child switching |
-| **M6: Context Autocomplete** | **Desktop only** — TUI picker/insertion flow is absent | Fuzzy completion snapshot tests |
+| **M6: Context Autocomplete** | **Web UI only** — TUI picker/insertion flow is absent | Fuzzy completion snapshot tests |
