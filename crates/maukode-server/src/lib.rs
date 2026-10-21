@@ -94,7 +94,9 @@ pub fn discover_web_dir() -> Option<PathBuf> {
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")));
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"))
+        });
     if let Some(data_home) = data_home {
         let candidate = data_home.join("maukode").join("web");
         if is_web_dir(&candidate) {
