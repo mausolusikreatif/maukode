@@ -96,8 +96,14 @@ maukode/
 
 ### From a release (Linux x86_64)
 
-Download the tarball from the GitHub release, extract it, and run `./install.sh`. It installs the
-daemon and the web UI into `~/.local` (`./install.sh --uninstall` removes them). See
+```bash
+curl -fsSL https://raw.githubusercontent.com/mausolusikreatif/maukode/master/install.sh | bash
+```
+
+This downloads the latest release, verifies its sha256, and installs the daemon and the web UI into
+`~/.local` (`--version vX.Y.Z` picks a release, `bash -s -- --uninstall` removes it). Then run
+`maukode server --token <token>`; the web UI is served from the same address. To install by hand,
+download the tarball from the GitHub release, extract it, and run `./install.sh`. See
 `packaging/linux/README.txt`.
 
 ### From source

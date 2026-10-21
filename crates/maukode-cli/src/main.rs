@@ -429,10 +429,15 @@ async fn main() -> anyhow::Result<()> {
                     "  Default workspace: \x1b[2m{}\x1b[0m",
                     workspace_dir.display()
                 );
-                if web_dir.is_some() {
-                    println!("  Web UI: \x1b[1;34mEnabled\x1b[0m — accessible at the server URL in any browser");
-                } else {
-                    println!("  Web UI: \x1b[2mAuto-detect\x1b[0m (will serve apps/desktop/dist/ if found)");
+                let web_dir = web_dir.or_else(maukode_server::discover_web_dir);
+                match &web_dir {
+                    Some(dir) => println!(
+                        "  Web UI: \x1b[1;34mEnabled\x1b[0m — serving {}",
+                        dir.display()
+                    ),
+                    None => println!(
+                        "  Web UI: \x1b[2mNot found\x1b[0m (pass --web-dir or set MAUKODE_WEB_DIR)"
+                    ),
                 }
                 if let Some(ref t) = token {
                     let display_addr = if bind_addr.ip().is_unspecified() {

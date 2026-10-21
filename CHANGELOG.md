@@ -7,6 +7,21 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **Web UI aktif setelah `install.sh`**: daemon kini mencari web UI juga di
+  `<prefix>/share/maukode/web` dan `~/.local/share/maukode/web`, sehingga `maukode server` langsung
+  menyajikannya tanpa `--web-dir`. Pesan startup menampilkan folder yang dipakai, atau memberi tahu
+  bila tidak ditemukan.
+- **Versi binary mengikuti rilis**: versi workspace dinaikkan ke 0.5.0, dan workflow rilis gagal bila
+  tag `v*` tidak sama dengan versi di `Cargo.toml`.
+
+### Added
+
+- **Installer satu baris**: `curl -fsSL https://raw.githubusercontent.com/mausolusikreatif/maukode/master/install.sh | bash`
+  mengunduh rilis terbaru (atau `--version vX.Y.Z`), memverifikasi sha256, lalu memasangnya ke
+  `~/.local`. `--uninstall` menghapusnya.
+
 ### Performance
 
 - **Prompt caching benar-benar terpakai**: urutan definisi tool kini tetap (diurutkan menurut nama),
