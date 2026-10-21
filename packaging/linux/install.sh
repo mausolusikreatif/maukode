@@ -15,4 +15,6 @@ install -Dm755 "$here/maukode" "$prefix/bin/maukode"
 rm -rf "$web"; mkdir -p "$web"; cp -r "$here/web/." "$web/"
 
 echo "installed to $prefix (make sure $prefix/bin is in PATH)"
-echo "serve the web UI: maukode server --bind 127.0.0.1:4096 --token <token> --web-dir $web"
+echo "start the server (the web UI is served automatically):"
+echo "  maukode server --bind 127.0.0.1:4096 --token <token>"
+echo "then open http://127.0.0.1:4096#token=<token>"

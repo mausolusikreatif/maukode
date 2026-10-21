@@ -53,9 +53,10 @@ fn check_bind_auth(bind_addr: SocketAddr, token: Option<&str>) -> Result<()> {
 }
 
 /// Auto-discover the pre-built web UI directory (`apps/desktop/dist/`) relative to common starting
-/// points: the current working directory, the server binary's location, and the default workspace
-/// directory. Returns `None` if no `index.html` is found.
-fn discover_web_dir() -> Option<PathBuf> {
+/// points: the current working directory, the server binary's location (including the
+/// `install.sh` layout, `<prefix>/share/maukode/web`), and the user data directory. Returns `None`
+/// if no `index.html` is found.
+pub fn discover_web_dir() -> Option<PathBuf> {
     /// Check if `dir` looks like a web build (has `index.html`).
     fn is_web_dir(dir: &Path) -> bool {
         dir.join("index.html").is_file()
@@ -79,12 +80,25 @@ fn discover_web_dir() -> Option<PathBuf> {
             for candidate in [
                 bin_dir.join("web"),
                 bin_dir.join("..").join("web"),
+                bin_dir.join("..").join("share").join("maukode").join("web"),
                 bin_dir.join("apps").join("desktop").join("dist"),
             ] {
                 if is_web_dir(&candidate) {
                     return Some(candidate);
                 }
             }
+        }
+    }
+
+    // 3. User data directory (`~/.local/share/maukode/web`, the default `install.sh` prefix)
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")));
+    if let Some(data_home) = data_home {
+        let candidate = data_home.join("maukode").join("web");
+        if is_web_dir(&candidate) {
+            return Some(candidate);
         }
     }
 
