@@ -16,12 +16,12 @@ on:
 
 jobs:
   linux:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
       contents: write    # needed by gh release create/upload
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: actions/checkout@v4
       - name: Check tag matches Cargo.toml version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |

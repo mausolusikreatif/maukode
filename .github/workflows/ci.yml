@@ -14,21 +14,20 @@ on:
 
 jobs:
   test:
-    runs-on: [self-hosted, rekarta]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      # The self-hosted runner already has Rust stable with rustfmt and clippy. Use it as-is so a
-      # flaky link to static.rust-lang.org cannot fail the job; install only if a part is missing.
-      - name: Use the runner's Rust toolchain
-        run: |
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.cargo/bin:$PATH"
-          installed="$(rustup component list --installed 2>/dev/null || true)"
-          if ! grep -q '^clippy' <<<"$installed" || ! grep -q '^rustfmt' <<<"$installed"; then
-            rustup toolchain install stable --profile minimal -c rustfmt,clippy
-          fi
-          rustc --version
-          cargo --version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ci-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ci-
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Test workspace and TUI behavior/performance smoke tests
@@ -48,7 +47,7 @@ jobs:
 
   desktop:
     if: github.event_name == 'workflow_dispatch' && inputs.run_desktop
-    runs-on: [self-hosted, rekarta]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
