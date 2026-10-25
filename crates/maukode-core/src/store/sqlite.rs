@@ -899,6 +899,20 @@ impl SqliteSessionStore {
         Ok(hash)
     }
 
+    /// Whether any recorded request of the session was served partly from the provider's cache.
+    pub async fn session_has_cache_hits(&self, id: SessionId) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let hit = conn
+            .query_row(
+                "SELECT 1 FROM usage_requests WHERE session_id = ?1 \
+                 AND cache_read_tokens > 0 LIMIT 1",
+                params![id.to_string()],
+                |_| Ok(()),
+            )
+            .optional()?;
+        Ok(hit.is_some())
+    }
+
     /// A stored prompt/tool-schema pair by its hash.
     pub async fn prompt_snapshot(&self, hash: &str) -> Result<Option<PromptSnapshot>> {
         let conn = self.conn.lock().await;
@@ -1536,6 +1550,9 @@ mod tests {
         assert_eq!(requests[0].input_tokens, 1_000);
         assert_eq!(requests[0].cache_read_tokens, Some(800));
         assert_eq!(requests[1].cache_read_tokens, None);
+
+        // Only the first request read from the provider's cache.
+        assert!(store.session_has_cache_hits(session.id).await.unwrap());
 
         // The context size is the latest request, not a sum; the totals are untouched.
         let usage = store.session_usage(session.id).await.unwrap();

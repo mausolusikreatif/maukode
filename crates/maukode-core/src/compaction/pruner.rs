@@ -85,6 +85,51 @@ impl ContextPruner {
             .collect()
     }
 
+    /// Like [`Self::prune_messages`], but the cutoff only moves forward `batch` assistant messages
+    /// at a time. Between two moves every message comes out exactly as before, so the prefix a
+    /// provider cached stays valid; it restarts once per batch instead of once per request.
+    pub fn prune_batched(&self, messages: &[Message], batch: usize) -> Vec<Message> {
+        let cutoff = self.batched_cutoff(messages, batch);
+        let mut pruned = Vec::with_capacity(messages.len());
+        for (idx, msg) in messages.iter().enumerate() {
+            pruned.push(self.prune_single_message(msg, idx < cutoff));
+        }
+        pruned
+    }
+
+    /// Characters [`Self::prune_batched`] would remove: the part of each older tool result beyond
+    /// `max_older_output_chars`.
+    pub fn stale_chars(&self, messages: &[Message], batch: usize) -> usize {
+        let cutoff = self.batched_cutoff(messages, batch);
+        let mut saved = 0;
+        for msg in &messages[..cutoff] {
+            for part in &msg.parts {
+                if let ContentPart::ToolResult(tr) = part {
+                    let len = tr.content.len();
+                    saved += len.saturating_sub(self.max_older_output_chars);
+                }
+            }
+        }
+        saved
+    }
+
+    /// Messages before this index count as older. With `recent_turns_to_keep` assistant messages
+    /// always kept, the cutoff is the assistant message at the largest multiple of `batch` that
+    /// leaves at least that many.
+    fn batched_cutoff(&self, messages: &[Message], batch: usize) -> usize {
+        let mut assistants = Vec::new();
+        for (idx, msg) in messages.iter().enumerate() {
+            if msg.role == Role::Assistant {
+                assistants.push(idx);
+            }
+        }
+        let Some(extra) = assistants.len().checked_sub(self.recent_turns_to_keep) else {
+            return 0;
+        };
+        let step = (extra / batch.max(1)) * batch.max(1);
+        assistants.get(step).copied().unwrap_or(0)
+    }
+
     fn prune_single_message(&self, message: &Message, is_older_turn: bool) -> Message {
         let mut pruned_parts = Vec::with_capacity(message.parts.len());
 
@@ -244,6 +289,60 @@ mod tests {
         } else {
             panic!("Expected ToolResult");
         }
+    }
+
+    fn tool_result_message(content: String) -> Message {
+        Message {
+            role: Role::User,
+            parts: vec![ContentPart::ToolResult(ToolResult {
+                tool_call_id: "call".into(),
+                tool_name: "read_file".into(),
+                content,
+                is_error: false,
+            })],
+        }
+    }
+
+    /// A prompt, then `steps` rounds of an assistant message and a 2,500-character tool result.
+    fn history(steps: usize) -> Vec<Message> {
+        let mut messages = vec![Message::user("start")];
+        for _ in 0..steps {
+            messages.push(Message::assistant_text("calling"));
+            messages.push(tool_result_message("x".repeat(2500)));
+        }
+        messages
+    }
+
+    #[test]
+    fn stale_output_is_counted_only_up_to_the_batched_cutoff() {
+        let pruner = ContextPruner::default();
+        assert_eq!(pruner.stale_chars(&history(4), 3), 0);
+        // Three results are older once the cutoff has moved; each saves 500 characters.
+        assert_eq!(pruner.stale_chars(&history(5), 3), 1500);
+        assert_eq!(pruner.stale_chars(&history(7), 3), 1500);
+        assert_eq!(pruner.stale_chars(&history(8), 3), 3000);
+    }
+
+    #[test]
+    fn the_pruned_prefix_does_not_change_between_batches() {
+        let pruner = ContextPruner::default();
+        let earlier = pruner.prune_batched(&history(5), 3);
+        let later = pruner.prune_batched(&history(7), 3);
+        assert_eq!(earlier[..7], later[..7]);
+        assert_ne!(earlier[2], history(5)[2], "the old result was cut");
+
+        // The next batch cuts more, and keeps what was already cut.
+        let next = pruner.prune_batched(&history(8), 3);
+        assert_eq!(later[..7], next[..7]);
+        assert_ne!(next[8], history(8)[8], "newly old results are cut");
+    }
+
+    #[test]
+    fn a_short_history_is_left_alone() {
+        let pruner = ContextPruner::default();
+        let messages = history(2);
+        assert_eq!(pruner.prune_batched(&messages, 3), messages);
+        assert_eq!(pruner.prune_batched(&[], 3), Vec::<Message>::new());
     }
 
     #[test]
