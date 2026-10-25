@@ -108,7 +108,7 @@ fn find_filter(command: &str) -> Option<&'static Compiled> {
     let subcommand = subcommand.as_str();
     for filter in filters() {
         let same_program = filter.program == program.as_str();
-        let same_subcommand = filter.subcommands.iter().any(|s| *s == subcommand);
+        let same_subcommand = filter.subcommands.contains(&subcommand);
         if same_program && same_subcommand {
             return Some(filter);
         }
