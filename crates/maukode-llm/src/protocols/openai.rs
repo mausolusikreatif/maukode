@@ -699,7 +699,10 @@ mod tests {
             "prompt_tokens": 1000, "completion_tokens": 20,
             "prompt_tokens_details": { "cached_tokens": 800 }
         }));
-        assert_eq!(openai.input_tokens, 1000, "prompt_tokens already includes the cache");
+        assert_eq!(
+            openai.input_tokens, 1000,
+            "prompt_tokens already includes the cache"
+        );
         assert_eq!(openai.cache_read_tokens, Some(800));
         assert_eq!(openai.cache_write_tokens, None);
 
