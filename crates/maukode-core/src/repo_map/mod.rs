@@ -8,7 +8,7 @@ use ignore::WalkBuilder;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::RwLock;
 
 pub use formatter::RepoMapFormatter;
@@ -16,10 +16,47 @@ pub use graph::{FileSymbolData, RankedFile, SymbolGraph};
 pub use parser::{AstParser, ParsedFileSymbols, SymbolDef, SymbolKind};
 pub use tool::CodebaseMapTool;
 
+/// A source file to parse and its modification time.
+type Candidate = (PathBuf, SystemTime);
+
+/// How much one map is allowed to cost. A huge tree is mapped from the files found first, so a
+/// workspace that is not a project (a home directory) cannot hold the CPU for minutes.
+#[derive(Clone, Copy)]
+struct Limits {
+    /// Most source files looked at.
+    max_files: usize,
+    /// Longest the walk and the parsing may take together.
+    budget: Duration,
+}
+
+const DEFAULT_LIMITS: Limits = Limits {
+    max_files: 5_000,
+    budget: Duration::from_secs(5),
+};
+
+/// Whether `dir` is too broad to map for the system prompt: the filesystem root or the user's home
+/// directory. A map of either walks every project the user has, and tells the model little.
+pub fn is_too_broad(dir: &Path) -> bool {
+    let home = dirs::home_dir();
+    is_broad(dir, home.as_deref())
+}
+
+fn is_broad(dir: &Path, home: Option<&Path>) -> bool {
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    if dir.parent().is_none() {
+        return true;
+    }
+    match home {
+        Some(h) => h.canonicalize().unwrap_or_else(|_| h.to_path_buf()) == dir,
+        None => false,
+    }
+}
+
 #[derive(Clone)]
 pub struct RepoMapGenerator {
     workspace_root: PathBuf,
     cache: Arc<RwLock<HashMap<PathBuf, (SystemTime, ParsedFileSymbols)>>>,
+    limits: Limits,
 }
 
 impl RepoMapGenerator {
@@ -29,6 +66,7 @@ impl RepoMapGenerator {
         Self {
             workspace_root: canonical_root,
             cache: Arc::new(RwLock::new(HashMap::new())),
+            limits: DEFAULT_LIMITS,
         }
     }
 
@@ -45,6 +83,7 @@ impl RepoMapGenerator {
     ) -> Result<String> {
         let root = self.workspace_root.clone();
         let cache_arc = Arc::clone(&self.cache);
+        let limits = self.limits;
 
         // Run file traversal & parsing in a blocking task so we don't stall Tokio executor
         let file_data = tokio::task::spawn_blocking(move || {
@@ -56,58 +95,16 @@ impl RepoMapGenerator {
                 }
             };
 
-            let mut files_to_process = Vec::new();
-            let walker = WalkBuilder::new(&root)
-                .hidden(true)
-                .git_ignore(true)
-                .git_global(true)
-                .git_exclude(true)
-                .filter_entry(|entry| {
-                    let file_name = entry.file_name().to_string_lossy();
-                    // Skip bulky folders
-                    !matches!(
-                        file_name.as_ref(),
-                        "target"
-                            | "node_modules"
-                            | ".git"
-                            | ".cargo"
-                            | "dist"
-                            | "build"
-                            | "vendor"
-                            | "__pycache__"
-                    )
-                })
-                .build();
-
-            for result in walker {
-                let entry = match result {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                };
-
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-
-                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                if !matches!(ext, "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go") {
-                    continue;
-                }
-
-                // Check file size (< 256KB to avoid huge generated files)
-                if let Ok(meta) = entry.metadata() {
-                    if meta.len() > 256 * 1024 {
-                        continue;
-                    }
-                    let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                    files_to_process.push((path.to_path_buf(), mtime));
-                }
-            }
+            let started = Instant::now();
+            let files_to_process = collect_candidates(&root, &limits, started);
 
             let mut collected = Vec::with_capacity(files_to_process.len());
 
             for (path, mtime) in files_to_process {
+                if started.elapsed() >= limits.budget {
+                    tracing::debug!("Codebase map stopped parsing at its time budget");
+                    break;
+                }
                 // Check in-memory cache
                 let cached_val = {
                     let guard = cache_arc.blocking_read();
@@ -149,6 +146,64 @@ impl RepoMapGenerator {
     }
 }
 
+/// The source files under `root` worth parsing, at most `limits.max_files` of them, and only for
+/// as long as the time budget lasts from `started`.
+fn collect_candidates(root: &Path, limits: &Limits, started: Instant) -> Vec<Candidate> {
+    let mut files = Vec::new();
+    let walker = WalkBuilder::new(root)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .filter_entry(|entry| {
+            let file_name = entry.file_name().to_string_lossy();
+            // Skip bulky folders
+            !matches!(
+                file_name.as_ref(),
+                "target"
+                    | "node_modules"
+                    | ".git"
+                    | ".cargo"
+                    | "dist"
+                    | "build"
+                    | "vendor"
+                    | "__pycache__"
+            )
+        })
+        .build();
+
+    for result in walker {
+        if files.len() >= limits.max_files || started.elapsed() >= limits.budget {
+            tracing::debug!("Codebase map walk stopped at its limits");
+            break;
+        }
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        if !matches!(ext, "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go") {
+            continue;
+        }
+
+        // Check file size (< 256KB to avoid huge generated files)
+        if let Ok(meta) = entry.metadata() {
+            if meta.len() > 256 * 1024 {
+                continue;
+            }
+            let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            files.push((path.to_path_buf(), mtime));
+        }
+    }
+    files
+}
+
 fn parse_and_cache(
     parser: &mut AstParser,
     path: &Path,
@@ -170,6 +225,63 @@ fn parse_and_cache(
 mod tests {
     use super::*;
     use std::path::Path;
+
+    fn tree_of_rust_files(count: usize) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..count {
+            let file = dir.path().join(format!("f{i}.rs"));
+            std::fs::write(file, "pub struct Item {}").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn the_walk_stops_at_the_file_limit() {
+        let dir = tree_of_rust_files(10);
+        let limits = Limits {
+            max_files: 3,
+            budget: Duration::from_secs(60),
+        };
+        let found = collect_candidates(dir.path(), &limits, Instant::now());
+        assert_eq!(found.len(), 3);
+        let limits = Limits {
+            max_files: 100,
+            budget: Duration::from_secs(60),
+        };
+        let found = collect_candidates(dir.path(), &limits, Instant::now());
+        assert_eq!(found.len(), 10);
+    }
+
+    #[test]
+    fn the_walk_stops_when_the_time_is_up() {
+        let dir = tree_of_rust_files(10);
+        let limits = Limits {
+            max_files: 100,
+            budget: Duration::ZERO,
+        };
+        assert!(collect_candidates(dir.path(), &limits, Instant::now()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_map_is_still_made_within_the_limits() {
+        let dir = tree_of_rust_files(10);
+        let mut generator = RepoMapGenerator::new(dir.path());
+        generator.limits.max_files = 2;
+        let map = generator.generate_map(800, None, None).await.unwrap();
+        assert!(map.contains(".rs"));
+        assert!(map.contains("Item"));
+    }
+
+    #[test]
+    fn the_root_and_the_home_directory_are_too_broad_to_map() {
+        let home = tempfile::tempdir().unwrap();
+        let project = home.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        assert!(is_broad(Path::new("/"), None));
+        assert!(is_broad(home.path(), Some(home.path())));
+        assert!(!is_broad(&project, Some(home.path())));
+        assert!(!is_broad(&project, None));
+    }
 
     #[test]
     fn test_rust_parser_ast() {
