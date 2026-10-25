@@ -269,6 +269,36 @@ gateways, or cloud platforms. Without a price, only token counts are shown.
 
 ---
 
+## 🧹 Bash Output Filters
+
+A successful `bash` command has its progress noise dropped before the output reaches the model
+(`cargo build/check/test/clippy/doc`, `git status/push/pull/fetch/log`, `pytest`, `go test`,
+`pip install`). Add filters for other tools in `<project>/.maukode/filters.json` or in
+`filters.json` next to the user's `config.json` (`~/.config/maukode/filters.json` on Linux). The
+project's filters are tried first, then the user's, then the built-in ones.
+
+```json
+{
+  "filters": [
+    {
+      "program": "terraform",
+      "subcommands": ["plan", "apply"],
+      "strip": ["^Refreshing state", "^\\s*#.*unchanged"],
+      "max_lines": 300
+    }
+  ]
+}
+```
+
+- `program` is the command name. `subcommands` is the list of first arguments that are not flags
+  (omit it to match any).
+- `strip` is a list of regular expressions; a line of output matching one is dropped.
+- `max_lines` (default 0, no limit) keeps the first and last lines of a longer result.
+
+A filter only drops lines, applies to a run that exited with code 0, and is used only for a single
+plain command (no `&&`, pipe or redirect). A file that does not parse is ignored with a warning in
+the log. A project filter file comes from the repository, so review it as you would a script.
+
 ## 🔐 Environment Variables and Secret Files
 
 MauKode does not load `.env` files automatically. Provider credentials are read from
@@ -295,7 +325,7 @@ Other environment variables:
 | `MAUKODE_HOME` | Relocate config and data directories (used by tests and portable installs). |
 | `MAUKODE_AUTH_TOKEN` | Bearer token for `maukode server` (passed to the daemon via the environment, not argv). |
 | `MAUKODE_WEB_DIR` | Directory of the built web UI for `maukode server`. |
-| `MAUKODE_NO_COMPRESS` | `1` sends `bash` output to the model unfiltered. By default the progress noise of a successful `cargo` or `git status/push/pull/fetch` run is dropped (see `crates/maukode-tools/src/compress.rs`); failed runs, chains, pipes and redirects are never filtered. |
+| `MAUKODE_NO_COMPRESS` | `1` sends `bash` output to the model unfiltered. By default the progress noise of a successful `cargo`, `git`, `pytest`, `go test` or `pip install` run is dropped (see `crates/maukode-tools/src/compress.rs` and "Bash Output Filters" above); failed runs, chains, pipes and redirects are never filtered. |
 | `MAUKODE_MEMORY_AUTO_EXTRACT` | `1`/`true` enables automatic end-of-turn memory extraction. |
 
 ---
