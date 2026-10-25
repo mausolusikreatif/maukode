@@ -418,7 +418,6 @@ mod tests {
         assert!(!new.exists());
     }
 
-
     fn write(path: &Path, text: &str) {
         std::fs::write(path, text).unwrap();
     }
@@ -534,7 +533,10 @@ mod tests {
         let (archive, sum) = release_files(work.path(), NAME);
         let routes = vec![
             (format!("/{NAME}.tar.gz"), Reply::Body(archive)),
-            (format!("/{NAME}.tar.gz.sha256"), Reply::Body(sum.into_bytes())),
+            (
+                format!("/{NAME}.tar.gz.sha256"),
+                Reply::Body(sum.into_bytes()),
+            ),
         ];
         let base = serve(routes).await;
         let prefix = tempfile::tempdir().unwrap();
@@ -560,7 +562,10 @@ mod tests {
         let wrong = format!("{}  {NAME}.tar.gz\n", "0".repeat(64));
         let routes = vec![
             (format!("/{NAME}.tar.gz"), Reply::Body(archive)),
-            (format!("/{NAME}.tar.gz.sha256"), Reply::Body(wrong.into_bytes())),
+            (
+                format!("/{NAME}.tar.gz.sha256"),
+                Reply::Body(wrong.into_bytes()),
+            ),
         ];
         let base = serve(routes).await;
         let prefix = tempfile::tempdir().unwrap();
@@ -607,7 +612,10 @@ mod tests {
         let sum = format!("{:x}  {NAME}.tar.gz\n", Sha256::digest(&bytes));
         let routes = vec![
             (format!("/{NAME}.tar.gz"), Reply::Body(bytes)),
-            (format!("/{NAME}.tar.gz.sha256"), Reply::Body(sum.into_bytes())),
+            (
+                format!("/{NAME}.tar.gz.sha256"),
+                Reply::Body(sum.into_bytes()),
+            ),
         ];
         let base = serve(routes).await;
         let prefix = tempfile::tempdir().unwrap();
@@ -624,9 +632,15 @@ mod tests {
     #[tokio::test]
     async fn the_latest_tag_is_read_from_the_redirect() {
         let routes = vec![
-            ("/latest".to_string(), Reply::Redirect("/tag/v9.9.9".to_string())),
+            (
+                "/latest".to_string(),
+                Reply::Redirect("/tag/v9.9.9".to_string()),
+            ),
             ("/tag/v9.9.9".to_string(), Reply::Body(Vec::new())),
-            ("/odd".to_string(), Reply::Redirect("/tag/nightly".to_string())),
+            (
+                "/odd".to_string(),
+                Reply::Redirect("/tag/nightly".to_string()),
+            ),
             ("/tag/nightly".to_string(), Reply::Body(Vec::new())),
         ];
         let base = serve(routes).await;
