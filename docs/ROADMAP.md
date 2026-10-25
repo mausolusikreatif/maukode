@@ -26,7 +26,7 @@ remove a feature, update its row in the same PR.
 | Shadow git checkpoints, diff, undo | **done** | `checkpoint.rs`; `/diff`, `/undo`; web UI Review panel |
 | Git worktree isolation per session | **done** | `worktree.rs`; web UI commit/merge in `ui/Review.tsx` |
 | Context pruning and automatic/manual compaction | **done** | `compaction/`; `/compact` |
-| Tree-Sitter repo map (Rust, TS/JS, Python, Go) | **done** | `repo_map/`; `get_codebase_map`; `/map` |
+| Tree-Sitter repo map (Rust, TS/JS, Python, Go) | **done** | `repo_map/`; `get_codebase_map`; `/map`; a walk stops at 5,000 files or 5 s, and the system prompt carries no map for a home directory or `/` (`is_too_broad`) |
 | `AGENTS.md` discovery and `maukode init` | **done** | `rules/` |
 | MCP client (stdio) | **done** | `mcp/`; `/mcp`; tool lists refreshed after `notifications/tools/list_changed`, server `ping` answered |
 | Subagents | **done** | `subagent.rs`; `invoke_subagent` |

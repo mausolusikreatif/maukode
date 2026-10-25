@@ -1,4 +1,4 @@
-use crate::repo_map::RepoMapGenerator;
+use crate::repo_map::{is_too_broad, RepoMapGenerator};
 use crate::rules::ProjectMemory;
 use crate::store::sqlite::SqliteSessionStore;
 use chrono::Utc;
@@ -224,8 +224,14 @@ impl ContextManager {
             prompt.push('\n');
         }
 
-        // Generate and inject concise codebase skeleton map
-        if let Ok(map) = self.repo_map.generate_map(800, None, None).await {
+        // Generate and inject concise codebase skeleton map. Not for a home directory or the root:
+        // that is not a project, and walking it takes minutes of CPU.
+        let map = if is_too_broad(&self.cwd) {
+            None
+        } else {
+            self.repo_map.generate_map(800, None, None).await.ok()
+        };
+        if let Some(map) = map {
             if !map.trim().is_empty() {
                 prompt.push_str("\n--- Codebase Map (Tree-Sitter Symbol Skeleton) ---\n");
                 prompt.push_str(&map);
