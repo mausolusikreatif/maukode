@@ -487,8 +487,14 @@ Successfully installed x-1.0";
         let compiled = parse_filters(TERRAFORM_FILTERS).unwrap();
         let planned = compress_with(&compiled, "terraform plan", 0, PLAN_OUTPUT);
         assert_eq!(planned.as_deref(), Some("Plan: 1 to add"));
-        assert_eq!(compress_with(&compiled, "terraform apply", 0, PLAN_OUTPUT), None);
-        assert_eq!(compress_with(&compiled, "terraform plan", 1, PLAN_OUTPUT), None);
+        assert_eq!(
+            compress_with(&compiled, "terraform apply", 0, PLAN_OUTPUT),
+            None
+        );
+        assert_eq!(
+            compress_with(&compiled, "terraform plan", 1, PLAN_OUTPUT),
+            None
+        );
     }
 
     #[test]
@@ -497,7 +503,10 @@ Successfully installed x-1.0";
             r#"{"filters":[{"program":"cargo","subcommands":["build"],"strip":["^warning"]}]}"#;
         let compiled = parse_filters(OVERRIDE).unwrap();
         let out = compress_with(&compiled, "cargo build", 0, CARGO_BUILD).unwrap();
-        assert!(out.contains("Compiling"), "the built-in filter is not applied");
+        assert!(
+            out.contains("Compiling"),
+            "the built-in filter is not applied"
+        );
         assert!(!out.contains("warning: unused"));
     }
 
