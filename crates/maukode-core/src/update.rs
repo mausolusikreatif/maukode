@@ -235,7 +235,11 @@ mod tests {
         assert_eq!(layout.web_dir, web);
 
         let elsewhere = dir.path().join("sbin").join("maukode");
-        assert_eq!(InstallLayout::of(&elsewhere), None, "not in a bin directory");
+        assert_eq!(
+            InstallLayout::of(&elsewhere),
+            None,
+            "not in a bin directory"
+        );
     }
 
     #[test]

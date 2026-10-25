@@ -148,7 +148,10 @@ enum Commands {
     Update {
         #[arg(long, help = "Only report whether a newer release exists")]
         check: bool,
-        #[arg(long, help = "Install this release (for example v0.5.0) instead of the latest")]
+        #[arg(
+            long,
+            help = "Install this release (for example v0.5.0) instead of the latest"
+        )]
         version: Option<String>,
     },
     #[command(about = "Allow a project's own mcp.json to start MCP servers")]
@@ -1271,7 +1274,10 @@ async fn run_update(check: bool, version: Option<String>) -> anyhow::Result<()> 
     }
     let exe = std::env::current_exe()?;
     let Some(layout) = update::InstallLayout::of(&exe) else {
-        anyhow::bail!("{} was not installed by install.sh; re-run the installer", exe.display());
+        anyhow::bail!(
+            "{} was not installed by install.sh; re-run the installer",
+            exe.display()
+        );
     };
 
     let daemon = maukode_server::get_daemon_status().await.ok().flatten();
