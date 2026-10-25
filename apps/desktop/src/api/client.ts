@@ -31,6 +31,7 @@ import type {
   SessionListItem,
   SetAgentConfigRequest,
   SkillDefinition,
+  SystemPromptInfo,
   UndoResponse,
   WorktreeStatus,
 } from "./types";
@@ -118,6 +119,10 @@ export class ApiClient {
     if (opts.deleteBranch !== undefined) q.set("delete_branch", String(opts.deleteBranch));
     const qs = q.toString();
     return this.request<void>("DELETE", `/api/v1/sessions/${id}${qs ? `?${qs}` : ""}`);
+  }
+  /** The system prompt and tool schemas of the session's latest request; 404 before the first. */
+  systemPrompt(id: string) {
+    return this.request<SystemPromptInfo>("GET", `/api/v1/sessions/${id}/system-prompt`);
   }
   renameSession(id: string, title: string | null) {
     return this.request<void>("PATCH", `/api/v1/sessions/${id}`, { title });

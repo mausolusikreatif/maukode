@@ -5,6 +5,7 @@ import { emptyThread } from "../state/thread";
 import { Thread } from "./Thread";
 import { Dock } from "./Dock";
 import { Composer } from "./Composer";
+import { PromptPanel } from "./PromptPanel";
 
 const EXEC_LABEL: Record<string, { text: string; hint: string }> = {
   host: { text: "Host", hint: "Perintah berjalan langsung di mesin ini" },
@@ -87,6 +88,7 @@ export function Session({ onBack, reviewOpen, onToggleReview }: {
   const { respond, loadOlder } = useApp.getState();
   const item = sessions.find((s) => s.id === activeId);
   const state = thread.pending.length > 0 ? "hold" : thread.running ? "run" : "";
+  const [promptOpen, setPromptOpen] = useState(false);
 
   if (!activeId) return null;
   return (
@@ -102,10 +104,14 @@ export function Session({ onBack, reviewOpen, onToggleReview }: {
         </div>
         <span className={`dot ${state}`} title={state === "hold" ? "menunggu izin" : state === "run" ? "berjalan" : "siap"} />
         <ModelPicker id={activeId} provider={meta?.provider ?? null} model={meta?.model ?? null} />
+        <button className="btn" aria-pressed={promptOpen} onClick={() => setPromptOpen(!promptOpen)} title="System prompt dan skema tool yang dikirim ke model">
+          Prompt
+        </button>
         <button className="btn" aria-pressed={reviewOpen} onClick={onToggleReview}>
           Perubahan{reviewFiles > 0 ? ` ${reviewFiles}` : ""}
         </button>
       </header>
+      {promptOpen && <PromptPanel id={activeId} />}
       <Thread thread={thread} loadedStart={meta?.loadedStart ?? 0} onLoadOlder={() => void loadOlder()} />
       <div className="bottom">
         <Dock pending={thread.pending} onRespond={(id, d) => void respond(id, d)} />

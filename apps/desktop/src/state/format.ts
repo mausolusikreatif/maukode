@@ -1,4 +1,4 @@
-import type { SessionUsage } from "../api/types";
+import type { SessionUsage, SystemPromptInfo } from "../api/types";
 
 /** Last path segment: the project's name. */
 export function baseName(path: string): string {
@@ -51,4 +51,17 @@ export function usageText(u: SessionUsage | null): string {
     if (u.unpriced_responses > 0) out += "+";
   }
   return out;
+}
+
+/**
+ * What every request carries besides the conversation: the system prompt plus the tool schemas
+ * (`fixedTokens`), and the tools whose schemas take the most.
+ */
+export function promptSummary(info: SystemPromptInfo, top = 5) {
+  const biggest = [...info.tools].sort((a, b) => b.tokens - a.tokens).slice(0, top);
+  return {
+    fixedTokens: info.system_prompt_tokens + info.tool_schema_tokens,
+    toolCount: info.tools.length,
+    biggest,
+  };
 }

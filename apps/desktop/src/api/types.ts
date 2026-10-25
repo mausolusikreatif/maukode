@@ -59,6 +59,17 @@ export type { TokenUsage } from "./generated/TokenUsage";
 export type { UndoResponse } from "./generated/UndoResponse";
 export type { WorktreeStatus } from "./generated/WorktreeStatus";
 
+/** `GET /api/v1/sessions/{id}/system-prompt`: written by hand, the server builds it without ts-rs. */
+export interface SystemPromptInfo {
+  session_id: string;
+  hash: string;
+  created_at: string;
+  system_prompt: string;
+  system_prompt_tokens: number;
+  tool_schema_tokens: number;
+  tools: { name: string; tokens: number }[];
+}
+
 /** True when the user probably needs to send "continue" to finish the task. */
 export function needsContinue(reason: import("./generated/StopReason").StopReason): boolean {
   return reason === "max_tokens" || reason === "max_steps";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SessionUsage } from "../api/types";
-import { contextText, shortCount, usageText } from "./format";
+import type { SessionUsage, SystemPromptInfo } from "../api/types";
+import { contextText, promptSummary, shortCount, usageText } from "./format";
 
 const usage = (over: Partial<SessionUsage> = {}): SessionUsage => ({
   input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
@@ -32,5 +32,27 @@ describe("usage formatting", () => {
   it("marks a partial cost and hides an unknown one", () => {
     expect(usageText(usage({ input_tokens: 10, cost_microusd: 1000, unpriced_responses: 1 }))).toBe("10 token · $0.001+");
     expect(usageText(usage({ input_tokens: 10, unpriced_responses: 2 }))).toBe("10 token");
+  });
+});
+
+describe("prompt overhead", () => {
+  const info = (tools: { name: string; tokens: number }[]): SystemPromptInfo => ({
+    session_id: "s", hash: "abc", created_at: "2026-01-01T00:00:00Z", system_prompt: "p",
+    system_prompt_tokens: 1200, tool_schema_tokens: 3000, tools,
+  });
+
+  it("adds the prompt and the tool schemas into one fixed cost", () => {
+    expect(promptSummary(info([])).fixedTokens).toBe(4200);
+  });
+
+  it("lists the tools with the largest schemas first, up to the limit", () => {
+    const tools = [
+      { name: "read", tokens: 100 }, { name: "bash", tokens: 900 },
+      { name: "edit", tokens: 500 }, { name: "grep", tokens: 300 },
+    ];
+    const summary = promptSummary(info(tools), 2);
+    expect(summary.toolCount).toBe(4);
+    expect(summary.biggest.map((t) => t.name)).toEqual(["bash", "edit"]);
+    expect(tools[0].name).toBe("read");
   });
 });
