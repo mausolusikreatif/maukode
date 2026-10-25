@@ -62,8 +62,13 @@ remove a feature, update its row in the same PR.
 | Subagent tool calls go through the parent's permissions | **done** | `SubagentTool::with_permission_manager` (#86) |
 | Repo-supplied MCP servers require a trusted project | **done** | `security.trusted_projects`, `maukode trust` (#86) |
 | Private tool results (`[p]`) | **done** | `PermissionDecision::AllowPrivate`, `PrivateToolResult` |
+<<<<<<< HEAD
 | Bash output filters | **partial** | `maukode-tools/src/compress.rs`: built-in filters for successful `cargo build/check/test/clippy/doc`, `git status/push/pull/fetch/log`, `pytest`, `go test` and `pip install` (single plain commands only, via `simple_command_words`); extra filters from `<project>/.maukode/filters.json` and the user's `filters.json`; opt out with `MAUKODE_NO_COMPRESS=1`; planned: `ls`/`find`/`grep`, base64 blob placeholder |
 | Self-update (`maukode update`) | **done** (Linux x86_64, `install.sh` installs) | `maukode-core/src/update.rs`, `run_update` in `maukode-cli`; GitHub Release tarball with sha256 check, web UI swapped before the binary, daemon restarted; `--check`, `--version`; once a day (background HEAD request) an `install.sh` install is told on stderr when a newer release exists, after the TUI closes or at `maukode server`; opt out with `MAUKODE_NO_UPDATE_CHECK=1` (`startup_notice`) |
+=======
+| Bash output filters | **partial** | `maukode-tools/src/compress.rs`: built-in filters for successful `cargo build/check/test/clippy/doc` and `git status/push/pull/fetch` (single plain commands only, via `simple_command_words`); opt out with `MAUKODE_NO_COMPRESS=1`; planned: user/project filter files, `ls`/`find`/`grep`, base64 blob placeholder |
+| Self-update (`maukode update`) | **done** (Linux x86_64, `install.sh` installs) | `maukode-core/src/update.rs`, `run_update` in `maukode-cli`; GitHub Release tarball with sha256 check, web UI swapped before the binary, daemon restarted; download, checksum, layout check and replacement are tested against a local HTTP server; `--check`, `--version`; no periodic "update available" notice yet |
+>>>>>>> 151866c (Test the maukode update download and replace path against a local server)
 | Bubblewrap sandbox for bash | **done** (Linux, opt-in) | `security.sandbox_mode = bubblewrap\|auto` |
 | lawang execution cells (bubblewrap, gVisor, Firecracker) | **partial** (opt-in) | `exec.rs`, `execution.backend = lawang` (PR #84); daemon sessions only, not the in-process CLI/TUI paths; MCP servers stay on the host; one setting for all sessions |
 | Network capability controls, secret broker | **planned** | — |

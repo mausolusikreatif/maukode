@@ -89,8 +89,12 @@ pub fn http_client() -> Result<reqwest::Client> {
 /// needs no API token and has no rate limit to run into.
 pub async fn latest_tag(client: &reqwest::Client) -> Result<String> {
     let url = format!("https://github.com/{REPO}/releases/latest");
+    latest_tag_at(client, &url).await
+}
+
+async fn latest_tag_at(client: &reqwest::Client, url: &str) -> Result<String> {
     let response = client
-        .head(&url)
+        .head(url)
         .send()
         .await
         .with_context(|| format!("could not reach {url}"))?;
@@ -116,8 +120,13 @@ async fn download(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
 /// Download release `tag`, verify it, and install it over `layout`. Nothing is replaced unless
 /// the checksum matches and the archive has the expected layout.
 pub async fn install(layout: &InstallLayout, tag: &str) -> Result<()> {
-    let name = format!("maukode-linux-x86_64-{tag}");
     let base = format!("https://github.com/{REPO}/releases/download/{tag}");
+    install_from(layout, tag, &base).await
+}
+
+/// [`install`] with the release files at `base` (the URL of the release's download directory).
+async fn install_from(layout: &InstallLayout, tag: &str, base: &str) -> Result<()> {
+    let name = format!("maukode-linux-x86_64-{tag}");
     let client = http_client()?;
 
     let archive = download(&client, &format!("{base}/{name}.tar.gz")).await?;
@@ -295,6 +304,8 @@ pub fn startup_notice(current: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn versions_parse_with_or_without_the_v() {
@@ -405,5 +416,226 @@ mod tests {
         assert!(!target.join("old.txt").exists());
         assert!(!dir.path().join("web.old").exists());
         assert!(!new.exists());
+    }
+
+
+    fn write(path: &Path, text: &str) {
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    /// An installation as `install.sh` leaves it, holding the "old" files.
+    fn old_install(prefix: &Path) -> InstallLayout {
+        let bin = prefix.join("bin");
+        let web = prefix.join("share").join("maukode").join("web");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&web).unwrap();
+        write(&bin.join("maukode"), "binary old");
+        write(&web.join("index.html"), "web old");
+        InstallLayout::of(&bin.join("maukode")).unwrap()
+    }
+
+    /// A release tarball laid out like the one `linux-build.yml` makes, with its `.sha256` text.
+    fn release_files(dir: &Path, name: &str) -> (Vec<u8>, String) {
+        let package = dir.join(name);
+        std::fs::create_dir_all(package.join("web")).unwrap();
+        write(&package.join("maukode"), "binary new");
+        write(&package.join("web").join("index.html"), "web new");
+        let archive = dir.join("release.tar.gz");
+        let status = std::process::Command::new("tar")
+            .arg("czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(dir)
+            .arg(name)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let bytes = std::fs::read(&archive).unwrap();
+        let sum = format!("{:x}  {name}.tar.gz\n", Sha256::digest(&bytes));
+        (bytes, sum)
+    }
+
+    /// What the test server answers for a path.
+    enum Reply {
+        Body(Vec<u8>),
+        Redirect(String),
+    }
+
+    fn http_response(reply: Option<&Reply>, head_only: bool) -> Vec<u8> {
+        let empty: &[u8] = &[];
+        let (status, location, body) = match reply {
+            Some(Reply::Body(body)) => ("200 OK", String::new(), body.as_slice()),
+            Some(Reply::Redirect(to)) => ("302 Found", format!("Location: {to}\r\n"), empty),
+            None => ("404 Not Found", String::new(), empty),
+        };
+        let mut out = format!("HTTP/1.1 {status}\r\n").into_bytes();
+        out.extend_from_slice(location.as_bytes());
+        let length = format!("Content-Length: {}\r\n", body.len());
+        out.extend_from_slice(length.as_bytes());
+        out.extend_from_slice(b"Connection: close\r\n\r\n");
+        if !head_only {
+            out.extend_from_slice(body);
+        }
+        out
+    }
+
+    async fn read_head(stream: &mut tokio::net::TcpStream) -> Option<String> {
+        let mut request = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut buf).await.ok()?;
+            if read == 0 {
+                return None;
+            }
+            request.extend_from_slice(&buf[..read]);
+            let text = String::from_utf8_lossy(&request);
+            if text.contains("\r\n\r\n") {
+                return Some(text.into_owned());
+            }
+        }
+    }
+
+    /// Serves `routes` on a free local port and returns its base URL.
+    async fn serve(routes: Vec<(String, Reply)>) -> String {
+        let bind = tokio::net::TcpListener::bind("127.0.0.1:0");
+        let listener = bind.await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let routes = Arc::new(routes);
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let routes = routes.clone();
+                tokio::spawn(async move {
+                    let Some(head) = read_head(&mut stream).await else {
+                        return;
+                    };
+                    let mut words = head.split_whitespace();
+                    let method = words.next().unwrap_or_default();
+                    let path = words.next().unwrap_or_default();
+                    let found = routes.iter().find(|(route, _)| route == path);
+                    let reply = found.map(|(_, reply)| reply);
+                    let response = http_response(reply, method == "HEAD");
+                    let _ = stream.write_all(&response).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        format!("http://{address}")
+    }
+
+    const NAME: &str = "maukode-linux-x86_64-v9.9.9";
+
+    #[tokio::test]
+    async fn install_replaces_the_binary_and_the_web_ui() {
+        let work = tempfile::tempdir().unwrap();
+        let (archive, sum) = release_files(work.path(), NAME);
+        let routes = vec![
+            (format!("/{NAME}.tar.gz"), Reply::Body(archive)),
+            (format!("/{NAME}.tar.gz.sha256"), Reply::Body(sum.into_bytes())),
+        ];
+        let base = serve(routes).await;
+        let prefix = tempfile::tempdir().unwrap();
+        let layout = old_install(prefix.path());
+
+        install_from(&layout, "v9.9.9", &base).await.unwrap();
+
+        assert_eq!(read(&layout.binary), "binary new");
+        assert_eq!(read(&layout.web_dir.join("index.html")), "web new");
+        // Neither the staging directory nor the previous web UI is left behind.
+        let share = layout.web_dir.parent().unwrap();
+        let entries = std::fs::read_dir(share).unwrap();
+        let names: Vec<_> = entries.map(|entry| entry.unwrap().file_name()).collect();
+        assert_eq!(names, ["web"]);
+        let bin = layout.binary.parent().unwrap();
+        assert!(!bin.join(".maukode.new").exists());
+    }
+
+    #[tokio::test]
+    async fn a_download_that_fails_its_checksum_changes_nothing() {
+        let work = tempfile::tempdir().unwrap();
+        let (archive, _) = release_files(work.path(), NAME);
+        let wrong = format!("{}  {NAME}.tar.gz\n", "0".repeat(64));
+        let routes = vec![
+            (format!("/{NAME}.tar.gz"), Reply::Body(archive)),
+            (format!("/{NAME}.tar.gz.sha256"), Reply::Body(wrong.into_bytes())),
+        ];
+        let base = serve(routes).await;
+        let prefix = tempfile::tempdir().unwrap();
+        let layout = old_install(prefix.path());
+
+        let result = install_from(&layout, "v9.9.9", &base).await;
+        let error = result.unwrap_err();
+
+        assert!(error.to_string().contains("checksum"), "{error}");
+        assert_eq!(read(&layout.binary), "binary old");
+        assert_eq!(read(&layout.web_dir.join("index.html")), "web old");
+    }
+
+    #[tokio::test]
+    async fn a_missing_release_changes_nothing() {
+        let base = serve(Vec::new()).await;
+        let prefix = tempfile::tempdir().unwrap();
+        let layout = old_install(prefix.path());
+
+        assert!(install_from(&layout, "v9.9.9", &base).await.is_err());
+
+        assert_eq!(read(&layout.binary), "binary old");
+        assert_eq!(read(&layout.web_dir.join("index.html")), "web old");
+    }
+
+    #[tokio::test]
+    async fn an_archive_with_the_wrong_layout_changes_nothing() {
+        let work = tempfile::tempdir().unwrap();
+        // The right name, but without a web UI inside.
+        let package = work.path().join(NAME);
+        std::fs::create_dir_all(&package).unwrap();
+        write(&package.join("maukode"), "binary new");
+        let archive = work.path().join("release.tar.gz");
+        let status = std::process::Command::new("tar")
+            .arg("czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(work.path())
+            .arg(NAME)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let bytes = std::fs::read(&archive).unwrap();
+        let sum = format!("{:x}  {NAME}.tar.gz\n", Sha256::digest(&bytes));
+        let routes = vec![
+            (format!("/{NAME}.tar.gz"), Reply::Body(bytes)),
+            (format!("/{NAME}.tar.gz.sha256"), Reply::Body(sum.into_bytes())),
+        ];
+        let base = serve(routes).await;
+        let prefix = tempfile::tempdir().unwrap();
+        let layout = old_install(prefix.path());
+
+        let result = install_from(&layout, "v9.9.9", &base).await;
+        let error = result.unwrap_err();
+
+        assert!(error.to_string().contains("layout"), "{error}");
+        assert_eq!(read(&layout.binary), "binary old");
+        assert_eq!(read(&layout.web_dir.join("index.html")), "web old");
+    }
+
+    #[tokio::test]
+    async fn the_latest_tag_is_read_from_the_redirect() {
+        let routes = vec![
+            ("/latest".to_string(), Reply::Redirect("/tag/v9.9.9".to_string())),
+            ("/tag/v9.9.9".to_string(), Reply::Body(Vec::new())),
+            ("/odd".to_string(), Reply::Redirect("/tag/nightly".to_string())),
+            ("/tag/nightly".to_string(), Reply::Body(Vec::new())),
+        ];
+        let base = serve(routes).await;
+        let client = http_client().unwrap();
+
+        let latest = latest_tag_at(&client, &format!("{base}/latest")).await;
+        assert_eq!(latest.unwrap(), "v9.9.9");
+
+        let odd = latest_tag_at(&client, &format!("{base}/odd")).await;
+        assert!(odd.is_err(), "a tag that is not a version");
     }
 }
