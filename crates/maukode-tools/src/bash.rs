@@ -1,3 +1,4 @@
+use crate::compress::compress_output;
 use crate::exec::{format_output, ExecBackend, ExecRequest, HostBackend};
 use crate::security::{PathJail, SandboxMode};
 use crate::tool::{Tool, ToolError};
@@ -120,6 +121,7 @@ impl Tool for BashTool {
         // No sync before a command: the backend that runs it holds the truth. Changes made on the
         // host by the file tools were pushed to it when they were made (`SyncedTool`), and what
         // the command changes comes back before the host next reads (`before_workspace_access`).
+        let command = args.command.clone();
         let output = self
             .backend
             .exec(ExecRequest {
@@ -128,6 +130,7 @@ impl Tool for BashTool {
                 timeout: timeout_dur,
             })
             .await?;
-        Ok(format_output(&output))
+        let text = format_output(&output);
+        Ok(compress_output(&command, output.exit_code, &text).unwrap_or(text))
     }
 }

@@ -27,6 +27,11 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   request), dan status bar TUI menampilkan `ctx`. Setiap request agen utama kini disimpan di tabel
   `usage_requests` (model, token masuk/keluar, cache), sehingga pertumbuhan token bisa diaudit.
   Request sub-agen hanya masuk ke total.
+- **Output `bash` dikompres untuk `cargo` dan `git`**: pada perintah tunggal yang selesai dengan
+  kode 0, baris progres (`Compiling`, `Downloading`, baris `test ... ok`, petunjuk `git status`,
+  progres `git push`) dibuang sebelum masuk ke konteks, dan hasil `cargo` yang lebih dari 400 baris
+  dipotong di tengah. Output yang gagal tidak pernah diubah, rantai/pipe/redirect tidak difilter,
+  dan `MAUKODE_NO_COMPRESS=1` mematikannya.
 - **Installer satu baris**: `curl -fsSL https://raw.githubusercontent.com/mausolusikreatif/maukode/master/install.sh | bash`
   mengunduh rilis terbaru (atau `--version vX.Y.Z`), memverifikasi sha256, lalu memasangnya ke
   `~/.local`. `--uninstall` menghapusnya.
