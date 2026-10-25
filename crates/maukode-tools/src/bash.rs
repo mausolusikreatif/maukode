@@ -1,4 +1,4 @@
-use crate::compress::compress_output;
+use crate::compress::compress_output_in;
 use crate::exec::{format_output, ExecBackend, ExecRequest, HostBackend};
 use crate::security::{PathJail, SandboxMode};
 use crate::tool::{Tool, ToolError};
@@ -131,6 +131,8 @@ impl Tool for BashTool {
             })
             .await?;
         let text = format_output(&output);
-        Ok(compress_output(&command, output.exit_code, &text).unwrap_or(text))
+        let project = &self.default_cwd;
+        let compressed = compress_output_in(project, &command, output.exit_code, &text);
+        Ok(compressed.unwrap_or(text))
     }
 }

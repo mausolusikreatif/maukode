@@ -7,6 +7,11 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Filter output `bash` kini mencakup `git log` (dipotong di tengah), `pytest`, `go test`, dan `pip install`.
+- Filter tambahan bisa ditulis di `.maukode/filters.json` (proyek) dan `filters.json` di samping `config.json` (pengguna): program, subcommand, pola baris yang dibuang, dan batas baris.
+
 ## [0.6.0] - 2026-10-25
 
 ### Fixed
