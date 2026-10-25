@@ -5,8 +5,8 @@ use crate::store::sqlite::{PermissionAuditRecord, SqliteSessionStore};
 use futures::StreamExt;
 use maukode_llm::{LLMClient, LLMRequest};
 use maukode_protocol::{
-    ContentPart, FinishReason, LLMEvent, Message, Role, SessionState, StopReason, ToolCall,
-    ToolResult,
+    ContentPart, FinishReason, LLMEvent, Message, Role, SessionId, SessionState, StopReason,
+    TokenUsage, ToolCall, ToolResult,
 };
 use maukode_tools::{ToolError, ToolRegistry};
 use std::collections::HashMap;
@@ -583,6 +583,7 @@ impl SessionRunner {
                                     step_tokens =
                                         usize::try_from(usage.input_tokens + usage.output_tokens)
                                             .ok();
+                                    self.record_request_usage(session_id, usage).await;
                                 }
                                 _ => {}
                             }
@@ -1066,6 +1067,19 @@ impl SessionRunner {
         let prompt = self.context.render_system_context().await;
         self.session.write().await.system_prompt = Some(prompt.clone());
         prompt
+    }
+
+    /// Store one request of the main agent: the per-request usage series and the context size.
+    async fn record_request_usage(&self, session_id: SessionId, usage: &TokenUsage) {
+        let Some(store) = &self.permission_store else {
+            return;
+        };
+        if let Err(error) = store
+            .record_usage_request(session_id, &self.config.model, usage)
+            .await
+        {
+            debug!(%error, "Failed to record request usage");
+        }
     }
 
     /// Run the calls of a step concurrently when all of them only read, so none can miss a write

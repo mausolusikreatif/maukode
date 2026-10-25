@@ -22,6 +22,11 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Ukuran konteks vs total di pemakaian sesi**: web UI menampilkan "konteks 30k" (input request
+  terakhir) di samping "total 546k" (jumlah semua request, karena riwayat dikirim ulang di tiap
+  request), dan status bar TUI menampilkan `ctx`. Setiap request agen utama kini disimpan di tabel
+  `usage_requests` (model, token masuk/keluar, cache), sehingga pertumbuhan token bisa diaudit.
+  Request sub-agen hanya masuk ke total.
 - **Installer satu baris**: `curl -fsSL https://raw.githubusercontent.com/mausolusikreatif/maukode/master/install.sh | bash`
   mengunduh rilis terbaru (atau `--version vX.Y.Z`), memverifikasi sha256, lalu memasangnya ke
   `~/.local`. `--uninstall` menghapusnya.

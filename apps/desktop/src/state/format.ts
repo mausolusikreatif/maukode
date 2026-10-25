@@ -28,6 +28,15 @@ export function shortCount(n: number): string {
 }
 
 /**
+ * The input size of the session's latest request, "30k": what the model's context holds now. Empty
+ * before the first response. Unlike {@link usageText} this is not a running total.
+ */
+export function contextText(u: SessionUsage | null): string {
+  if (!u || u.context_tokens === 0) return "";
+  return shortCount(u.context_tokens);
+}
+
+/**
  * A session's usage so far: "12.3k token · $0.042". The cost is left out when no response had a
  * known price, and marked "+" when only some had one.
  */

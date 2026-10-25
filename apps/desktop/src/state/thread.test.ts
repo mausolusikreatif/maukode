@@ -27,7 +27,7 @@ describe("thread reducer", () => {
   it("keeps session usage totals and shows attached images", () => {
     const totals = {
       input_tokens: 10, output_tokens: 2, cache_read_tokens: 0, cache_write_tokens: 0,
-      cost_microusd: 5, unpriced_responses: 0,
+      cost_microusd: 5, unpriced_responses: 0, context_tokens: 7,
     };
     const s = run([{ type: "session_usage", ...totals }]);
     expect(s.sessionUsage).toEqual(totals);

@@ -12,4 +12,9 @@ cost_microusd: number,
 /**
  * Responses whose model had no known price; their tokens are counted, their cost is not.
  */
-unpriced_responses: number, };
+unpriced_responses: number, 
+/**
+ * The input size of the session's latest request: what the model's context held then. Not a
+ * running total, unlike the fields above.
+ */
+context_tokens: number, };
