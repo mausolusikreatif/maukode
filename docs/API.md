@@ -52,6 +52,7 @@ bodies with a 4xx/5xx status.
 | GET | `/sessions/{id}/events` | `?since=` or `Last-Event-ID` | SSE, below |
 | POST | `/sessions/{id}/permissions/{request_id}` | `{decision}` | `allow_once \| allow_session \| allow_private \| deny` |
 | GET | `/sessions/{id}/audit` | | `{summary, report}`; `report` is structured (latest 200 each) |
+| GET | `/sessions/{id}/system-prompt` | | the system prompt and tool schemas of the session's latest request: `{hash, created_at, system_prompt, system_prompt_tokens, tool_schema_tokens, tools:[{name,tokens}]}` (token counts are estimates, 4 characters each); `404` before the first request |
 | GET | `/sessions/{id}/diff`, `/checkpoints`, `/map`, `/mcp` (non-spawning) | map: `?subpath=&query=&max_tokens=` | diff/checkpoints are computed in the session's own workspace and survive daemon restarts |
 | GET | `/sessions/{id}/diff/files` | `?turn=` | `{files:[{path,status,insertions,deletions,binary}]}` |
 | GET | `/sessions/{id}/diff/file` | `?path=&turn=` | unified diff of one file (literal path, capped at 1 MiB, `truncated` flag) |

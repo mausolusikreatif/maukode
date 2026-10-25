@@ -1307,6 +1307,58 @@ pub async fn get_session_audit(
     }))
 }
 
+#[derive(Serialize)]
+pub struct PromptTool {
+    pub name: String,
+    pub tokens: usize,
+}
+
+/// What the model was last sent besides the conversation: the system prompt and the tool schemas.
+#[derive(Serialize)]
+pub struct SystemPromptResponse {
+    pub session_id: SessionId,
+    pub hash: String,
+    pub created_at: String,
+    pub system_prompt: String,
+    pub system_prompt_tokens: usize,
+    pub tool_schema_tokens: usize,
+    pub tools: Vec<PromptTool>,
+}
+
+pub async fn get_session_system_prompt(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<SessionId>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let snapshot = state
+        .store
+        .latest_prompt_snapshot(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let Some(snapshot) = snapshot else {
+        let message = "no request has been recorded for this session".to_string();
+        return Err((StatusCode::NOT_FOUND, message));
+    };
+    let estimate = maukode_core::TokenEstimator::estimate_text;
+    let parsed = serde_json::from_str::<Vec<serde_json::Value>>(&snapshot.tools_json);
+    let mut tools = Vec::new();
+    for tool in parsed.unwrap_or_default() {
+        let name = tool.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+        tools.push(PromptTool {
+            name: name.to_string(),
+            tokens: estimate(&tool.to_string()),
+        });
+    }
+    Ok(Json(SystemPromptResponse {
+        session_id: id,
+        system_prompt_tokens: estimate(&snapshot.system_prompt),
+        tool_schema_tokens: estimate(&snapshot.tools_json),
+        hash: snapshot.hash,
+        created_at: snapshot.created_at,
+        system_prompt: snapshot.system_prompt,
+        tools,
+    }))
+}
+
 pub async fn update_session(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<SessionId>,
