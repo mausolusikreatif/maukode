@@ -41,7 +41,19 @@ pub struct CreateSessionRequest {
     /// `"worktree"` runs the agent in its own git worktree/branch so parallel agents on the same
     /// repository cannot overwrite each other. Omit for the shared checkout.
     pub isolation: Option<Isolation>,
+    /// A conversation without a project: a private empty folder, only the web and memory tools,
+    /// and no codebase map. Cannot be combined with `directory` or `isolation`.
+    pub chat: Option<bool>,
 }
+
+/// The tools of a chat-only session (with their aliases): the web, no files and no shell.
+const CHAT_TOOLS: &[&str] = &[
+    "web_search",
+    "search_web",
+    "fetch_web_content",
+    "fetch_url",
+    "read_url",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -310,6 +322,11 @@ pub async fn create_session(
     State(state): State<Arc<ServerState>>,
     Json(payload): Json<CreateSessionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let chat = payload.chat == Some(true);
+    if chat && (payload.directory.is_some() || payload.isolation.is_some()) {
+        let message = "a chat session has no project folder or isolation".to_string();
+        return Err((StatusCode::BAD_REQUEST, message));
+    }
     let dir = payload
         .directory
         .map(PathBuf::from)
@@ -340,6 +357,11 @@ pub async fn create_session(
     };
 
     let mut session = Session::new(&dir);
+    if chat {
+        let chat_dir = maukode_core::paths::create_chat_dir(&session.id.to_string())
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        session.directory = chat_dir;
+    }
     let mut worktree_info = None;
     if payload.isolation == Some(Isolation::Worktree) {
         let info = worktree::create(&dir, session.id)
@@ -382,6 +404,9 @@ pub async fn create_session(
             let _ = worktree::remove(info, true).await;
         }
         let _ = state.store.delete_session(session.id).await;
+        if chat {
+            maukode_core::paths::remove_chat_dir(&session.id.to_string());
+        }
         return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
 
@@ -527,6 +552,7 @@ fn start_turn(
     Box::pin(async move {
         let (provider_id, model) = effective_model(&state, id).await;
         let session_dir = session_arc.read().await.directory.clone();
+        let is_chat = maukode_core::paths::is_chat_dir(&session_dir);
 
         // Where commands run. A configuration that cannot work stops the turn with the reason;
         // it never quietly falls back to running commands on the host.
@@ -541,7 +567,11 @@ fn start_turn(
                 ),
             ));
         }
-        let exec_backend = state.exec_backend_for(id, &session_dir, &execution).await;
+        let exec_backend = if is_chat {
+            None
+        } else {
+            state.exec_backend_for(id, &session_dir, &execution).await
+        };
 
         let (llm_client, runner_config, mut tool_registry, jail) = {
             let config_guard = state.config.read().await;
@@ -589,17 +619,26 @@ fn start_turn(
                 create_default_registry(&session_dir)
             };
             config_guard.configure_web_search_in_registry(&mut tool_registry);
+            if is_chat {
+                tool_registry.retain(|name| CHAT_TOOLS.contains(&name));
+            }
             (llm_client, runner_config, tool_registry, jail)
         };
 
         let app_config = state.config.read().await.clone();
-        state
-            .mcp_manager
-            .register_tools_into_registry(&mut tool_registry, &session_dir, &app_config)
-            .await;
+        if !is_chat {
+            state
+                .mcp_manager
+                .register_tools_into_registry(&mut tool_registry, &session_dir, &app_config)
+                .await;
+        }
 
         let permission_mgr = state.permission_manager_for(id).await;
-        let checkpoint_mgr = state.checkpoint_manager_for(&session_dir).await;
+        let checkpoint_mgr = if is_chat {
+            None
+        } else {
+            state.checkpoint_manager_for(&session_dir).await.ok()
+        };
 
         let (llm_tx, llm_rx) = mpsc::unbounded_channel::<LLMEvent>();
 
@@ -609,25 +648,28 @@ fn start_turn(
         if let Some(binding) = &memory {
             maukode_core::register_memory_tools(&mut tool_registry, binding);
         }
-        tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
-            context.repo_map(),
-        ))));
+        // A chat has no project to map and no files for a subagent to work on.
+        if !is_chat {
+            tool_registry.register(Arc::new(maukode_core::CodebaseMapTool::new(Arc::clone(
+                context.repo_map(),
+            ))));
 
-        let mut subagent = SubagentTool::new(
-            id,
-            session_dir.clone(),
-            jail,
-            Arc::clone(&llm_client),
-            Some(llm_tx.clone()),
-        )
-        .with_mcp_manager(Arc::clone(&state.mcp_manager))
-        .with_app_config(Arc::clone(&state.config))
-        .with_permission_manager(Arc::clone(&permission_mgr));
-        // A subagent runs commands where its parent does.
-        if let Some(backend) = &exec_backend {
-            subagent = subagent.with_exec_backend(Arc::clone(backend));
+            let mut subagent = SubagentTool::new(
+                id,
+                session_dir.clone(),
+                jail,
+                Arc::clone(&llm_client),
+                Some(llm_tx.clone()),
+            )
+            .with_mcp_manager(Arc::clone(&state.mcp_manager))
+            .with_app_config(Arc::clone(&state.config))
+            .with_permission_manager(Arc::clone(&permission_mgr));
+            // A subagent runs commands where its parent does.
+            if let Some(backend) = &exec_backend {
+                subagent = subagent.with_exec_backend(Arc::clone(backend));
+            }
+            tool_registry.register(Arc::new(subagent));
         }
-        tool_registry.register(Arc::new(subagent));
         let tools = Arc::new(tool_registry);
 
         let mut runner = SessionRunner::new(
@@ -657,7 +699,7 @@ fn start_turn(
             runner = runner.with_consolidation_config(app_config.agent.consolidation.clone());
         }
 
-        if let Ok(cm) = checkpoint_mgr {
+        if let Some(cm) = checkpoint_mgr {
             runner = runner.with_checkpoint_manager(cm);
         }
 
@@ -1282,6 +1324,7 @@ pub async fn delete_session(
         }
     }
     state.destroy_exec_cell(id).await;
+    maukode_core::paths::remove_chat_dir(&id.to_string());
     state.emit(GlobalEvent::SessionDeleted { session_id: id });
     Ok(Json(json!({ "status": "deleted", "session_id": id })))
 }

@@ -11,6 +11,10 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Peta codebase tidak lagi menelusuri seluruh folder home: penelusuran berhenti di 5.000 file atau 5 detik, dan system prompt tidak memuat peta bila folder kerja adalah home atau `/`. Sebelumnya sesi yang dimulai dari home menghabiskan CPU berlama-lama.
 
+### Added
+
+- Mode chat saja: di form "Sesi baru" web UI, mengosongkan "Folder proyek" (atau menekan "Chat saja") memulai percakapan tanpa folder proyek. Agent hanya punya pencarian web dan memori, tanpa akses file dan shell, tanpa peta codebase. Sesi chat dikelompokkan di "Chat" dan folder kosongnya dihapus bersama sesi. API: `POST /sessions` dengan `chat: true`.
+
 ## [0.7.0] - 2026-10-25
 
 ### Added

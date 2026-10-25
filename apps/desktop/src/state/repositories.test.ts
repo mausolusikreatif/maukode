@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { SessionListItem } from "../api/types";
 import { recentRepositories, repositoryName } from "./repositories";
 
-const session = (directory: string, project_dir: string | null = null): SessionListItem => ({
+const session = (
+  directory: string,
+  project_dir: string | null = null,
+  chat = false,
+): SessionListItem => ({
   id: directory,
   directory,
   project_dir,
@@ -13,6 +17,7 @@ const session = (directory: string, project_dir: string | null = null): SessionL
   updated_at: "2026-01-01T00:00:00Z",
   worktree_branch: null,
   archived: false,
+  chat,
   running: false,
   pending_permission_count: 0,
   turn_started_at: null,
@@ -29,6 +34,12 @@ describe("recentRepositories", () => {
         session("/code/last"),
       ]),
     ).toEqual(["/code/last", "/code/project"]);
+  });
+
+  it("never offers the folder of a chat as a project", () => {
+    expect(
+      recentRepositories([], [session("/data/maukode/chats/abc", null, true), session("/code/a")]),
+    ).toEqual(["/code/a"]);
   });
 
   it("removes blanks and limits the list", () => {

@@ -38,7 +38,7 @@ bodies with a 4xx/5xx status.
 | GET | `/permissions/mode?session_id=` | | per-session if given |
 | POST | `/permissions/mode` | `{mode, session_id?}` | with `session_id` only that session changes; without, default **and all** sessions change |
 | GET | `/sessions` | `?directory=&all=` | items add `running`, `pending_permission_count`, `project_dir`, `worktree_branch`; header `X-Event-Seq` (see Global feed) |
-| POST | `/sessions` | `{directory?, title?, provider?, model?, isolation?}` | `isolation: "worktree"` → own git worktree + branch; `400` if not a git repo / no commits |
+| POST | `/sessions` | `{directory?, title?, provider?, model?, isolation?, chat?}` | `isolation: "worktree"` → own git worktree + branch; `400` if not a git repo / no commits. `chat: true` → chat-only session in a private empty folder (`<data_dir>/maukode/chats/<id>`) with only the web and memory tools; `400` if combined with `directory` or `isolation`; `SessionListItem.chat` marks such sessions |
 | GET | `/sessions/{id}` | `?limit=N` (newest N messages) | detail + snapshot (below) |
 | GET | `/sessions/{id}/messages` | `?before=&limit=` | backwards paging, default 50, max 500: `{total, start, end, has_more, messages}`; next page: `before=start` |
 | PUT | `/sessions/{id}/model` | `{provider_id?, model}` | pins provider/model to this session only |

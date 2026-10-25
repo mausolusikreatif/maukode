@@ -10,4 +10,9 @@ provider: string | null, model: string | null,
  * `"worktree"` runs the agent in its own git worktree/branch so parallel agents on the same
  * repository cannot overwrite each other. Omit for the shared checkout.
  */
-isolation: Isolation | null, };
+isolation: Isolation | null, 
+/**
+ * A conversation without a project: a private empty folder, only the web and memory tools,
+ * and no codebase map. Cannot be combined with `directory` or `isolation`.
+ */
+chat: boolean | null, };

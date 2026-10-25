@@ -465,7 +465,11 @@ impl ServerState {
         if let Some(entry) = contexts.get(&key) {
             return entry.clone();
         }
-        let (context, memory) = maukode_core::project_context(dir);
+        let (context, memory) = if maukode_core::paths::is_chat_dir(dir) {
+            maukode_core::chat_context(dir)
+        } else {
+            maukode_core::project_context(dir)
+        };
         let entry = (Arc::new(context), memory);
         if entry.1.is_some() {
             contexts.insert(key, entry.clone());

@@ -9,6 +9,7 @@ import {
   matchesSearch,
   matchesStatus,
   projectOfSession,
+  CHAT_GROUP,
   saveArchivedSessions,
   savePinnedSessions,
   sortSessions,
@@ -34,6 +35,7 @@ const mockSession = (overrides: Partial<SessionListItem> = {}): SessionListItem 
   updated_at: "2026-10-06T12:00:00Z",
   worktree_branch: null,
   archived: false,
+  chat: false,
   running: false,
   pending_permission_count: 0,
   turn_started_at: null,
@@ -89,6 +91,15 @@ describe("projectOfSession", () => {
     expect(projectOfSession(mockSession({ directory: "/home/repo", project_dir: null }))).toBe(
       "/home/repo",
     );
+  });
+});
+
+describe("chat sessions", () => {
+  it("are grouped together, whatever their private folders are called", () => {
+    const a = mockSession({ directory: "/data/maukode/chats/a", chat: true });
+    const b = mockSession({ directory: "/data/maukode/chats/b", chat: true });
+    expect(projectOfSession(a)).toBe(CHAT_GROUP);
+    expect(projectOfSession(b)).toBe(CHAT_GROUP);
   });
 });
 

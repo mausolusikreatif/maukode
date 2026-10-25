@@ -51,8 +51,12 @@ export function saveArchivedSessions(ids: Iterable<string>): void {
   }
 }
 
-/** Returns the project directory or directory path for grouping. */
+/** The group every chat-only session belongs to; it is shown under this name. */
+export const CHAT_GROUP = "Chat";
+
+/** Returns the project directory or directory path for grouping. Chats have no project. */
 export function projectOfSession(s: SessionListItem): string {
+  if (s.chat) return CHAT_GROUP;
   return s.project_dir ?? s.directory;
 }
 

@@ -98,8 +98,8 @@ export function Session({ onBack, reviewOpen, onToggleReview }: {
         <div className="head-title">
           <TitleEditor key={activeId} id={activeId} title={meta?.title || item?.title || ""} />
           <div className="small muted trunc">
-            {meta ? baseName(meta.directory) : ""}{meta?.branch ? ` / ${meta.branch.replace(/^maukode\//, "")}` : ""}
-            {" "}<ExecTag />
+            {item?.chat ? "Chat" : meta ? baseName(meta.directory) : ""}{meta?.branch ? ` / ${meta.branch.replace(/^maukode\//, "")}` : ""}
+            {" "}{!item?.chat && <ExecTag />}
           </div>
         </div>
         <span className={`dot ${state}`} title={state === "hold" ? "menunggu izin" : state === "run" ? "berjalan" : "siap"} />

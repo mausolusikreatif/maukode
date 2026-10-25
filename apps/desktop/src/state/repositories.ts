@@ -11,7 +11,9 @@ function clean(path: string): string {
 
 /** Combines last-used repositories with projects discovered from daemon sessions. */
 export function recentRepositories(saved: string[], sessions: SessionListItem[]): string[] {
-  const fromSessions = sessions.map((session) => session.project_dir ?? session.directory);
+  // A chat's folder is private and empty: it is not a place to start a project session.
+  const projects = sessions.filter((session) => !session.chat);
+  const fromSessions = projects.map((session) => session.project_dir ?? session.directory);
   const seen = new Set<string>();
   return [...saved, ...fromSessions]
     .map(clean)
