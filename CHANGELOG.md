@@ -22,6 +22,11 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Snapshot system prompt dan skema tool**: prompt dan skema tool yang dikirim ke model kini
+  disimpan sekali per kombinasi unik (tabel `prompt_snapshots`, dideduplikasi dengan hash) dan
+  dirujuk oleh setiap request lewat `usage_requests.snapshot_hash`. `GET
+  /api/v1/sessions/{id}/system-prompt` menampilkan prompt, perkiraan token, dan ukuran tiap tool
+  dari request terakhir sesi; snapshot yang tak lagi dirujuk ikut terhapus bersama sesinya.
 - **Ukuran konteks vs total di pemakaian sesi**: web UI menampilkan "konteks 30k" (input request
   terakhir) di samping "total 546k" (jumlah semua request, karena riwayat dikirim ulang di tiap
   request), dan status bar TUI menampilkan `ctx`. Setiap request agen utama kini disimpan di tabel

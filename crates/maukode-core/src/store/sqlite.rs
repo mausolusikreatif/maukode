@@ -142,6 +142,34 @@ fn opt_count_at(row: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<Option<u6
     Ok(row.get::<_, Option<i64>>(i)?.map(|v| v.max(0) as u64))
 }
 
+/// The system prompt and tool schemas (a JSON array) that requests were sent with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PromptSnapshot {
+    pub hash: String,
+    pub system_prompt: String,
+    pub tools_json: String,
+    pub created_at: String,
+}
+
+fn snapshot_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PromptSnapshot> {
+    Ok(PromptSnapshot {
+        hash: row.get(0)?,
+        system_prompt: row.get(1)?,
+        tools_json: row.get(2)?,
+        created_at: row.get(3)?,
+    })
+}
+
+/// Identity of a prompt/tool-schema pair: SHA-256 over both, separated by a NUL byte.
+fn prompt_snapshot_hash(system_prompt: &str, tools_json: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(system_prompt.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(tools_json.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 /// One request the main agent sent to the model, as stored in `usage_requests`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageRequestRecord {
@@ -150,6 +178,7 @@ pub struct UsageRequestRecord {
     pub output_tokens: u64,
     pub cache_read_tokens: Option<u64>,
     pub cache_write_tokens: Option<u64>,
+    pub snapshot_hash: Option<String>,
     pub created_at: String,
 }
 
@@ -375,10 +404,19 @@ impl SqliteSessionStore {
                 output_tokens INTEGER NOT NULL,
                 cache_read_tokens INTEGER,
                 cache_write_tokens INTEGER,
+                snapshot_hash TEXT,
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_usage_requests_session_id
                 ON usage_requests(session_id, id);
+
+            -- The system prompt and tool schemas of requests, stored once per distinct pair.
+            CREATE TABLE IF NOT EXISTS prompt_snapshots (
+                hash TEXT PRIMARY KEY,
+                system_prompt TEXT NOT NULL,
+                tools_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS compaction_audit (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -408,6 +446,7 @@ impl SqliteSessionStore {
             "ALTER TABLE sessions ADD COLUMN base_commit TEXT;",
             "ALTER TABLE messages ADD COLUMN content_hash TEXT;",
             "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE usage_requests ADD COLUMN snapshot_hash TEXT;",
         ] {
             match retry_busy(|| conn.execute(ddl, [])) {
                 Ok(_) => {}
@@ -822,12 +861,13 @@ impl SqliteSessionStore {
         id: SessionId,
         model: &str,
         usage: &maukode_protocol::TokenUsage,
+        snapshot_hash: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO usage_requests (session_id, model, input_tokens, output_tokens, \
-             cache_read_tokens, cache_write_tokens, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             cache_read_tokens, cache_write_tokens, snapshot_hash, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id.to_string(),
                 model,
@@ -835,10 +875,57 @@ impl SqliteSessionStore {
                 usage.output_tokens as i64,
                 usage.cache_read_tokens.map(|v| v as i64),
                 usage.cache_write_tokens.map(|v| v as i64),
+                snapshot_hash,
                 Utc::now().to_rfc3339(),
             ],
         )?;
         Ok(())
+    }
+
+    /// Store a system prompt and tool schemas once, however many requests used them, and return
+    /// the hash that identifies the pair.
+    pub async fn record_prompt_snapshot(
+        &self,
+        system_prompt: &str,
+        tools_json: &str,
+    ) -> Result<String> {
+        let hash = prompt_snapshot_hash(system_prompt, tools_json);
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT OR IGNORE INTO prompt_snapshots (hash, system_prompt, tools_json, \
+             created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![hash, system_prompt, tools_json, Utc::now().to_rfc3339()],
+        )?;
+        Ok(hash)
+    }
+
+    /// A stored prompt/tool-schema pair by its hash.
+    pub async fn prompt_snapshot(&self, hash: &str) -> Result<Option<PromptSnapshot>> {
+        let conn = self.conn.lock().await;
+        let snapshot = conn
+            .query_row(
+                "SELECT hash, system_prompt, tools_json, created_at FROM prompt_snapshots \
+                 WHERE hash = ?1",
+                params![hash],
+                snapshot_from_row,
+            )
+            .optional()?;
+        Ok(snapshot)
+    }
+
+    /// The prompt and tool schemas of the session's latest recorded request.
+    pub async fn latest_prompt_snapshot(&self, id: SessionId) -> Result<Option<PromptSnapshot>> {
+        let conn = self.conn.lock().await;
+        let snapshot = conn
+            .query_row(
+                "SELECT s.hash, s.system_prompt, s.tools_json, s.created_at \
+                 FROM usage_requests r JOIN prompt_snapshots s ON s.hash = r.snapshot_hash \
+                 WHERE r.session_id = ?1 ORDER BY r.id DESC LIMIT 1",
+                params![id.to_string()],
+                snapshot_from_row,
+            )
+            .optional()?;
+        Ok(snapshot)
     }
 
     /// The session's requests in the order they were sent.
@@ -846,7 +933,7 @@ impl SqliteSessionStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
             "SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, \
-             created_at FROM usage_requests WHERE session_id = ?1 ORDER BY id",
+             snapshot_hash, created_at FROM usage_requests WHERE session_id = ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map(params![id.to_string()], |row| {
             Ok(UsageRequestRecord {
@@ -855,7 +942,8 @@ impl SqliteSessionStore {
                 output_tokens: count_at(row, 2)?,
                 cache_read_tokens: opt_count_at(row, 3)?,
                 cache_write_tokens: opt_count_at(row, 4)?,
-                created_at: row.get(5)?,
+                snapshot_hash: row.get(5)?,
+                created_at: row.get(6)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -911,6 +999,11 @@ impl SqliteSessionStore {
                 params![id],
             )?;
         }
+        tx.execute(
+            "DELETE FROM prompt_snapshots WHERE hash NOT IN \
+             (SELECT snapshot_hash FROM usage_requests WHERE snapshot_hash IS NOT NULL)",
+            [],
+        )?;
         let deleted = tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
         tx.commit()?;
         Ok(deleted > 0)
@@ -1430,11 +1523,11 @@ mod tests {
             cache_write_tokens: None,
         };
         store
-            .record_usage_request(session.id, "m", &first)
+            .record_usage_request(session.id, "m", &first, None)
             .await
             .unwrap();
         store
-            .record_usage_request(session.id, "m", &second)
+            .record_usage_request(session.id, "m", &second, None)
             .await
             .unwrap();
 
@@ -1452,6 +1545,48 @@ mod tests {
         store.delete_session(session.id).await.unwrap();
         let requests = store.session_usage_requests(session.id).await.unwrap();
         assert!(requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn identical_prompts_are_stored_once_and_go_with_their_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(dir.path().join("db.sqlite")).unwrap();
+        let mut session = Session::new(dir.path());
+        session.add_message(Message::user("first"));
+        store.save_session(&session, "p", "m").await.unwrap();
+
+        let a = store.record_prompt_snapshot("system", "[]").await.unwrap();
+        let b = store.record_prompt_snapshot("system", "[]").await.unwrap();
+        let other = store.record_prompt_snapshot("other", "[]").await.unwrap();
+        assert_eq!(a, b, "the same pair is the same snapshot");
+        assert_ne!(a, other);
+
+        let latest = store.latest_prompt_snapshot(session.id).await.unwrap();
+        assert_eq!(latest, None, "no request has used one yet");
+
+        let usage = maukode_protocol::TokenUsage {
+            input_tokens: 10,
+            output_tokens: 1,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        };
+        store
+            .record_usage_request(session.id, "m", &usage, Some(a.as_str()))
+            .await
+            .unwrap();
+        let latest = store.latest_prompt_snapshot(session.id).await.unwrap();
+        let latest = latest.unwrap();
+        assert_eq!(latest.hash, a);
+        assert_eq!(latest.system_prompt, "system");
+        assert_eq!(latest.tools_json, "[]");
+
+        let requests = store.session_usage_requests(session.id).await.unwrap();
+        assert_eq!(requests[0].snapshot_hash.as_deref(), Some(a.as_str()));
+
+        // Deleting the session drops the snapshots nothing refers to any more.
+        store.delete_session(session.id).await.unwrap();
+        assert_eq!(store.prompt_snapshot(&a).await.unwrap(), None);
+        assert_eq!(store.prompt_snapshot(&other).await.unwrap(), None);
     }
 
     #[tokio::test]

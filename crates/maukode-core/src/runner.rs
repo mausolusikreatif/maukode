@@ -342,9 +342,11 @@ impl SessionRunner {
         let mut system_prompt = self.session_system_prompt().await;
         let workspace = self.session.read().await.directory.clone();
         let tool_defs = self.tools.definitions();
-        let tool_schema_tokens = crate::compaction::TokenEstimator::estimate_text(
-            &serde_json::to_string(&tool_defs).unwrap_or_default(),
-        );
+        let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
+        let tool_schema_tokens = crate::compaction::TokenEstimator::estimate_text(&tools_json);
+        // Identifies the prompt and tool schemas of the requests below; looked up once, and again
+        // only when a compaction rebuilds the prompt.
+        let mut snapshot_hash: Option<String> = None;
         // Context size the provider reported for the last step (prompt plus reply), and how many
         // session messages that covered. Later steps add an estimate for the newer messages only.
         let mut reported_context: Option<(usize, usize)> = None;
@@ -480,6 +482,7 @@ impl SessionRunner {
                     // Compaction starts a new prefix: pick up the current instructions and map.
                     if compacted {
                         system_prompt = self.session_system_prompt().await;
+                        snapshot_hash = None;
                     }
                 }
             }
@@ -513,6 +516,9 @@ impl SessionRunner {
             let mut is_cancelled = false;
 
             'attempts: loop {
+                if snapshot_hash.is_none() {
+                    snapshot_hash = self.save_snapshot(&system_prompt, &tools_json).await;
+                }
                 let mut req = LLMRequest::new(&self.config.model, pruned_messages.clone())
                     .with_system_prompt(&system_prompt)
                     .with_tools(tool_defs.clone());
@@ -583,7 +589,7 @@ impl SessionRunner {
                                     step_tokens =
                                         usize::try_from(usage.input_tokens + usage.output_tokens)
                                             .ok();
-                                    self.record_request_usage(session_id, usage).await;
+                                    self.note_usage(session_id, usage, &snapshot_hash).await;
                                 }
                                 _ => {}
                             }
@@ -1069,15 +1075,32 @@ impl SessionRunner {
         prompt
     }
 
+    /// Store the prompt and tool schemas of the request about to be sent and return their hash.
+    async fn save_snapshot(&self, system_prompt: &str, tools_json: &str) -> Option<String> {
+        let store = self.permission_store.as_ref()?;
+        let saved = store.record_prompt_snapshot(system_prompt, tools_json);
+        match saved.await {
+            Ok(hash) => Some(hash),
+            Err(error) => {
+                debug!(%error, "Failed to record the prompt snapshot");
+                None
+            }
+        }
+    }
+
     /// Store one request of the main agent: the per-request usage series and the context size.
-    async fn record_request_usage(&self, session_id: SessionId, usage: &TokenUsage) {
+    async fn note_usage(
+        &self,
+        session_id: SessionId,
+        usage: &TokenUsage,
+        snapshot: &Option<String>,
+    ) {
         let Some(store) = &self.permission_store else {
             return;
         };
-        if let Err(error) = store
-            .record_usage_request(session_id, &self.config.model, usage)
-            .await
-        {
+        let model = &self.config.model;
+        let recorded = store.record_usage_request(session_id, model, usage, snapshot.as_deref());
+        if let Err(error) = recorded.await {
             debug!(%error, "Failed to record request usage");
         }
     }
