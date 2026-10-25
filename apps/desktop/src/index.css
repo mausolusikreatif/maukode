@@ -303,6 +303,8 @@ kbd { font: inherit; font-size: 10.5px; padding: 0 0.35em; margin-left: 0.4em; b
 .inbox-card .cmd { margin: 0; max-height: 8rem; overflow: auto; padding: 0.5rem 0.65rem; background: var(--paper); border: 1px solid var(--line); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .inbox-card .acts { display: grid; grid-template-columns: 1fr 1.6fr; gap: 0.6rem; }
 .inbox-card .acts .btn { min-height: 2.9rem; }
+.prompt-panel { border-bottom: 1px solid var(--line); background: var(--surface); padding: 0.6rem 1rem; display: grid; gap: 0.45rem; max-height: 45vh; overflow-y: auto; }
+.prompt-panel .cmd { margin: 0; max-height: 16rem; overflow: auto; padding: 0.5rem 0.65rem; background: var(--paper); border: 1px solid var(--line); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .more > summary { cursor: pointer; color: var(--ink-2); font-size: 12px; }
 .more .acts2 { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
 .orow {
