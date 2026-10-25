@@ -7,6 +7,8 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-25
+
 ### Fixed
 
 - **Token cache terbaca di provider OpenAI-compatible**: usage kini membaca
