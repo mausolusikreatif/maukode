@@ -22,6 +22,12 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Hasil tool lama dipangkas tanpa menunggu jendela konteks penuh**: bila provider tidak punya
+  prompt cache (tidak pernah melaporkan cache hit), hasil tool yang lebih lama dari jendela terbaru
+  dipotong head/tail begitu timbunannya mencapai ±6k token, dan batas "lama" hanya maju per 6 pesan
+  asisten supaya bagian yang sudah dipangkas tidak berubah di antaranya. Dengan cache, perilaku
+  lama tetap berlaku (pangkas setelah konteks 60% penuh), karena menulis ulang pesan lama membuang
+  cache. Sebelumnya, pada model berjendela 1 juta token pemangkasan praktis tidak pernah aktif.
 - **Snapshot system prompt dan skema tool**: prompt dan skema tool yang dikirim ke model kini
   disimpan sekali per kombinasi unik (tabel `prompt_snapshots`, dideduplikasi dengan hash) dan
   dirujuk oleh setiap request lewat `usage_requests.snapshot_hash`. `GET

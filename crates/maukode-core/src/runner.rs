@@ -55,6 +55,14 @@ const STREAM_RESUME_PROMPT: &str = "Your previous response was cut off by a conn
 /// Share of the context window from which older tool outputs are truncated (see `run_turn`).
 const PRUNE_FROM_USAGE: f32 = 0.6;
 
+/// Stale tool output, in tokens, that makes pruning worth it when the provider has no prompt
+/// cache: every request would otherwise pay full price to send it again.
+const STALE_PRUNE_TOKENS: usize = 6_000;
+
+/// The pruning cutoff moves this many assistant messages at a time, so what was pruned stays the
+/// same between moves.
+const PRUNE_BATCH: usize = 6;
+
 /// Tools without side effects. When every call of a step is one of these they run concurrently.
 const READ_ONLY_TOOLS: &[&str] = &[
     "fetch_web_content",
@@ -347,6 +355,8 @@ impl SessionRunner {
         // Identifies the prompt and tool schemas of the requests below; looked up once, and again
         // only when a compaction rebuilds the prompt.
         let mut snapshot_hash: Option<String> = None;
+        // Whether the provider has served any request of this session from its prompt cache.
+        let mut provider_caches = self.provider_caches(session_id).await;
         // Context size the provider reported for the last step (prompt plus reply), and how many
         // session messages that covered. Later steps add an estimate for the newer messages only.
         let mut reported_context: Option<(usize, usize)> = None;
@@ -396,6 +406,14 @@ impl SessionRunner {
                 >= PRUNE_FROM_USAGE
             {
                 pruned_messages = pruner.prune_messages(&current_messages);
+            } else if !provider_caches {
+                // No cache to protect: stop paying for old tool output once enough of it piles up.
+                // With a cache, rewriting old messages costs more than re-reading them, so only
+                // the window-fullness gate above applies.
+                let stale_chars = pruner.stale_chars(&current_messages, PRUNE_BATCH);
+                if stale_chars / 4 >= STALE_PRUNE_TOKENS {
+                    pruned_messages = pruner.prune_batched(&current_messages, PRUNE_BATCH);
+                }
             }
 
             // Context window threshold monitoring
@@ -589,6 +607,9 @@ impl SessionRunner {
                                     step_tokens =
                                         usize::try_from(usage.input_tokens + usage.output_tokens)
                                             .ok();
+                                    if usage.cache_read_tokens.unwrap_or(0) > 0 {
+                                        provider_caches = true;
+                                    }
                                     self.note_usage(session_id, usage, &snapshot_hash).await;
                                 }
                                 _ => {}
@@ -1073,6 +1094,15 @@ impl SessionRunner {
         let prompt = self.context.render_system_context().await;
         self.session.write().await.system_prompt = Some(prompt.clone());
         prompt
+    }
+
+    /// Whether the provider has served any recorded request of the session from its prompt cache.
+    async fn provider_caches(&self, session_id: SessionId) -> bool {
+        let Some(store) = &self.permission_store else {
+            return false;
+        };
+        let hit = store.session_has_cache_hits(session_id);
+        hit.await.unwrap_or(false)
     }
 
     /// Store the prompt and tool schemas of the request about to be sent and return their hash.
