@@ -20,6 +20,7 @@ pub mod session;
 pub mod skills;
 pub mod store;
 pub mod subagent;
+pub mod update;
 pub mod worktree;
 
 pub use chatgpt_auth::{AuthEndpoints, ChatGptAuth, LoginAttempt};
