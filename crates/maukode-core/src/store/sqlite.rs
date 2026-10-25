@@ -27,6 +27,9 @@ pub struct SessionSummary {
     /// Hidden from the default session list (`PUT /sessions/{id}/archive`).
     #[serde(default)]
     pub archived: bool,
+    /// A chat-only session: it works in a private empty folder and belongs to no project.
+    #[serde(default)]
+    pub chat: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1303,6 +1306,7 @@ impl SqliteSessionStore {
                 let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
                     .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now());
+                let chat = crate::paths::is_chat_dir(Path::new(&directory));
                 summaries.push(SessionSummary {
                     id: SessionId(uuid),
                     directory,
@@ -1314,6 +1318,7 @@ impl SqliteSessionStore {
                     project_dir,
                     worktree_branch,
                     archived,
+                    chat,
                 });
             }
         }
@@ -1377,6 +1382,7 @@ impl SqliteSessionStore {
                 let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
                     .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now());
+                let chat = crate::paths::is_chat_dir(Path::new(&directory));
                 summaries.push(SessionSummary {
                     id: SessionId(uuid),
                     directory,
@@ -1388,6 +1394,7 @@ impl SqliteSessionStore {
                     project_dir,
                     worktree_branch,
                     archived,
+                    chat,
                 });
             }
         }

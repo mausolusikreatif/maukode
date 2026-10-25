@@ -35,7 +35,7 @@ pub use config::{
 };
 pub use consolidation::{ConsolidationConfig, ConsolidationEngine, ConsolidationReport};
 pub use context::{
-    context_with_project_memory, memory_auto_extract_enabled, project_context,
+    chat_context, context_with_project_memory, memory_auto_extract_enabled, project_context,
     register_memory_tools, ContextManager, MemoryBinding,
 };
 pub use hooks::{Hook, Hooks, HooksConfig};

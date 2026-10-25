@@ -21,4 +21,8 @@ project_dir: string | null, worktree_branch: string | null,
 /**
  * Hidden from the default session list (`PUT /sessions/{id}/archive`).
  */
-archived: boolean, };
+archived: boolean, 
+/**
+ * A chat-only session: it works in a private empty folder and belongs to no project.
+ */
+chat: boolean, };

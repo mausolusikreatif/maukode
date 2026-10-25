@@ -15,6 +15,8 @@ export function Home() {
   const [worktree, setWorktree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // No folder means a chat: no files, no shell, nothing to scan.
+  const chat = dir.trim() === "";
 
   const start = async () => {
     setBusy(true);
@@ -24,7 +26,8 @@ export function Home() {
       if (directory) rememberRepository(directory);
       await createSession({
         directory, title: null, provider: null, model: null,
-        isolation: worktree ? "worktree" : null,
+        isolation: !chat && worktree ? "worktree" : null,
+        chat: chat ? true : null,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -39,7 +42,8 @@ export function Home() {
     <div className="home">
       <form className="home-in" onSubmit={(e) => { e.preventDefault(); void start(); }}>
         <p className="muted" style={{ margin: 0 }}>
-          Pilih folder proyek tempat agent bekerja. Kosongkan untuk memakai folder bawaan server.
+          Pilih folder proyek tempat agent bekerja. Kosongkan untuk chat saja: tanpa akses file dan shell,
+          hanya pencarian web dan memori.
         </p>
         <label className="label" htmlFor="dir">Folder proyek</label>
         <input
@@ -48,15 +52,14 @@ export function Home() {
           onChange={(e) => setDir(e.target.value)}
         />
         <datalist id="recent-dirs">{recents.map((r) => <option key={r} value={r} />)}</datalist>
-        {recents.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {recents.slice(0, 5).map((r) => (
-              <button key={r} type="button" className="btn small" title={r} onClick={() => setDir(r)}>{baseName(r)}</button>
-            ))}
-          </div>
-        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <button type="button" className="btn small" aria-pressed={chat} onClick={() => setDir("")}>Chat saja</button>
+          {recents.slice(0, 5).map((r) => (
+            <button key={r} type="button" className="btn small" title={r} onClick={() => setDir(r)}>{baseName(r)}</button>
+          ))}
+        </div>
         <label className="checkrow">
-          <input type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} />
+          <input type="checkbox" checked={worktree && !chat} disabled={chat} onChange={(e) => setWorktree(e.target.checked)} />
           <span>
             Jalankan di git worktree terpisah
             <span className="muted small" style={{ display: "block" }}>
@@ -66,7 +69,7 @@ export function Home() {
         </label>
         {error && <div className="notice error">{error}</div>}
         <button className="btn send" type="submit" disabled={busy} style={{ justifySelf: "start" }}>
-          {busy ? "Membuat…" : "Mulai sesi"}
+          {busy ? "Membuat…" : chat ? "Mulai chat" : "Mulai sesi"}
         </button>
       </form>
     </div>

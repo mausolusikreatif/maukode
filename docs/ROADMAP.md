@@ -27,6 +27,7 @@ remove a feature, update its row in the same PR.
 | Git worktree isolation per session | **done** | `worktree.rs`; web UI commit/merge in `ui/Review.tsx` |
 | Context pruning and automatic/manual compaction | **done** | `compaction/`; `/compact` |
 | Tree-Sitter repo map (Rust, TS/JS, Python, Go) | **done** | `repo_map/`; `get_codebase_map`; `/map`; a walk stops at 5,000 files or 5 s, and the system prompt carries no map for a home directory or `/` (`is_too_broad`) |
+| Chat-only sessions | **done** (web UI and API; no CLI/TUI flag) | `POST /sessions {chat: true}`: private empty folder `<data_dir>/maukode/chats/<id>` (`paths::is_chat_dir`), tools limited to `web_search`/`fetch_web_content` and the memory tools (global scope, `chat_context`), no codebase map, MCP, subagent, checkpoints or exec backend; web UI: an empty "Folder proyek" starts a chat; `SessionSummary.chat` groups them under "Chat" |
 | `AGENTS.md` discovery and `maukode init` | **done** | `rules/` |
 | MCP client (stdio) | **done** | `mcp/`; `/mcp`; tool lists refreshed after `notifications/tools/list_changed`, server `ping` answered |
 | Subagents | **done** | `subagent.rs`; `invoke_subagent` |

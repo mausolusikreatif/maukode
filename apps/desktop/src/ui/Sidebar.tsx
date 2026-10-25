@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../state/store";
 import { baseName, shortAgo } from "../state/format";
-import { filterSessions, groupSessionsByProject } from "../state/sessionFilters";
+import { CHAT_GROUP, filterSessions, groupSessionsByProject } from "../state/sessionFilters";
 import type { SessionListItem } from "../api/types";
 
 function stateOf(s: SessionListItem): { cls: string; label: string } {
@@ -85,7 +85,7 @@ export function Sidebar({ tab, onGo, onOpened }: {
                 {project && (
                   <button
                     className="btn quiet small" aria-label={`Sesi baru di ${baseName(project)}`}
-                    onClick={() => { useApp.getState().openNewSession(project); onGo("new"); }}
+                    onClick={() => { useApp.getState().openNewSession(project === CHAT_GROUP ? "" : project); onGo("new"); }}
                   >
                     + Baru
                   </button>

@@ -70,6 +70,24 @@ pub fn context_with_project_memory(
     (context, binding)
 }
 
+/// The context of a chat-only session in `dir`. It has no project, so the knowledge it uses is
+/// the user's global memory, shared by every chat.
+pub fn chat_context(dir: impl AsRef<Path>) -> (ContextManager, Option<MemoryBinding>) {
+    let binding = match MemoryBinding::open_default(Scope::global()) {
+        Ok(binding) => Some(binding.with_auto_extract(memory_auto_extract_enabled())),
+        Err(e) => {
+            tracing::warn!("Memory store unavailable, continuing without it: {e}");
+            None
+        }
+    };
+    let context = ContextManager::new(dir.as_ref()).for_chat();
+    let context = match &binding {
+        Some(binding) => context.with_knowledge(binding.clone()),
+        None => context,
+    };
+    (context, binding)
+}
+
 /// Like [`context_with_project_memory`] without registering tools, for callers that keep the
 /// context across turns (its repo-map cache then survives) and register the tools per turn.
 pub fn project_context(dir: impl AsRef<Path>) -> (ContextManager, Option<MemoryBinding>) {
@@ -93,6 +111,8 @@ pub struct ContextManager {
     repo_map: Arc<RepoMapGenerator>,
     memory: Arc<ProjectMemory>,
     knowledge: Option<MemoryBinding>,
+    /// A chat-only session: no project, so no codebase map, project rules or coding guidelines.
+    chat: bool,
 }
 
 impl ContextManager {
@@ -105,7 +125,14 @@ impl ContextManager {
             repo_map,
             memory,
             knowledge: None,
+            chat: false,
         }
+    }
+
+    /// Make this the context of a chat-only session (see [`chat_context`]).
+    pub fn for_chat(mut self) -> Self {
+        self.chat = true;
+        self
     }
 
     /// Attach a knowledge store so the system prompt can carry the taxonomy template and relevant
@@ -191,10 +218,29 @@ impl ContextManager {
         out
     }
 
+    /// The system prompt of a chat-only session: conversation, no files and no shell.
+    fn render_chat_context() -> String {
+        let os = std::env::consts::OS;
+        let arch = std::env::consts::ARCH;
+        format!(
+            "You are MauKode in chat mode: a conversational assistant that is not attached to a project.\n\
+             Environment:\n\
+             - Operating System: {os} ({arch})\n\n\
+             Guidelines:\n\
+             - Answer directly and keep responses concise. Reply in the language the user writes in.\n\
+             - You have no access to files or a shell here. If the user wants code changed or commands run, tell them to start a session in a project folder.\n\
+             - Use `web_search` and `fetch_web_content` for current or unfamiliar information.\n\
+             - Use the memory tools to keep durable facts about the user across chats, and only when they are worth keeping.\n"
+        )
+    }
+
     /// Render baseline system context with project instructions and codebase repository map.
     /// Keep it free of anything that changes from turn to turn (see [`Self::render_turn_context`]),
     /// so providers can cache it.
     pub async fn render_system_context(&self) -> String {
+        if self.chat {
+            return Self::render_chat_context();
+        }
         let os = std::env::consts::OS;
         let arch = std::env::consts::ARCH;
         let cwd_str = self.cwd.display().to_string();
@@ -240,5 +286,33 @@ impl ContextManager {
         }
 
         prompt
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_chat_prompt_has_no_project_material() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("lib.rs"), "pub struct Item {}").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "Project rule: always say moo").unwrap();
+        let context = ContextManager::new(dir.path()).for_chat();
+        let prompt = context.render_system_context().await;
+        assert!(prompt.contains("chat mode"));
+        assert!(!prompt.contains("Codebase Map"));
+        assert!(!prompt.contains("moo"));
+        assert!(!prompt.contains(&dir.path().display().to_string()));
+    }
+
+    #[tokio::test]
+    async fn a_project_prompt_still_carries_the_map_and_the_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("lib.rs"), "pub struct Item {}").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "Project rule: always say moo").unwrap();
+        let prompt = ContextManager::new(dir.path()).render_system_context().await;
+        assert!(prompt.contains("Codebase Map"));
+        assert!(prompt.contains("moo"));
     }
 }
