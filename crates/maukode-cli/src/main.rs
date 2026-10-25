@@ -332,6 +332,19 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // An update is mentioned by the commands a person starts by hand: at once for `server`, and
+    // after the TUI has closed, since it would be wiped from the screen before that.
+    let is_server = matches!(cli.command, Some(Commands::Server { .. }));
+    let is_tui_start = cli.command.is_none();
+    let update_notice = if is_server || is_tui_start {
+        maukode_core::update::startup_notice(env!("CARGO_PKG_VERSION"))
+    } else {
+        None
+    };
+    if is_server {
+        print_update_notice(update_notice.as_deref());
+    }
+
     // Handle "update" subcommand
     if let Some(Commands::Update { check, version }) = cli.command {
         run_update(check, version).await?;
@@ -767,6 +780,7 @@ async fn main() -> anyhow::Result<()> {
             cli.max_steps,
         )
         .await?;
+        print_update_notice(update_notice.as_deref());
         return Ok(());
     }
 
@@ -1239,8 +1253,19 @@ async fn main() -> anyhow::Result<()> {
         cli.max_steps,
     )
     .await?;
+    print_update_notice(update_notice.as_deref());
 
     Ok(())
+}
+
+/// Show `notice` on stderr, but only to a person at a terminal, never into a pipe or a log.
+fn print_update_notice(notice: Option<&str>) {
+    use std::io::IsTerminal;
+    if let Some(notice) = notice {
+        if io::stderr().is_terminal() {
+            eprintln!("\x1b[1;33m{notice}\x1b[0m");
+        }
+    }
 }
 
 /// `maukode update`: check for a newer release and, unless `check`, install it over this

@@ -110,6 +110,8 @@ address. To install by hand, download the tarball from the GitHub release, extra
 To update an installation made this way, run `maukode update` (`--check` only reports whether a
 newer release exists, `--version vX.Y.Z` picks one). It verifies the download, replaces the binary
 and the web UI, and restarts a running daemon. A binary from `cargo install` is not updated by it.
+Such an installation also checks for a newer release once a day in the background and mentions it
+on stderr; set `MAUKODE_NO_UPDATE_CHECK=1` to turn that off.
 
 ### From source
 

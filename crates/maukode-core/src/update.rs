@@ -5,10 +5,18 @@
 //! executable by rename is safe on Linux, so the old process keeps working until it is restarted.
 
 use anyhow::{anyhow, bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const REPO: &str = "mausolusikreatif/maukode";
+
+/// How often the "update available" check asks GitHub.
+const CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
+
+/// Set to a value other than `0` to turn the "update available" check off.
+const NO_CHECK_ENV: &str = "MAUKODE_NO_UPDATE_CHECK";
 
 /// Where `install.sh` put things: `<prefix>/bin/maukode` and `<prefix>/share/maukode/web`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,6 +193,105 @@ fn swap_dir(new: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
+/// What the last "update available" check found, kept in `<data dir>/maukode/update-check.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CheckCache {
+    /// Unix time of the check, in seconds.
+    checked_at: u64,
+    /// The latest release tag then; empty when the check could not reach GitHub.
+    latest: String,
+}
+
+fn now_secs() -> u64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => elapsed.as_secs(),
+        Err(_) => 0,
+    }
+}
+
+fn check_path() -> Option<PathBuf> {
+    let dir = crate::paths::data_dir()?;
+    Some(dir.join("maukode").join("update-check.json"))
+}
+
+fn read_check(path: &Path) -> Option<CheckCache> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn is_stale(cache: Option<&CheckCache>, now: u64) -> bool {
+    match cache {
+        Some(cache) => now.saturating_sub(cache.checked_at) >= CHECK_INTERVAL_SECS,
+        None => true,
+    }
+}
+
+fn notice_for(cache: &CheckCache, current: &str) -> Option<String> {
+    if !is_newer(&cache.latest, current) {
+        return None;
+    }
+    Some(format!(
+        "MauKode {} is available (this is {current}). Run `maukode update`.",
+        cache.latest
+    ))
+}
+
+/// Only an `install.sh` installation can run `maukode update`, so only it is told about updates
+/// (and only it asks GitHub). `MAUKODE_NO_UPDATE_CHECK=1` turns the check off.
+fn check_allowed() -> bool {
+    let opted_out = match std::env::var_os(NO_CHECK_ENV) {
+        Some(value) => !value.is_empty() && value != "0",
+        None => false,
+    };
+    if opted_out {
+        return false;
+    }
+    let exe = std::env::current_exe().ok();
+    exe.and_then(|exe| InstallLayout::of(&exe)).is_some()
+}
+
+/// Ask GitHub for the latest release and store the answer. When GitHub cannot be reached the
+/// time is still stored, so an offline machine asks once a day and not at every start.
+async fn refresh_check(path: PathBuf, previous: Option<CheckCache>) {
+    let latest = match http_client() {
+        Ok(client) => {
+            let wait = Duration::from_secs(10);
+            let asked = tokio::time::timeout(wait, latest_tag(&client)).await;
+            asked.ok().and_then(|result| result.ok())
+        }
+        Err(_) => None,
+    };
+    let latest = latest
+        .or_else(|| previous.map(|cache| cache.latest))
+        .unwrap_or_default();
+    let cache = CheckCache {
+        checked_at: now_secs(),
+        latest,
+    };
+    let Ok(json) = serde_json::to_string(&cache) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, json);
+}
+
+/// For the start of an interactive command: the line to show when an earlier check found a newer
+/// release than `current`. A check older than a day is refreshed in the background, so its result
+/// shows up on a later start and nothing waits for the network. Must run inside a tokio runtime.
+pub fn startup_notice(current: &str) -> Option<String> {
+    if !check_allowed() {
+        return None;
+    }
+    let path = check_path()?;
+    let cache = read_check(&path);
+    if is_stale(cache.as_ref(), now_secs()) {
+        tokio::spawn(refresh_check(path, cache.clone()));
+    }
+    notice_for(&cache?, current)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +319,46 @@ mod tests {
         assert_eq!(normalize_tag("0.5.0").unwrap(), "v0.5.0");
         assert_eq!(normalize_tag("v0.5.0").unwrap(), "v0.5.0");
         assert!(normalize_tag("main").is_err());
+    }
+
+    fn cache(checked_at: u64, latest: &str) -> CheckCache {
+        CheckCache {
+            checked_at,
+            latest: latest.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_check_goes_stale_after_a_day() {
+        let day = CHECK_INTERVAL_SECS;
+        assert!(is_stale(None, 1_000));
+        assert!(!is_stale(Some(&cache(1_000, "v0.6.0")), 1_000 + day - 1));
+        assert!(is_stale(Some(&cache(1_000, "v0.6.0")), 1_000 + day));
+        // The clock went back: not stale.
+        assert!(!is_stale(Some(&cache(5_000, "v0.6.0")), 1_000));
+    }
+
+    #[test]
+    fn the_notice_names_a_newer_release_only() {
+        let newer = notice_for(&cache(0, "v0.7.0"), "0.6.0").unwrap();
+        assert!(newer.contains("v0.7.0"));
+        assert!(newer.contains("maukode update"));
+        assert_eq!(notice_for(&cache(0, "v0.6.0"), "0.6.0"), None);
+        assert_eq!(notice_for(&cache(0, "v0.5.0"), "0.6.0"), None);
+        // A check that could not reach GitHub stores no tag.
+        assert_eq!(notice_for(&cache(0, ""), "0.6.0"), None);
+    }
+
+    #[test]
+    fn a_stored_check_reads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("update-check.json");
+        assert_eq!(read_check(&path), None);
+        const STORED: &str = r#"{"checked_at":7,"latest":"v0.7.0"}"#;
+        std::fs::write(&path, STORED).unwrap();
+        assert_eq!(read_check(&path), Some(cache(7, "v0.7.0")));
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(read_check(&path), None);
     }
 
     #[test]
