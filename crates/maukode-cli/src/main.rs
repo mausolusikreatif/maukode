@@ -144,6 +144,16 @@ enum Commands {
         #[arg(short, long, help = "Force overwrite existing AGENTS.md")]
         force: bool,
     },
+    #[command(about = "Update MauKode to the latest release (installs made by install.sh)")]
+    Update {
+        #[arg(long, help = "Only report whether a newer release exists")]
+        check: bool,
+        #[arg(
+            long,
+            help = "Install this release (for example v0.5.0) instead of the latest"
+        )]
+        version: Option<String>,
+    },
     #[command(about = "Allow a project's own mcp.json to start MCP servers")]
     Trust {
         #[arg(help = "Project folder (defaults to the working directory)")]
@@ -319,6 +329,12 @@ async fn main() -> anyhow::Result<()> {
             println!("\x1b[1;33m{}\x1b[0m", res.message);
             println!("  Path: \x1b[1;36m{}\x1b[0m", res.path.display());
         }
+        return Ok(());
+    }
+
+    // Handle "update" subcommand
+    if let Some(Commands::Update { check, version }) = cli.command {
+        run_update(check, version).await?;
         return Ok(());
     }
 
@@ -1224,6 +1240,64 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    Ok(())
+}
+
+/// `maukode update`: check for a newer release and, unless `check`, install it over this
+/// installation, then restart the background daemon so it runs the new version.
+async fn run_update(check: bool, version: Option<String>) -> anyhow::Result<()> {
+    use maukode_core::update;
+
+    let current = env!("CARGO_PKG_VERSION");
+    let client = update::http_client()?;
+    let tag = match &version {
+        Some(requested) => update::normalize_tag(requested)?,
+        None => update::latest_tag(&client).await?,
+    };
+    let newer = update::is_newer(&tag, current);
+
+    if check {
+        if newer {
+            println!("MauKode {tag} is available (you have {current}). Run: maukode update");
+        } else {
+            println!("MauKode {current} is up to date (latest: {tag}).");
+        }
+        return Ok(());
+    }
+    if version.is_none() && !newer {
+        println!("MauKode {current} is up to date.");
+        return Ok(());
+    }
+
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        anyhow::bail!("release builds exist only for Linux x86_64; build from source instead");
+    }
+    let exe = std::env::current_exe()?;
+    let Some(layout) = update::InstallLayout::of(&exe) else {
+        anyhow::bail!(
+            "{} was not installed by install.sh; re-run the installer",
+            exe.display()
+        );
+    };
+
+    let daemon = maukode_server::get_daemon_status().await.ok().flatten();
+    println!("Updating MauKode {current} -> {tag} ...");
+    update::install(&layout, &tag).await?;
+    println!("Updated to {tag}.");
+
+    if let Some(info) = daemon {
+        maukode_server::stop_daemon().await?;
+        let port = info.url.rsplit(':').next().unwrap_or("4096");
+        let mut restart = tokio::process::Command::new(&layout.binary);
+        restart.args(["server", "start", "--port", port]);
+        if let Some(token) = &info.token {
+            restart.env("MAUKODE_AUTH_TOKEN", token);
+        }
+        let status = restart.status().await?;
+        if !status.success() {
+            println!("The daemon did not restart; run `maukode server restart`.");
+        }
+    }
     Ok(())
 }
 

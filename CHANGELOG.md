@@ -32,6 +32,11 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   progres `git push`) dibuang sebelum masuk ke konteks, dan hasil `cargo` yang lebih dari 400 baris
   dipotong di tengah. Output yang gagal tidak pernah diubah, rantai/pipe/redirect tidak difilter,
   dan `MAUKODE_NO_COMPRESS=1` mematikannya.
+- **`maukode update`**: memperbarui instalasi dari `install.sh` ke rilis terbaru GitHub
+  (`--check` hanya melaporkan, `--version vX.Y.Z` memilih rilis). Tarball diverifikasi sha256-nya,
+  web UI diganti lebih dulu lalu binary diganti dengan `rename`, dan daemon yang sedang jalan
+  direstart. Binary hasil `cargo install` ditolak dengan petunjuk, begitu juga platform selain
+  Linux x86_64.
 - **Installer satu baris**: `curl -fsSL https://raw.githubusercontent.com/mausolusikreatif/maukode/master/install.sh | bash`
   mengunduh rilis terbaru (atau `--version vX.Y.Z`), memverifikasi sha256, lalu memasangnya ke
   `~/.local`. `--uninstall` menghapusnya.

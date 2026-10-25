@@ -102,9 +102,14 @@ curl -fsSL https://raw.githubusercontent.com/mausolusikreatif/maukode/master/ins
 
 This downloads the latest release, verifies its sha256, and installs the daemon and the web UI into
 `~/.local` (`--version vX.Y.Z` picks a release, `bash -s -- --uninstall` removes it). Then run
-`maukode server --token <token>`; the web UI is served from the same address. To install by hand,
-download the tarball from the GitHub release, extract it, and run `./install.sh`. See
-`packaging/linux/README.txt`.
+`maukode server start` (a background daemon; `status`, `restart` and `stop` manage it, and
+`maukode server` without a subcommand runs in the foreground); the web UI is served from the same
+address. To install by hand, download the tarball from the GitHub release, extract it, and run
+`./install.sh`. See `packaging/linux/README.txt`.
+
+To update an installation made this way, run `maukode update` (`--check` only reports whether a
+newer release exists, `--version vX.Y.Z` picks one). It verifies the download, replaces the binary
+and the web UI, and restarts a running daemon. A binary from `cargo install` is not updated by it.
 
 ### From source
 
