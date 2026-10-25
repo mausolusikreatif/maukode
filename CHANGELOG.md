@@ -7,6 +7,8 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-25
+
 ### Added
 
 - Filter output `bash` kini mencakup `git log` (dipotong di tengah), `pytest`, `go test`, dan `pip install`.
