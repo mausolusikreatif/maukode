@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../state/store";
 import type { ThreadState } from "../state/thread";
-import { usageText } from "../state/format";
+import { contextText, usageText } from "../state/format";
 import {
   buildAutocompleteItems,
   estimateTokens,
@@ -180,6 +180,7 @@ export function Composer({ thread }: { thread: ThreadState }) {
   const empty = !text.trim() && chips.length === 0 && images.length === 0;
   const blocked = running && images.length > 0;
   const usage = usageText(thread.sessionUsage);
+  const context = contextText(thread.sessionUsage);
 
   return (
     <div
@@ -267,7 +268,8 @@ export function Composer({ thread }: { thread: ThreadState }) {
         <span className="small muted">
           {running ? "berjalan" : "siap"}
           {tokens.tokens > 0 ? `, ±${tokens.tokens} token` : ""}
-          {usage && <span title="Pemakaian sesi ini sejauh ini"> · sesi {usage}</span>}
+          {context && <span title="Ukuran konteks pada request terakhir, bukan total"> · konteks {context}</span>}
+          {usage && <span title="Total semua request sesi ini; riwayat ikut terkirim ulang di tiap request"> · total {usage}</span>}
         </span>
         <span style={{ display: "flex", gap: 6 }}>
           <button

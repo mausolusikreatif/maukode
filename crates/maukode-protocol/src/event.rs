@@ -74,12 +74,18 @@ pub struct SessionUsage {
     /// Responses whose model had no known price; their tokens are counted, their cost is not.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub unpriced_responses: u64,
+    /// The input size of the session's latest request: what the model's context held then. Not a
+    /// running total, unlike the fields above.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    #[serde(default)]
+    pub context_tokens: u64,
 }
 
 impl SessionUsage {
     /// Add one response; `cost_usd` is `None` when its model has no known price.
     pub fn add(&mut self, usage: &TokenUsage, cost_usd: Option<f64>) {
         self.input_tokens += usage.input_tokens;
+        self.context_tokens = usage.input_tokens;
         self.output_tokens += usage.output_tokens;
         self.cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
         self.cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
@@ -97,6 +103,9 @@ impl SessionUsage {
         self.cache_write_tokens += other.cache_write_tokens;
         self.cost_microusd += other.cost_microusd;
         self.unpriced_responses += other.unpriced_responses;
+        if other.context_tokens > 0 {
+            self.context_tokens = other.context_tokens;
+        }
     }
 }
 

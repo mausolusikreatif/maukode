@@ -116,11 +116,41 @@ fn read_session_usage(conn: &Connection, id: SessionId) -> rusqlite::Result<Sess
                     cache_write_tokens: get(3)?,
                     cost_microusd: get(4)?,
                     unpriced_responses: get(5)?,
+                    context_tokens: 0,
                 })
             },
         )
         .optional()?;
-    Ok(usage.unwrap_or_default())
+    let mut usage = usage.unwrap_or_default();
+    usage.context_tokens = conn
+        .query_row(
+            "SELECT input_tokens FROM usage_requests WHERE session_id = ?1 \
+             ORDER BY id DESC LIMIT 1",
+            params![id.to_string()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map_or(0, |v| v.max(0) as u64);
+    Ok(usage)
+}
+
+fn count_at(row: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<u64> {
+    Ok(row.get::<_, i64>(i)?.max(0) as u64)
+}
+
+fn opt_count_at(row: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<Option<u64>> {
+    Ok(row.get::<_, Option<i64>>(i)?.map(|v| v.max(0) as u64))
+}
+
+/// One request the main agent sent to the model, as stored in `usage_requests`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageRequestRecord {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    pub created_at: String,
 }
 
 fn content_hash(role_json: &str, parts_json: &str) -> String {
@@ -334,6 +364,21 @@ impl SqliteSessionStore {
                 unpriced_responses INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
+
+            -- One row per request the main agent sent. No foreign key: the runner records a
+            -- request before every front end has saved its session row.
+            CREATE TABLE IF NOT EXISTS usage_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                model TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL,
+                output_tokens INTEGER NOT NULL,
+                cache_read_tokens INTEGER,
+                cache_write_tokens INTEGER,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_requests_session_id
+                ON usage_requests(session_id, id);
 
             CREATE TABLE IF NOT EXISTS compaction_audit (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -770,6 +815,52 @@ impl SqliteSessionStore {
         Ok(read_session_usage(&conn, id)?)
     }
 
+    /// Record one request of the main agent, for the per-request series and the current context
+    /// size. Subagent requests are only part of the session totals.
+    pub async fn record_usage_request(
+        &self,
+        id: SessionId,
+        model: &str,
+        usage: &maukode_protocol::TokenUsage,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO usage_requests (session_id, model, input_tokens, output_tokens, \
+             cache_read_tokens, cache_write_tokens, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id.to_string(),
+                model,
+                usage.input_tokens as i64,
+                usage.output_tokens as i64,
+                usage.cache_read_tokens.map(|v| v as i64),
+                usage.cache_write_tokens.map(|v| v as i64),
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The session's requests in the order they were sent.
+    pub async fn session_usage_requests(&self, id: SessionId) -> Result<Vec<UsageRequestRecord>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, \
+             created_at FROM usage_requests WHERE session_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(params![id.to_string()], |row| {
+            Ok(UsageRequestRecord {
+                model: row.get(0)?,
+                input_tokens: count_at(row, 1)?,
+                output_tokens: count_at(row, 2)?,
+                cache_read_tokens: opt_count_at(row, 3)?,
+                cache_write_tokens: opt_count_at(row, 4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// The session's usage totals (zero for a session without any).
     pub async fn session_usage(&self, id: SessionId) -> Result<SessionUsage> {
         let conn = self.conn.lock().await;
@@ -813,6 +904,7 @@ impl SqliteSessionStore {
             "permission_mode_audit",
             "compaction_audit",
             "session_usage",
+            "usage_requests",
         ] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE session_id = ?1"),
@@ -1291,6 +1383,7 @@ mod tests {
             cache_write_tokens: 0,
             cost_microusd: 500,
             unpriced_responses: 0,
+            context_tokens: 0,
         };
         store.add_session_usage(session.id, &delta).await.unwrap();
         let unpriced = SessionUsage {
@@ -1312,6 +1405,53 @@ mod tests {
             store.session_usage(session.id).await.unwrap(),
             SessionUsage::default()
         );
+    }
+
+    #[tokio::test]
+    async fn requests_are_recorded_and_the_latest_sets_the_context_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(dir.path().join("db.sqlite")).unwrap();
+        let mut session = Session::new(dir.path());
+        session.add_message(Message::user("first"));
+        store.save_session(&session, "p", "m").await.unwrap();
+        let usage = store.session_usage(session.id).await.unwrap();
+        assert_eq!(usage.context_tokens, 0);
+
+        let first = maukode_protocol::TokenUsage {
+            input_tokens: 1_000,
+            output_tokens: 20,
+            cache_read_tokens: Some(800),
+            cache_write_tokens: None,
+        };
+        let second = maukode_protocol::TokenUsage {
+            input_tokens: 1_500,
+            output_tokens: 30,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        };
+        store
+            .record_usage_request(session.id, "m", &first)
+            .await
+            .unwrap();
+        store
+            .record_usage_request(session.id, "m", &second)
+            .await
+            .unwrap();
+
+        let requests = store.session_usage_requests(session.id).await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].input_tokens, 1_000);
+        assert_eq!(requests[0].cache_read_tokens, Some(800));
+        assert_eq!(requests[1].cache_read_tokens, None);
+
+        // The context size is the latest request, not a sum; the totals are untouched.
+        let usage = store.session_usage(session.id).await.unwrap();
+        assert_eq!(usage.context_tokens, 1_500);
+        assert_eq!(usage.input_tokens, 0);
+
+        store.delete_session(session.id).await.unwrap();
+        let requests = store.session_usage_requests(session.id).await.unwrap();
+        assert!(requests.is_empty());
     }
 
     #[tokio::test]

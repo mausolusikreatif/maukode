@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SessionUsage } from "../api/types";
-import { shortCount, usageText } from "./format";
+import { contextText, shortCount, usageText } from "./format";
 
 const usage = (over: Partial<SessionUsage> = {}): SessionUsage => ({
   input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
-  cost_microusd: 0, unpriced_responses: 0, ...over,
+  cost_microusd: 0, unpriced_responses: 0, context_tokens: 0, ...over,
 });
 
 describe("usage formatting", () => {
@@ -21,6 +21,12 @@ describe("usage formatting", () => {
     expect(usageText(usage())).toBe("");
     expect(usageText(usage({ input_tokens: 1200, output_tokens: 34, cost_microusd: 42_000 }))).toBe("1.2k token · $0.042");
     expect(usageText(usage({ input_tokens: 900_000, output_tokens: 100_000, cost_microusd: 3_456_000 }))).toBe("1M token · $3.46");
+  });
+
+  it("shows the latest request's size as the context, not the total", () => {
+    expect(contextText(null)).toBe("");
+    expect(contextText(usage())).toBe("");
+    expect(contextText(usage({ input_tokens: 546_661, context_tokens: 30_200 }))).toBe("30k");
   });
 
   it("marks a partial cost and hides an unknown one", () => {

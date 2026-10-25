@@ -133,6 +133,7 @@ pub fn usage_since(after: &SessionUsage, before: &SessionUsage) -> SessionUsage 
         unpriced_responses: after
             .unpriced_responses
             .saturating_sub(before.unpriced_responses),
+        context_tokens: after.context_tokens,
     }
 }
 
