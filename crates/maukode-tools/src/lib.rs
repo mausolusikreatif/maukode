@@ -1,4 +1,5 @@
 pub mod bash;
+pub mod compress;
 pub mod exec;
 pub mod file;
 pub mod grep;
