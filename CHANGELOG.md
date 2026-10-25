@@ -7,6 +7,8 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-25
+
 ### Fixed
 
 - Peta codebase tidak lagi menelusuri seluruh folder home: penelusuran berhenti di 5.000 file atau 5 detik, dan system prompt tidak memuat peta bila folder kerja adalah home atau `/`. Sebelumnya sesi yang dimulai dari home menghabiskan CPU berlama-lama.
