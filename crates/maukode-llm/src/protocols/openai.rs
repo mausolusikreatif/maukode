@@ -130,13 +130,28 @@ impl StreamState {
                 events.push(Ok(LLMEvent::Usage(TokenUsage {
                     input_tokens,
                     output_tokens,
-                    cache_read_tokens: None,
+                    cache_read_tokens: cached_prompt_tokens(usage),
                     cache_write_tokens: None,
                 })));
             }
         }
         events
     }
+}
+
+/// The part of the prompt the provider served from its cache. `None` when the response says
+/// nothing about it, so "unknown" stays distinguishable from "no hit" (`Some(0)`).
+///
+/// `prompt_tokens` already includes the cached part, as `TokenUsage::input_tokens` expects.
+/// OpenAI and GLM report `prompt_tokens_details.cached_tokens`; DeepSeek reports
+/// `prompt_cache_hit_tokens`; Moonshot reports a top-level `cached_tokens`.
+fn cached_prompt_tokens(usage: &serde_json::Map<String, serde_json::Value>) -> Option<u64> {
+    usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .or_else(|| usage.get("prompt_cache_hit_tokens"))
+        .or_else(|| usage.get("cached_tokens"))
+        .and_then(|v| v.as_u64())
 }
 
 pub struct OpenAIClient {
@@ -667,6 +682,49 @@ mod tests {
             [Ok(LLMEvent::ToolCallFinish { tool_call }), Ok(LLMEvent::Finish { reason: FinishReason::EndTurn })]
             if tool_call.name == "grep"
         ));
+    }
+
+    fn usage_event(usage: serde_json::Value) -> TokenUsage {
+        let mut state = StreamState::default();
+        let events = state.consume(&json!({ "choices": [], "usage": usage }));
+        match events.into_iter().next() {
+            Some(Ok(LLMEvent::Usage(usage))) => usage,
+            _ => panic!("expected a usage event"),
+        }
+    }
+
+    #[test]
+    fn cached_prompt_tokens_are_read_from_each_provider_shape() {
+        let openai = usage_event(json!({
+            "prompt_tokens": 1000, "completion_tokens": 20,
+            "prompt_tokens_details": { "cached_tokens": 800 }
+        }));
+        assert_eq!(openai.input_tokens, 1000, "prompt_tokens already includes the cache");
+        assert_eq!(openai.cache_read_tokens, Some(800));
+        assert_eq!(openai.cache_write_tokens, None);
+
+        let deepseek = usage_event(json!({
+            "prompt_tokens": 500, "completion_tokens": 5,
+            "prompt_cache_hit_tokens": 300, "prompt_cache_miss_tokens": 200
+        }));
+        assert_eq!(deepseek.cache_read_tokens, Some(300));
+
+        let moonshot = usage_event(json!({
+            "prompt_tokens": 500, "completion_tokens": 5, "cached_tokens": 128
+        }));
+        assert_eq!(moonshot.cache_read_tokens, Some(128));
+    }
+
+    #[test]
+    fn missing_cache_fields_stay_unknown_and_a_zero_hit_stays_zero() {
+        let silent = usage_event(json!({ "prompt_tokens": 10, "completion_tokens": 2 }));
+        assert_eq!(silent.cache_read_tokens, None);
+
+        let miss = usage_event(json!({
+            "prompt_tokens": 10, "completion_tokens": 2,
+            "prompt_tokens_details": { "cached_tokens": 0 }
+        }));
+        assert_eq!(miss.cache_read_tokens, Some(0));
     }
 
     #[test]

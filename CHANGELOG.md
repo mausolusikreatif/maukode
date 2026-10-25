@@ -9,6 +9,10 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Token cache terbaca di provider OpenAI-compatible**: usage kini membaca
+  `prompt_tokens_details.cached_tokens` (OpenAI, GLM), `prompt_cache_hit_tokens` (DeepSeek), dan
+  `cached_tokens` (Moonshot). Sebelumnya cache selalu tercatat 0. Bila provider tidak melaporkan,
+  nilainya tetap "tidak diketahui", bukan 0.
 - **Web UI aktif setelah `install.sh`**: daemon kini mencari web UI juga di
   `<prefix>/share/maukode/web` dan `~/.local/share/maukode/web`, sehingga `maukode server` langsung
   menyajikannya tanpa `--web-dir`. Pesan startup menampilkan folder yang dipakai, atau memberi tahu
