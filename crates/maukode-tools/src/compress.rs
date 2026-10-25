@@ -159,7 +159,11 @@ pub fn compress_output(command: &str, exit_code: i32, text: &str) -> Option<Stri
     if result.len() >= text.len() {
         return None;
     }
-    tracing::debug!(before = text.len(), after = result.len(), "Compressed bash output");
+    tracing::debug!(
+        before = text.len(),
+        after = result.len(),
+        "Compressed bash output"
+    );
     Some(result)
 }
 
