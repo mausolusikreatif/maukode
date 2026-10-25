@@ -325,6 +325,7 @@ Other environment variables:
 | `MAUKODE_HOME` | Relocate config and data directories (used by tests and portable installs). |
 | `MAUKODE_AUTH_TOKEN` | Bearer token for `maukode server` (passed to the daemon via the environment, not argv). |
 | `MAUKODE_WEB_DIR` | Directory of the built web UI for `maukode server`. |
+| `MAUKODE_NO_UPDATE_CHECK` | `1` turns off the daily "update available" check of an `install.sh` installation (one HEAD request to github.com, cached in `update-check.json` in the data directory). |
 | `MAUKODE_NO_COMPRESS` | `1` sends `bash` output to the model unfiltered. By default the progress noise of a successful `cargo`, `git`, `pytest`, `go test` or `pip install` run is dropped (see `crates/maukode-tools/src/compress.rs` and "Bash Output Filters" above); failed runs, chains, pipes and redirects are never filtered. |
 | `MAUKODE_MEMORY_AUTO_EXTRACT` | `1`/`true` enables automatic end-of-turn memory extraction. |
 

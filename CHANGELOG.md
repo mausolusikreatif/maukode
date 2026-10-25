@@ -11,6 +11,7 @@ dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Filter output `bash` kini mencakup `git log` (dipotong di tengah), `pytest`, `go test`, dan `pip install`.
 - Filter tambahan bisa ditulis di `.maukode/filters.json` (proyek) dan `filters.json` di samping `config.json` (pengguna): program, subcommand, pola baris yang dibuang, dan batas baris.
+- Instalasi dari `install.sh` kini memberi tahu bila ada rilis yang lebih baru (sehari sekali, di latar belakang): setelah TUI ditutup atau saat `maukode server`. Matikan dengan `MAUKODE_NO_UPDATE_CHECK=1`.
 
 ## [0.6.0] - 2026-10-25
 
