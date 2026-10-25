@@ -311,7 +311,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("lib.rs"), "pub struct Item {}").unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "Project rule: always say moo").unwrap();
-        let prompt = ContextManager::new(dir.path()).render_system_context().await;
+        let prompt = ContextManager::new(dir.path())
+            .render_system_context()
+            .await;
         assert!(prompt.contains("Codebase Map"));
         assert!(prompt.contains("moo"));
     }
