@@ -275,8 +275,8 @@ impl Renderer {
 
 #[cfg(test)]
 mod tests {
-    use super::render;
     use crate::theme::COLOR_FG;
+    use super::render;
 
     fn text(lines: &[ratatui::text::Line<'_>]) -> String {
         lines
