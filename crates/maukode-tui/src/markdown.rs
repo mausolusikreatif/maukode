@@ -75,7 +75,7 @@ impl Renderer {
     fn start(&mut self, tag: Tag<'_>) {
         match tag {
             Tag::Paragraph => self.ensure_prefix(),
-            Tag::Heading { level, .. } => {
+            Tag::Heading { .. } => {
                 self.flush();
                 self.ensure_prefix();
                 // Headings differ by weight only; the accent colors keep their one meaning.
@@ -276,6 +276,7 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::render;
+    use crate::theme::COLOR_FG;
 
     fn text(lines: &[ratatui::text::Line<'_>]) -> String {
         lines
