@@ -19,18 +19,18 @@ export function Connect({ initialUrl }: { initialUrl: string }) {
       >
         <h1 className="strong" style={{ fontSize: 20, margin: 0 }}>MauKode</h1>
         {busy ? (
-          <p className="muted">Menghubungkan ke {url}…</p>
+          <p className="muted">Connecting to {url}…</p>
         ) : (
           <p className="muted">
-            {connectionError ?? "Masukkan alamat server dan token untuk mulai."}
+            {connectionError ?? "Enter the server address and token to start."}
           </p>
         )}
         {connectionError && <div className="notice error">{connectionError}</div>}
-        <label className="label" htmlFor="url">Alamat server</label>
+        <label className="label" htmlFor="url">Server address</label>
         <input id="url" className="field" value={url} onChange={(e) => setUrl(e.target.value)} inputMode="url" autoCapitalize="off" />
         <label className="label" htmlFor="token">Token</label>
         <input id="token" className="field" type="password" value={token} onChange={(e) => setToken(e.target.value)} autoCapitalize="off" autoComplete="off" />
-        <button className="btn send" disabled={busy} type="submit">Hubungkan</button>
+        <button className="btn send" disabled={busy} type="submit">Connect</button>
       </form>
     </main>
   );

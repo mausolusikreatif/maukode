@@ -19,7 +19,7 @@ the agent; a terminal UI, a plain CLI REPL, and a browser-based web UI are clien
   - Several terminals, project directories, and the web UI can share one daemon.
   - The daemon can run on a remote host with Bearer-token authentication
     (`maukode --remote http://vps:4096 --token <secret>`).
-- **Web UI** (`apps/desktop`)
+- **Web UI** (`apps/web`)
   - A React single-page app served by the daemon. It is a browser app; there is no native desktop
     shell.
   - Overview of all agents by urgency, a cross-session approval inbox, session threads with plans
@@ -85,7 +85,7 @@ maukode/
 │   ├── maukode-server/        # Axum HTTP + SSE daemon, client SDK, daemon manager
 │   ├── maukode-tui/           # Terminal UI (ratatui)
 │   └── maukode-cli/           # `maukode` binary and subcommands
-├── apps/desktop/              # Web UI (React + TypeScript), served by the daemon
+├── apps/web/              # Web UI (React + TypeScript), served by the daemon
 ├── packaging/linux/           # Release tarball installer
 └── docs/                      # Architecture, configuration, API, and roadmap documents
 ```
@@ -122,7 +122,7 @@ cargo install --path crates/maukode-cli --force
 ```
 
 Make sure `~/.cargo/bin` is in your `$PATH`. To serve the web UI from a source checkout, build it
-with `npm ci && npm run build` in `apps/desktop`; see [apps/desktop/README.md](apps/desktop/README.md).
+with `npm ci && npm run build` in `apps/web`; see [apps/web/README.md](apps/web/README.md).
 
 ### Providers and API keys
 

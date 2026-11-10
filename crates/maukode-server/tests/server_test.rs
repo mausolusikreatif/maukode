@@ -175,7 +175,7 @@ async fn test_diff_and_undo_endpoints() {
 }
 
 #[tokio::test]
-async fn test_desktop_backend_hardening() {
+async fn test_web_backend_hardening() {
     let temp_dir = tempdir().unwrap();
     let (url, _handle) = start_test_server(temp_dir.path()).await;
     let http = reqwest::Client::new();

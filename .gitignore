@@ -5,5 +5,5 @@
 .env.*
 !.env.example
 .worktrees/
-apps/desktop/*.png
+apps/web/*.png
 

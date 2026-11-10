@@ -6,8 +6,8 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      run_desktop:
-        description: Run desktop UI checks
+      run_web:
+        description: Run web UI checks
         required: false
         type: boolean
         default: false
@@ -36,17 +36,17 @@ jobs:
         run: |
           cargo test --locked -p maukode-protocol -p maukode-core -p maukode-server \
             --features maukode-protocol/ts,maukode-core/ts,maukode-server/ts export_bindings
-          test -z "$(git status --porcelain -- apps/desktop/src/api/generated)" || {
-            git status --porcelain -- apps/desktop/src/api/generated
-            git diff -- apps/desktop/src/api/generated
-            echo "Generated bindings are stale: regenerate and commit apps/desktop/src/api/generated"
+          test -z "$(git status --porcelain -- apps/web/src/api/generated)" || {
+            git status --porcelain -- apps/web/src/api/generated
+            git diff -- apps/web/src/api/generated
+            echo "Generated bindings are stale: regenerate and commit apps/web/src/api/generated"
             exit 1
           }
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  desktop:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_desktop
+  web:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_web
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -54,9 +54,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
+          cache-dependency-path: apps/web/package-lock.json
       - name: Install, typecheck, unit test
-        working-directory: apps/desktop
+        working-directory: apps/web
         run: |
           npm ci
           npm run typecheck

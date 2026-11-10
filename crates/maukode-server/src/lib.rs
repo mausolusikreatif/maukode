@@ -52,7 +52,7 @@ fn check_bind_auth(bind_addr: SocketAddr, token: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Auto-discover the pre-built web UI directory (`apps/desktop/dist/`) relative to common starting
+/// Auto-discover the pre-built web UI directory (`apps/web/dist/`) relative to common starting
 /// points: the current working directory, the server binary's location (including the
 /// `install.sh` layout, `<prefix>/share/maukode/web`), and the user data directory. Returns `None`
 /// if no `index.html` is found.
@@ -65,7 +65,7 @@ pub fn discover_web_dir() -> Option<PathBuf> {
     // 1. Current working directory
     if let Ok(cwd) = std::env::current_dir() {
         for candidate in [
-            cwd.join("apps").join("desktop").join("dist"),
+            cwd.join("apps").join("web").join("dist"),
             cwd.join("dist"),
         ] {
             if is_web_dir(&candidate) {
@@ -81,7 +81,7 @@ pub fn discover_web_dir() -> Option<PathBuf> {
                 bin_dir.join("web"),
                 bin_dir.join("..").join("web"),
                 bin_dir.join("..").join("share").join("maukode").join("web"),
-                bin_dir.join("apps").join("desktop").join("dist"),
+                bin_dir.join("apps").join("web").join("dist"),
             ] {
                 if is_web_dir(&candidate) {
                     return Some(candidate);

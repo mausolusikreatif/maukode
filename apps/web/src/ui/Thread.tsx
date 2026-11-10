@@ -53,7 +53,7 @@ function Item({ item }: { item: ThreadItem }) {
       return (
         <div className="row user">
           <span className="gutter" />
-          <img className="thumb large" src={`data:${item.mediaType};base64,${item.data}`} alt="Gambar terlampir" />
+          <img className="thumb large" src={`data:${item.mediaType};base64,${item.data}`} alt="Attached image" />
         </div>
       );
     case "assistant":
@@ -68,7 +68,7 @@ function Item({ item }: { item: ThreadItem }) {
         <div className="row">
           <span className="gutter" />
           <details className="think">
-            <summary>Proses berpikir</summary>
+            <summary>Reasoning</summary>
             <Md text={item.text} />
           </details>
         </div>
@@ -84,14 +84,14 @@ function Item({ item }: { item: ThreadItem }) {
             </summary>
             {fileOf(item.name, item.args) && (
               <button
-                className="btn quiet small" title="Buka di editor pada mesin tempat daemon berjalan"
+                className="btn quiet small" title="Open in the editor on the machine where the daemon runs"
                 onClick={() => void useApp.getState().openInEditor(fileOf(item.name, item.args) as string)}
               >
-                Buka di editor
+                Open in editor
               </button>
             )}
             <pre>{item.args}</pre>
-            {item.result && <pre>{item.result.length > 6000 ? `${item.result.slice(0, 6000)}\n… dipotong` : item.result}</pre>}
+            {item.result && <pre>{item.result.length > 6000 ? `${item.result.slice(0, 6000)}\n… truncated` : item.result}</pre>}
           </details>
         </div>
       );
@@ -116,7 +116,7 @@ function Item({ item }: { item: ThreadItem }) {
           <span className="gutter">+</span>
           <div className="small">
             <span className="strong">{item.profileName}</span>{" "}
-            <span className="muted">{item.status === "running" ? `langkah ${item.step}: ${item.lastAction}` : item.status}</span>
+            <span className="muted">{item.status === "running" ? `step ${item.step}: ${item.lastAction}` : item.status}</span>
             <div className="muted trunc">{item.goal}</div>
           </div>
         </div>
@@ -125,10 +125,10 @@ function Item({ item }: { item: ThreadItem }) {
 }
 
 const STOP_TEXT: Record<string, string> = {
-  max_tokens: "Berhenti: batas token tercapai.",
-  max_steps: "Berhenti: batas langkah tercapai. Kirim pesan untuk melanjutkan.",
-  cancelled: "Dihentikan.",
-  error: "Berhenti karena error.",
+  max_tokens: "Stopped: token limit reached.",
+  max_steps: "Stopped: step limit reached. Send a message to continue.",
+  cancelled: "Stopped by you.",
+  error: "Stopped because of an error.",
 };
 
 export function Thread({ thread, loadedStart, onLoadOlder }: {
@@ -154,12 +154,12 @@ export function Thread({ thread, loadedStart, onLoadOlder }: {
     >
       <div className="thread-in">
         {loadedStart > 0 && (
-          <button className="btn small" style={{ justifySelf: "center" }} onClick={onLoadOlder}>Muat pesan lama</button>
+          <button className="btn small" style={{ justifySelf: "center" }} onClick={onLoadOlder}>Load older messages</button>
         )}
         {thread.items.length === 0 && (
           <div className="empty">
-            <div className="strong" style={{ fontSize: 15 }}>Sesi masih kosong</div>
-            <p className="muted" style={{ margin: 0 }}>Tulis tugas di bawah. Agent akan meminta izin sebelum menjalankan perintah berisiko.</p>
+            <div className="strong" style={{ fontSize: 15 }}>This session is empty</div>
+            <p className="muted" style={{ margin: 0 }}>Write a task below. The agent asks for permission before it runs a risky command.</p>
           </div>
         )}
         {thread.items.map((i) => <Item key={i.id} item={i} />)}

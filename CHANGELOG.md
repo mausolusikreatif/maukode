@@ -1,536 +1,546 @@
 # Changelog
 
-Semua perubahan penting untuk proyek ini akan didokumentasikan dalam file ini.
+All notable changes to this project are documented in this file.
 
-Format berdasarkan [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-dan proyek ini mengikuti [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Changed
+
+- The TUI palette now matches the web UI's dark-mode tokens (`--ink`, `--ink-2`, `--line`, `--surface`, `--cobalt`, `--hold`, `--green`, `--red`). Each accent color has one meaning: amber means the agent is waiting for you, red means deny or failure, and green means success or an added line. The mint, cyan, blue, and purple colors are gone; Markdown headings and tool names are told apart by weight instead of color. Modal borders are now flat (`--line`), and diffs use the `--add-bg`/`--del-bg` backgrounds.
+- The web UI folder moved from `apps/desktop` to `apps/web` (the npm package is now `maukode-web`). The manual CI input `run_desktop` is now `run_web`, and the `desktop` job is now `web`.
+- Everything is in English now: the changelog, the docs, and the web UI strings (previously Indonesian). Settings sections have English ids (`connection`, `permissions`, `execution`, `extensions`, `appearance`).
 
 ## [0.7.1] - 2026-10-25
 
 ### Fixed
 
-- Peta codebase tidak lagi menelusuri seluruh folder home: penelusuran berhenti di 5.000 file atau 5 detik, dan system prompt tidak memuat peta bila folder kerja adalah home atau `/`. Sebelumnya sesi yang dimulai dari home menghabiskan CPU berlama-lama.
+- The codebase map no longer walks an entire home directory: the walk stops at 5,000 files or 5 seconds, and the system prompt carries no map when the working directory is the home directory or `/`. Previously a session started from home burned CPU for a long time.
 
 ### Added
 
-- Mode chat saja: di form "Sesi baru" web UI, mengosongkan "Folder proyek" (atau menekan "Chat saja") memulai percakapan tanpa folder proyek. Agent hanya punya pencarian web dan memori, tanpa akses file dan shell, tanpa peta codebase. Sesi chat dikelompokkan di "Chat" dan folder kosongnya dihapus bersama sesi. API: `POST /sessions` dengan `chat: true`.
+- Chat-only mode: in the web UI's "New session" form, emptying "Project folder" (or pressing "Chat only") starts a conversation without a project folder. The agent only has web search and memory: no file or shell access and no codebase map. Chat sessions are grouped under "Chat", and their empty folder is deleted together with the session. API: `POST /sessions` with `chat: true`.
 
 ## [0.7.0] - 2026-10-25
 
 ### Added
 
-- Filter output `bash` kini mencakup `git log` (dipotong di tengah), `pytest`, `go test`, dan `pip install`.
-- Filter tambahan bisa ditulis di `.maukode/filters.json` (proyek) dan `filters.json` di samping `config.json` (pengguna): program, subcommand, pola baris yang dibuang, dan batas baris.
-- Instalasi dari `install.sh` kini memberi tahu bila ada rilis yang lebih baru (sehari sekali, di latar belakang): setelah TUI ditutup atau saat `maukode server`. Matikan dengan `MAUKODE_NO_UPDATE_CHECK=1`.
-- Web UI: tombol "Prompt" di header sesi menampilkan biaya tetap per permintaan (system prompt + skema tool), tool dengan skema terbesar, dan teks system prompt yang terakhir dikirim ke model.
+- `bash` output filters now cover `git log` (truncated in the middle), `pytest`, `go test`, and `pip install`.
+- Extra filters can be written in `.maukode/filters.json` (project) and `filters.json` next to `config.json` (user): program, subcommand, line patterns to drop, and a line limit.
+- An `install.sh` installation now tells you when a newer release exists (once a day, in the background): after the TUI closes or at `maukode server`. Turn it off with `MAUKODE_NO_UPDATE_CHECK=1`.
+- Web UI: the "Prompt" button in the session header shows the fixed cost per request (system prompt + tool schemas), the tools with the largest schemas, and the text of the system prompt last sent to the model.
 
 ## [0.6.0] - 2026-10-25
 
 ### Fixed
 
-- **Token cache terbaca di provider OpenAI-compatible**: usage kini membaca
-  `prompt_tokens_details.cached_tokens` (OpenAI, GLM), `prompt_cache_hit_tokens` (DeepSeek), dan
-  `cached_tokens` (Moonshot). Sebelumnya cache selalu tercatat 0. Bila provider tidak melaporkan,
-  nilainya tetap "tidak diketahui", bukan 0.
-- **Web UI aktif setelah `install.sh`**: daemon kini mencari web UI juga di
-  `<prefix>/share/maukode/web` dan `~/.local/share/maukode/web`, sehingga `maukode server` langsung
-  menyajikannya tanpa `--web-dir`. Pesan startup menampilkan folder yang dipakai, atau memberi tahu
-  bila tidak ditemukan.
-- **Versi binary mengikuti rilis**: versi workspace dinaikkan ke 0.5.0, dan workflow rilis gagal bila
-  tag `v*` tidak sama dengan versi di `Cargo.toml`.
+- **Cached tokens are read from OpenAI-compatible providers**: usage now reads
+  `prompt_tokens_details.cached_tokens` (OpenAI, GLM), `prompt_cache_hit_tokens` (DeepSeek), and
+  `cached_tokens` (Moonshot). Before, the cache was always recorded as 0. When a provider does not
+  report it, the value stays "unknown" instead of 0.
+- **The web UI works after `install.sh`**: the daemon now also looks for the web UI in
+  `<prefix>/share/maukode/web` and `~/.local/share/maukode/web`, so `maukode server` serves it
+  right away without `--web-dir`. The startup message shows the folder in use, or says when none
+  was found.
+- **The binary version follows the release**: the workspace version was raised to 0.5.0, and the
+  release workflow fails when a `v*` tag does not match the version in `Cargo.toml`.
 
 ### Added
 
-- **Hasil tool lama dipangkas tanpa menunggu jendela konteks penuh**: bila provider tidak punya
-  prompt cache (tidak pernah melaporkan cache hit), hasil tool yang lebih lama dari jendela terbaru
-  dipotong head/tail begitu timbunannya mencapai ±6k token, dan batas "lama" hanya maju per 6 pesan
-  asisten supaya bagian yang sudah dipangkas tidak berubah di antaranya. Dengan cache, perilaku
-  lama tetap berlaku (pangkas setelah konteks 60% penuh), karena menulis ulang pesan lama membuang
-  cache. Sebelumnya, pada model berjendela 1 juta token pemangkasan praktis tidak pernah aktif.
-- **Snapshot system prompt dan skema tool**: prompt dan skema tool yang dikirim ke model kini
-  disimpan sekali per kombinasi unik (tabel `prompt_snapshots`, dideduplikasi dengan hash) dan
-  dirujuk oleh setiap request lewat `usage_requests.snapshot_hash`. `GET
-  /api/v1/sessions/{id}/system-prompt` menampilkan prompt, perkiraan token, dan ukuran tiap tool
-  dari request terakhir sesi; snapshot yang tak lagi dirujuk ikut terhapus bersama sesinya.
-- **Ukuran konteks vs total di pemakaian sesi**: web UI menampilkan "konteks 30k" (input request
-  terakhir) di samping "total 546k" (jumlah semua request, karena riwayat dikirim ulang di tiap
-  request), dan status bar TUI menampilkan `ctx`. Setiap request agen utama kini disimpan di tabel
-  `usage_requests` (model, token masuk/keluar, cache), sehingga pertumbuhan token bisa diaudit.
-  Request sub-agen hanya masuk ke total.
-- **Output `bash` dikompres untuk `cargo` dan `git`**: pada perintah tunggal yang selesai dengan
-  kode 0, baris progres (`Compiling`, `Downloading`, baris `test ... ok`, petunjuk `git status`,
-  progres `git push`) dibuang sebelum masuk ke konteks, dan hasil `cargo` yang lebih dari 400 baris
-  dipotong di tengah. Output yang gagal tidak pernah diubah, rantai/pipe/redirect tidak difilter,
-  dan `MAUKODE_NO_COMPRESS=1` mematikannya.
-- **`maukode update`**: memperbarui instalasi dari `install.sh` ke rilis terbaru GitHub
-  (`--check` hanya melaporkan, `--version vX.Y.Z` memilih rilis). Tarball diverifikasi sha256-nya,
-  web UI diganti lebih dulu lalu binary diganti dengan `rename`, dan daemon yang sedang jalan
-  direstart. Binary hasil `cargo install` ditolak dengan petunjuk, begitu juga platform selain
-  Linux x86_64.
-- **Installer satu baris**: `curl -fsSL https://raw.githubusercontent.com/mausolusikreatif/maukode/master/install.sh | bash`
-  mengunduh rilis terbaru (atau `--version vX.Y.Z`), memverifikasi sha256, lalu memasangnya ke
-  `~/.local`. `--uninstall` menghapusnya.
+- **Old tool results are pruned without waiting for the context window to fill**: when a provider
+  has no prompt cache (it never reported a cache hit), tool results older than the latest window
+  are truncated head/tail as soon as the pile reaches about 6k tokens, and the "old" cutoff only
+  moves every 6 assistant messages so the parts that were already pruned do not change in between.
+  With a cache, the earlier behavior still applies (prune once the context is 60% full), because
+  rewriting old messages throws away the cache. Before, pruning was practically never active on
+  models with a 1 million token window.
+- **System prompt and tool schema snapshots**: the prompt and tool schemas sent to the model are
+  now stored once per unique combination (the `prompt_snapshots` table, deduplicated by hash) and
+  referenced by every request through `usage_requests.snapshot_hash`. `GET
+  /api/v1/sessions/{id}/system-prompt` shows the prompt, a token estimate, and the size of each
+  tool from the session's latest request; snapshots that are no longer referenced are deleted
+  together with their session.
+- **Context size vs. total in session usage**: the web UI shows "context 30k" (the input of the
+  latest request) next to "total 546k" (the sum of all requests, because the history is sent again
+  with every request), and the TUI status bar shows `ctx`. Every main-agent request is now stored
+  in the `usage_requests` table (model, input/output tokens, cache), so token growth can be
+  audited. Subagent requests only count toward the total.
+- **`bash` output is compressed for `cargo` and `git`**: for single commands that exit with code 0,
+  progress lines (`Compiling`, `Downloading`, `test ... ok` lines, `git status` hints, `git push`
+  progress) are dropped before they enter the context, and `cargo` results longer than 400 lines
+  are truncated in the middle. Failed output is never changed, chains/pipes/redirects are not
+  filtered, and `MAUKODE_NO_COMPRESS=1` turns it off.
+- **`maukode update`**: updates an `install.sh` installation to the latest GitHub release
+  (`--check` only reports, `--version vX.Y.Z` picks a release). The tarball's sha256 is verified,
+  the web UI is replaced first and then the binary is replaced with `rename`, and a running daemon
+  is restarted. A binary from `cargo install` is refused with a hint, and so is any platform other
+  than Linux x86_64.
+- **One-line installer**: `curl -fsSL https://raw.githubusercontent.com/mausolusikreatif/maukode/master/install.sh | bash`
+  downloads the latest release (or `--version vX.Y.Z`), verifies the sha256, and installs it to
+  `~/.local`. `--uninstall` removes it.
 
 ### Performance
 
-- **Prompt caching benar-benar terpakai**: urutan definisi tool kini tetap (diurutkan menurut nama),
-  waktu saat ini tidak lagi ada di awal system prompt (cukup tanggal, di bagian akhir bersama memori
-  yang di-recall), dan adapter Anthropic memasang `cache_control` di tool terakhir, system prompt
-  yang stabil, dan pesan terakhir. Dalam satu turn, setiap langkah membaca request sebelumnya dari
-  cache.
-- **Kerja per prompt berkurang**: daemon menyimpan `ContextManager` (beserta cache parse repo map) dan
-  memory store per workspace antar-turn, sehingga repo tidak di-parse ulang setiap prompt. Daftar
-  tool MCP diambil sekali per koneksi.
-- **`save_session` hanya menulis pesan yang berubah** (dibandingkan lewat hash isi), di thread
-  blocking, dan `created_at` pesan lama tidak lagi di-reset. `messages_audit` kini diindeks dengan
-  hash isi, bukan teks lengkap; database lama dimigrasikan otomatis saat dibuka.
-- **Tool read-only berjalan paralel**: bila semua tool call dalam satu langkah hanya membaca
-  (`read_file`, `grep`, `glob`, `web_search`, …), semuanya dijalankan bersamaan.
-- **`grep` tidak lagi memblokir runtime**, menghormati `.gitignore`, melewati file biner dan file di
-  atas 1 MB, dan menampilkan path relatif terhadap workspace.
-- **`read_file` tanpa `end_line` mengembalikan paling banyak 2000 baris** (dan 2000 karakter per
-  baris), dengan petunjuk cara membaca sisanya.
-- **Cache prompt bertahan antar-turn**: konteks per-turn (tanggal dan memori yang di-recall) kini
-  dikirim di akhir pesan user terakhir sebagai catatan `<maukode-context>`, bukan di system prompt.
-  Riwayat percakapan sebelumnya tetap menjadi prefix yang ter-cache di Anthropic, provider
-  OpenAI-compatible, dan paket ChatGPT.
-- **Estimasi ukuran konteks lebih akurat**: pemeriksaan context window memakai ukuran yang
-  dilaporkan provider untuk langkah sebelumnya, ditambah estimasi untuk pesan yang lebih baru saja;
-  estimasi penuh kini ikut menghitung skema tool. `input_tokens` dari Anthropic kini sudah termasuk
-  token yang ter-cache, sama seperti provider lain.
-- **Compaction otomatis tidak diulang di setiap langkah**: setelah compaction (berhasil atau gagal),
-  compaction berikutnya menunggu sampai percakapan bertambah 10% dari context window.
-- **Delta streaming digabung**: daemon menggabungkan delta teks, reasoning, dan argumen tool yang
-  berurutan (maksimal 50 ms) sebelum dipublikasikan, sehingga frame SSE jauh lebih sedikit dan log
-  replay mencakup balasan yang jauh lebih panjang. TUI menggambar teks streaming pada tick 50 ms,
-  bukan sekali per delta.
-- **Regex HTML ke Markdown dikompilasi sekali** di `fetch_web_content`, bukan di setiap panggilan
-  (dan per link atau item list).
+- **Prompt caching is actually used**: the order of tool definitions is now fixed (sorted by name),
+  the current time is no longer at the start of the system prompt (only the date, at the end
+  together with the recalled memories), and the Anthropic adapter sets `cache_control` on the last
+  tool, the stable system prompt, and the last message. Within one turn, every step reads the
+  previous request from the cache.
+- **Less work per prompt**: the daemon keeps the `ContextManager` (with the repo map parse cache)
+  and the memory store per workspace between turns, so the repo is not parsed again for every
+  prompt. The MCP tool list is fetched once per connection.
+- **`save_session` writes only the messages that changed** (compared by content hash), on a
+  blocking thread, and the `created_at` of old messages is no longer reset. `messages_audit` is now
+  keyed by content hash instead of the full text; old databases are migrated automatically when
+  opened.
+- **Read-only tools run in parallel**: when all tool calls in one step only read (`read_file`,
+  `grep`, `glob`, `web_search`, …), they all run at the same time.
+- **`grep` no longer blocks the runtime**, honors `.gitignore`, skips binary files and files over
+  1 MB, and prints paths relative to the workspace.
+- **`read_file` without `end_line` returns at most 2000 lines** (and 2000 characters per line),
+  with a hint on how to read the rest.
+- **The prompt cache survives between turns**: the per-turn context (the date and the recalled
+  memories) is now sent at the end of the last user message as a `<maukode-context>` note instead
+  of in the system prompt. The earlier conversation history stays a cached prefix on Anthropic,
+  OpenAI-compatible providers, and the ChatGPT plan.
+- **More accurate context size estimates**: the context window check uses the size the provider
+  reported for the previous step, plus an estimate for newer messages only; the full estimate now
+  also counts the tool schemas. Anthropic's `input_tokens` now includes cached tokens, like the
+  other providers.
+- **Automatic compaction does not repeat at every step**: after a compaction (successful or
+  failed), the next one waits until the conversation has grown by 10% of the context window.
+- **Streaming deltas are merged**: the daemon merges consecutive text, reasoning, and tool argument
+  deltas (at most 50 ms) before publishing them, so there are far fewer SSE frames and the replay
+  log covers much longer replies. The TUI draws streamed text on a 50 ms tick instead of once per
+  delta.
+- **The HTML-to-Markdown regexes are compiled once** in `fetch_web_content` instead of on every
+  call (and per link or list item).
 
 ### Fixed
 
-- **Riwayat percakapan kini benar-benar append-only**:
-  - Catatan konteks per-turn (tanggal dan memori) disimpan di pesan prompt-nya, tidak lagi
-    dipindah ke pesan terakhir di setiap langkah.
-  - System prompt dibekukan per sesi (dibangun ulang hanya setelah compaction).
-  - Pemangkasan output tool lama baru dimulai saat konteks terisi 60%.
-  - Akibatnya cache prompt tetap terpakai, dan blok thinking Claude tetap valid. Model baru menolak
-    blok thinking yang riwayatnya diubah.
-- **Compaction membuang blok thinking dari pesan yang dipertahankan**, karena blok itu terikat
-  pada riwayat yang sudah diganti ringkasan.
+- **The conversation history is now truly append-only**:
+  - The per-turn context note (date and memories) is stored in its prompt message and is no longer
+    moved to the last message at every step.
+  - The system prompt is frozen per session (rebuilt only after a compaction).
+  - Pruning of old tool output only starts when the context is 60% full.
+  - As a result the prompt cache stays in use, and Claude's thinking blocks stay valid. Newer
+    models reject thinking blocks whose history was changed.
+- **Compaction drops thinking blocks from the messages it keeps**, because those blocks are tied to
+  the history that was replaced by the summary.
 
-- **Stream LLM yang macet tidak lagi menggantung turn**: semua client LLM punya connect timeout 30
-  detik dan read timeout 300 detik; stream yang diam terlalu lama dicoba ulang.
-- **Adapter Anthropic**: event `error` di tengah stream (misalnya `overloaded_error`) kini menjadi
-  error (dan dicoba ulang bila sementara) alih-alih dianggap selesai; JSON argumen tool yang rusak
-  menjadi error alih-alih `{}`; pemakaian token (termasuk cache read/write) dilaporkan lewat event
-  `Usage`.
-- **MCP**: daftar tool diambil ulang setelah server mengirim `notifications/tools/list_changed`, dan
-  permintaan dari server (misalnya `ping`) kini dijawab alih-alih dianggap sebagai respons.
+- **A stalled LLM stream no longer hangs the turn**: all LLM clients have a 30 second connect
+  timeout and a 300 second read timeout; a stream that stays silent for too long is retried.
+- **Anthropic adapter**: an `error` event in the middle of a stream (for example
+  `overloaded_error`) is now an error (and retried when transient) instead of being treated as
+  finished; malformed tool argument JSON becomes an error instead of `{}`; token usage (including
+  cache read/write) is reported through the `Usage` event.
+- **MCP**: the tool list is fetched again after a server sends `notifications/tools/list_changed`,
+  and requests from the server (for example `ping`) are now answered instead of being mistaken for
+  a response.
 
 ### Security
 
-- **Whitelist bash tidak bisa lagi ditumpangi perintah lain**: entri `bash_whitelist` dulu dicocokkan
-  sebagai awalan string, sehingga `cargo *` (ada di whitelist bawaan) juga meloloskan
-  `cargo build && rm -rf ~` tanpa persetujuan, bahkan di mode `strict`. Sekarang entri hanya cocok
-  dengan **satu perintah sederhana** (tanpa `;`, `&&`, `|`, redirection, `$(…)`, backtick, subshell,
-  atau baris baru), dicocokkan kata per kata, hanya untuk tool `bash`, dan tidak pernah meloloskan
-  perintah yang dinilai berbahaya.
-- **Persetujuan "untuk sesi ini" kini per tool**: menyetujui `memory_get {"id":1}` tidak lagi ikut
-  meloloskan `memory_delete {"id":1}`.
-- **Penilaian risiko bash melihat isi perintah yang dibungkus**: `bash -c '…'`, `sh -c`, `eval`,
-  subshell `( … )`, `<( … )`, `{ …; }`, `if … then`, brace expansion `{rm,-rf,x}`, here-string
-  `bash <<< '…'`, wrapper (`timeout`, `nice`, `nohup`, `xargs`, `busybox`, …), `find -exec`, dan
-  `git -C dir …` kini diperiksa isinya. Kode yang tidak bisa diperiksa (`python -c`, `node -e`,
-  `perl -e`, shell/interpreter yang membaca dari stdin, nama perintah dari variabel, `awk` dengan
-  `system()`) minimal menjadi peringatan sehingga mode `ask` meminta persetujuan. Begitu juga tulis
-  ke luar workspace (`>> ~/.bashrc`, `tee /etc/…`, `cp`/`mv` ke path absolut), `git checkout -- .`,
-  `git restore`, dan `git push --force-with-lease`/`--delete`. Membaca `daemon.json` atau
-  `chatgpt_auth.json` dan memanggil API daemon lokal (`curl localhost:4096/api/v1/…`) dianggap
-  berbahaya.
-- **Subagen kini meminta persetujuan**: tool call subagen dulu berjalan tanpa permission manager
-  apa pun. Sekarang subagen memakai mode izin dan whitelist sesi induknya, dan permintaan izinnya
-  muncul di sesi induk.
-- **Daemon lokal selalu memakai token**: `maukode` dan `maukode server start` membuat token acak bila
-  tidak diberi, menyimpannya di `daemon.json` (hanya bisa dibaca pemilik), dan klien lokal
-  memakainya otomatis. `maukode server start|status|restart` mencetak alamat web UI lengkap dengan
-  `#token=…`. Membuka `http://127.0.0.1:4096` tanpa token kini meminta token.
-- **`maukode server` menolak alamat non-loopback tanpa token** (misalnya `--bind 0.0.0.0:4096`);
-  token kosong dianggap tidak ada token. Token dibandingkan dalam waktu konstan. Origin `tauri://`
-  tidak lagi diterima.
-- **Server MCP dari repo tidak otomatis jalan**: `mcp.json` / `.maukode/mcp.json` milik project
-  hanya dipakai bila folder tersebut ada di `security.trusted_projects`. Tambahkan dengan
-  `maukode trust` (cabut dengan `maukode trust --revoke`). Server MCP dari konfigurasi global tetap
-  berjalan seperti biasa.
-- **`fetch_web_content` menolak alamat metadata cloud dan API daemon**: alamat link-local
-  (`169.254.169.254`, `fe80::/10`), alamat metadata lain, dan `localhost/api/…` ditolak, termasuk
-  lewat redirect dan nama DNS. Body dibaca bertahap dan berhenti di batas 2 MB.
-- **`config.json` kini hanya bisa dibaca pemiliknya** (0600) karena berisi API key.
-- **Tool MCP kini meminta persetujuan di mode `ask`**: tool MCP menjalankan kode yang tidak bisa
-  diperiksa MauKode, jadi setiap panggilannya kini meminta izin, kecuali tool yang ditandai server
-  dengan `readOnlyHint`. "Izinkan untuk sesi ini" berlaku untuk tool tersebut dengan argumen apa
-  pun.
-- **`maukode trust` tidak lagi bisa dibatalkan diam-diam oleh daemon**: hanya `maukode trust` yang
-  menulis `security.trusted_projects`. Penyimpanan lain (API pengaturan daemon, CLI) mempertahankan
-  daftar yang ada di disk, sehingga daemon yang menyimpan konfigurasi lamanya dari memori tidak lagi
-  menghapus project yang di-trust saat daemon berjalan.
+- **The bash whitelist can no longer be piggybacked by other commands**: `bash_whitelist` entries
+  used to be matched as a string prefix, so `cargo *` (in the default whitelist) also let
+  `cargo build && rm -rf ~` through without approval, even in `strict` mode. An entry now only
+  matches **one simple command** (no `;`, `&&`, `|`, redirection, `$(…)`, backticks, subshell, or
+  newline), matched word by word, only for the `bash` tool, and it never lets through a command
+  that is assessed as dangerous.
+- **"For this session" approval is now per tool**: approving `memory_get {"id":1}` no longer also
+  lets `memory_delete {"id":1}` through.
+- **The bash risk assessment looks inside wrapped commands**: `bash -c '…'`, `sh -c`, `eval`,
+  subshells `( … )`, `<( … )`, `{ …; }`, `if … then`, brace expansion `{rm,-rf,x}`, here-strings
+  `bash <<< '…'`, wrappers (`timeout`, `nice`, `nohup`, `xargs`, `busybox`, …), `find -exec`, and
+  `git -C dir …` are now inspected. Code that cannot be inspected (`python -c`, `node -e`,
+  `perl -e`, a shell/interpreter reading from stdin, a command name from a variable, `awk` with
+  `system()`) is at least a warning, so `ask` mode asks for approval. The same goes for writes
+  outside the workspace (`>> ~/.bashrc`, `tee /etc/…`, `cp`/`mv` to an absolute path),
+  `git checkout -- .`, `git restore`, and `git push --force-with-lease`/`--delete`. Reading
+  `daemon.json` or `chatgpt_auth.json` and calling the local daemon API
+  (`curl localhost:4096/api/v1/…`) is considered dangerous.
+- **Subagents now ask for approval**: subagent tool calls used to run without any permission
+  manager. A subagent now uses the permission mode and session whitelist of its parent session,
+  and its permission requests appear in the parent session.
+- **The local daemon always uses a token**: `maukode` and `maukode server start` generate a random
+  token when none is given, store it in `daemon.json` (readable by the owner only), and local
+  clients use it automatically. `maukode server start|status|restart` prints the web UI address
+  with `#token=…`. Opening `http://127.0.0.1:4096` without a token now asks for the token.
+- **`maukode server` refuses a non-loopback address without a token** (for example
+  `--bind 0.0.0.0:4096`); an empty token counts as no token. Tokens are compared in constant time.
+  The `tauri://` origin is no longer accepted.
+- **MCP servers from a repo do not start on their own**: a project's `mcp.json` /
+  `.maukode/mcp.json` is only used when the folder is in `security.trusted_projects`. Add it with
+  `maukode trust` (revoke with `maukode trust --revoke`). MCP servers from the global
+  configuration run as usual.
+- **`fetch_web_content` refuses cloud metadata addresses and the daemon API**: link-local
+  addresses (`169.254.169.254`, `fe80::/10`), other metadata addresses, and `localhost/api/…` are
+  refused, including through redirects and DNS names. The body is read incrementally and stops at
+  a 2 MB limit.
+- **`config.json` is now readable by its owner only** (0600) because it contains API keys.
+- **MCP tools now ask for approval in `ask` mode**: MCP tools run code that MauKode cannot
+  inspect, so every call now asks for permission, except tools the server marks with
+  `readOnlyHint`. "Allow for this session" applies to that tool with any arguments.
+- **`maukode trust` can no longer be silently undone by the daemon**: only `maukode trust` writes
+  `security.trusted_projects`. Other saves (the daemon's settings API, the CLI) keep the list that
+  is on disk, so a daemon that saves its old configuration from memory no longer removes a project
+  that was trusted while the daemon was running.
 
 ### Added
 
-- **Web UI: palet perintah, arsip sesi, dan buka di editor**:
-  - `Ctrl/Cmd+K` membuka palet untuk berpindah sesi (cari judul), navigasi, dan aksi sesi
-    (lihat perubahan, hentikan agent, arsipkan). `?` menampilkan daftar pintasan.
-  - Arsip sesi kini disimpan di daemon (`PUT /sessions/{id}/archive`), sehingga sama di semua
-    perangkat; arsip lama di browser dipindahkan otomatis. Sidebar punya tombol Arsip serta
-    Arsipkan/Pulihkan.
-  - "Buka di editor" di panel perubahan dan di tool call file membuka file dengan
-    `editor.command` (default `code --goto {path}:{line}`) di mesin tempat daemon berjalan.
-- **`maukode run --output json|stream-json`** untuk CI dan skrip. Mode `json` mencetak satu objek
-  hasil (teks akhir, stop reason, tool call, izin yang ditolak, error, dan usage beserta biaya).
-  Mode `stream-json` mencetak setiap event sebagai satu baris JSON, lalu objek hasilnya. Di kedua
-  mode, panggilan yang butuh izin otomatis ditolak; `--permission-mode` mengubahnya untuk run
-  tersebut. Exit code 1 bila turn gagal.
-- **TUI: steering, antrean, dan autocomplete `@file`**:
-  - `Enter` saat agen bekerja mengantrekan prompt, yang lalu dikirim berurutan setelah turn
-    selesai. `/queue` menampilkan, menjalankan, atau mengosongkan antrean.
-  - `Alt+Enter` atau `/steer` menyisipkan arahan ke turn yang sedang berjalan.
-  - Mengetik `@` membuka daftar file workspace dengan pencocokan fuzzy yang menghormati
-    `.gitignore`.
-- **Tool `apply_patch`**: menambah, mengubah, menghapus, dan memindahkan beberapa file sekaligus
-  dalam satu panggilan dengan format `*** Begin Patch`. Semua hunk diperiksa dulu, sehingga patch
-  diterapkan seluruhnya atau tidak sama sekali.
-- **Aturan izin berbasis pola** (`security.permission_rules`): izinkan, tanyakan, atau tolak tool
-  call berdasarkan nama tool, pola perintah bash, atau glob path, di semua mode izin. `deny` selalu
-  menang.
-- **Hooks** (`hooks`): perintah shell untuk `pre_tool_use` (bisa memblokir), `post_tool_use`
-  (misalnya formatter setelah edit; output kegagalan diteruskan ke model), dan `turn_end`. Hooks
-  dari `.maukode/hooks.json` milik project hanya jalan untuk project yang di-trust.
-- **Pemakaian token dan biaya per sesi**: total token (input, output, cache read/write) dan biaya
-  setiap sesi disimpan, termasuk pemakaian subagen. Totalnya tampil di composer web UI dan status
-  bar TUI. Harga bawaan tersedia untuk model Claude terkini; model lain bisa diberi harga lewat
-  `models.<id>.pricing` di config. Daemon mengirim event `session_usage`, dan snapshot sesi kini
-  punya field `usage`.
-- **Extended thinking untuk Anthropic**: thinking adaptif aktif otomatis di Claude 4.6 ke atas,
-  dengan budget tetap untuk model yang lebih lama. Effort dan tampilan ringkasan bisa diatur per
-  model lewat `models.<id>.thinking`. Teks thinking tampil sebagai proses berpikir, dan blok
-  thinking beserta signature-nya dikirim balik utuh di langkah berikutnya.
-- **Input gambar**: gambar PNG, JPEG, GIF, atau WebP (maksimal 5 MB, 20 per pesan) bisa dilampirkan
-  di web UI lewat tombol, tempel, atau seret, lalu dikirim ke Anthropic, provider
-  OpenAI-compatible, dan paket ChatGPT. API: `images` di `POST /sessions/{id}/prompt`.
+- **Web UI: command palette, session archive, and open in editor**:
+  - `Ctrl/Cmd+K` opens a palette to switch sessions (search by title), navigate, and run session
+    actions (view changes, stop the agent, archive). `?` shows the list of shortcuts.
+  - The session archive is now stored in the daemon (`PUT /sessions/{id}/archive`), so it is the
+    same on every device; old browser archives are moved over automatically. The sidebar has an
+    Archive toggle and Archive/Restore buttons.
+  - "Open in editor" in the changes panel and on file tool calls opens the file with
+    `editor.command` (default `code --goto {path}:{line}`) on the machine where the daemon runs.
+- **`maukode run --output json|stream-json`** for CI and scripts. `json` mode prints one result
+  object (final text, stop reason, tool calls, denied permissions, errors, and usage with cost).
+  `stream-json` mode prints every event as one JSON line, then the result object. In both modes,
+  calls that need permission are denied automatically; `--permission-mode` changes that for the
+  run. Exit code 1 when the turn fails.
+- **TUI: steering, queueing, and `@file` autocomplete**:
+  - `Enter` while the agent is working queues the prompt, which is then sent in order after the
+    turn finishes. `/queue` shows, runs, or clears the queue.
+  - `Alt+Enter` or `/steer` inserts guidance into the running turn.
+  - Typing `@` opens a list of workspace files with fuzzy matching that honors `.gitignore`.
+- **`apply_patch` tool**: adds, updates, deletes, and moves several files in one call with the
+  `*** Begin Patch` format. All hunks are checked first, so a patch is applied entirely or not at
+  all.
+- **Pattern-based permission rules** (`security.permission_rules`): allow, ask, or deny tool calls
+  by tool name, bash command pattern, or path glob, in every permission mode. `deny` always wins.
+- **Hooks** (`hooks`): shell commands for `pre_tool_use` (can block), `post_tool_use` (for example
+  a formatter after an edit; failure output is passed on to the model), and `turn_end`. Hooks from
+  a project's `.maukode/hooks.json` only run for trusted projects.
+- **Token usage and cost per session**: the token totals (input, output, cache read/write) and the
+  cost of every session are stored, including subagent usage. The totals show in the web UI
+  composer and the TUI status bar. Built-in prices exist for current Claude models; other models
+  can be priced through `models.<id>.pricing` in the config. The daemon sends `session_usage`
+  events, and the session snapshot now has a `usage` field.
+- **Extended thinking for Anthropic**: adaptive thinking is on automatically for Claude 4.6 and up,
+  with a fixed budget for older models. Effort and the summary display can be set per model
+  through `models.<id>.thinking`. Thinking text shows as the reasoning, and the thinking blocks
+  with their signatures are sent back intact in the next step.
+- **Image input**: PNG, JPEG, GIF, or WebP images (at most 5 MB, 20 per message) can be attached
+  in the web UI with the button, paste, or drag, and are sent to Anthropic, OpenAI-compatible
+  providers, and the ChatGPT plan. API: `images` in `POST /sessions/{id}/prompt`.
 
-- **Tempat perintah dijalankan bisa dipilih (`ExecBackend`)**: tool `bash` tidak lagi selalu
-  menjalankan proses lokal. Pengaturan baru `execution` memilih **Host** (seperti biasa) atau
-  **Lawang**: sel terisolasi milik daemon lawang (program terpisah, dipakai
-  lewat HTTP) dengan tingkat `process` (bubblewrap), `sandbox` (gVisor) atau `vm` (Firecracker).
-  Konfigurasi lama tanpa bagian `execution` tetap berjalan di host.
-  - Satu sel per sesi, dibuat saat perintah pertama dan dihapus bersama sesinya. Folder proyek
-    dipasang ke sel di `/work`; untuk VM, folder disalin masuk dan dibawa pulang. Tool file
-    (`read_file`, `grep`, `glob`, `write_file`, `edit_file`) tetap bekerja di folder host dan
-    dibungkus `SyncedTool` supaya perubahan di kedua sisi saling terlihat. File yang hanya ada di
-    host tidak pernah dihapus oleh sinkronisasi.
-  - Subagen menjalankan perintah di tempat yang sama dengan sesi induknya.
-  - Daemon tidak bisa dihubungi, token salah, atau konfigurasi rusak (misalnya VM tanpa image)
-    membuat perintah gagal dengan penjelasan. **Perintah tidak pernah jatuh diam-diam ke host.**
-  - API: `GET|PUT /api/v1/config/execution` dan `GET /api/v1/config/execution/status` (menanyakan
-    daemon tingkat isolasi mana yang tersedia). Token tidak pernah dikirim balik.
-  - UI: bagian **Eksekusi** di Pengaturan dan label (Host / Proses terisolasi / Sandbox / VM) di
-    header sesi.
-  - Batasan: server MCP tetap berjalan di host; CLI/TUI belum memakai backend ini; pengaturan
-    berlaku untuk semua sesi sekaligus.
+- **Where commands run can be chosen (`ExecBackend`)**: the `bash` tool no longer always runs a
+  local process. The new `execution` setting selects **Host** (as before) or **Lawang**: an
+  isolated cell owned by the lawang daemon (a separate program, used over HTTP) with the
+  `process` (bubblewrap), `sandbox` (gVisor), or `vm` (Firecracker) level. An old configuration
+  without an `execution` section keeps running on the host.
+  - One cell per session, created at the first command and deleted together with its session. The
+    project folder is mounted into the cell at `/work`; for a VM, the folder is copied in and
+    brought back. The file tools (`read_file`, `grep`, `glob`, `write_file`, `edit_file`) still
+    work in the host folder and are wrapped in `SyncedTool` so changes on both sides become
+    visible to each other. Files that exist only on the host are never deleted by the sync.
+  - Subagents run commands in the same place as their parent session.
+  - A daemon that cannot be reached, a wrong token, or a broken configuration (for example a VM
+    without an image) makes commands fail with an explanation. **Commands never silently fall back
+    to the host.**
+  - API: `GET|PUT /api/v1/config/execution` and `GET /api/v1/config/execution/status` (asks the
+    daemon which isolation levels are available). The token is never sent back.
+  - UI: an **Execution** section in Settings and a label (Host / Isolated process / Sandbox / VM)
+    in the session header.
+  - Limits: MCP servers still run on the host; the CLI/TUI do not use this backend yet; the setting
+    applies to all sessions at once.
 
 ### Changed
 
-- **Dokumentasi dirapikan agar sesuai kode**: README ditulis ulang (crate `maukode-memory`, web UI,
-  memori, subagen, backend eksekusi lawang, daftar tool dan slash command lengkap, penjelasan
-  keamanan yang jujur: path jail hanya untuk tool file, bukan sandbox untuk `bash`).
-  - Status fitur kini hanya ada di `docs/ROADMAP.md`, termasuk backlog hasil audit kode
-    (performa, keandalan, keamanan, fitur). `docs/ROADMAP_AUDIT.md` dihapus.
-  - `docs/DESKTOP_ROADMAP.md` menjadi `docs/WEB_UI_ROADMAP.md`, tanpa sisa Tauri.
-  - `docs/CONFIGURATION.md` mengikuti skema asli (`providers` berupa list dengan `kind`, blok
-    `agent` dan `execution`; blok `compaction` yang tidak pernah ada dihapus).
-  - `docs/ARCHITECTURE.md`, `docs/TUI_ROADMAP.md`, `docs/CI_TEST_PLAN.md`, dan
-    `apps/desktop/README.md` diperbarui; skill rilis di `.maukode/skills/learned/` tidak lagi
-    menyuruh mengubah file Tauri.
-  - `AGENTS.md` mencatat aturan bahasa dokumentasi dan bahwa status fitur dicatat di
+- **The documentation was tidied up to match the code**: the README was rewritten (the
+  `maukode-memory` crate, the web UI, memory, subagents, the lawang execution backend, the full
+  list of tools and slash commands, and an honest explanation of security: the path jail only
+  covers the file tools and is not a sandbox for `bash`).
+  - Feature status now lives only in `docs/ROADMAP.md`, including the backlog from the code audit
+    (performance, reliability, security, features). `docs/ROADMAP_AUDIT.md` was deleted.
+  - `docs/DESKTOP_ROADMAP.md` became `docs/WEB_UI_ROADMAP.md`, with no Tauri leftovers.
+  - `docs/CONFIGURATION.md` follows the real schema (`providers` is a list with `kind`, the `agent`
+    and `execution` blocks; the `compaction` block that never existed was removed).
+  - `docs/ARCHITECTURE.md`, `docs/TUI_ROADMAP.md`, `docs/CI_TEST_PLAN.md`, and
+    `apps/desktop/README.md` were updated; the release skill in `.maukode/skills/learned/` no
+    longer tells you to change Tauri files.
+  - `AGENTS.md` records the documentation language rule and that feature status is kept in
     `docs/ROADMAP.md`.
 
 ## [0.4.0] - 2026-10-15
 
-Minor release. Default langkah agent 50 → 2000, perbaikan pengiriman CLI `--max-steps`, dan retry stream llm-kita.
+Minor release. The agent step default goes from 50 to 2000, the CLI `--max-steps` delivery is fixed, and llm-kita streams are retried.
 
 ### Fixed
 
-- **CLI `--max-steps` benar-benar terkirim ke daemon**: `ServerClient::set_agent_config`
-  POST ke path yang salah (`/api/v1/agent/config`, selalu 404) sementara pemanggil
-  di CLI menelan error via `let _ =`, sehingga override selalu gagal diam-diam.
-  Sekarang mengarah ke `/api/v1/config/agent` dan kegagalan diteruskan sebagai
-  error eksplisit (`Failed to apply --max-steps {n}: ...`).
-- **LLM stream body-cut llm-kita di-retry**: `LLMError::is_transient()` sekarang
-  mengenali pesan reqwest/hyper seperti `error decoding response body: stream
-  closed before response completed`, sehingga turn yang terputus di tengah jalan
-  di-resume (maks 4 attempt) alih-alih langsung gagal.
+- **CLI `--max-steps` is actually sent to the daemon**: `ServerClient::set_agent_config`
+  POSTed to the wrong path (`/api/v1/agent/config`, always a 404) while the CLI caller
+  swallowed the error with `let _ =`, so the override always failed silently.
+  It now targets `/api/v1/config/agent` and a failure is passed on as an
+  explicit error (`Failed to apply --max-steps {n}: ...`).
+- **llm-kita LLM streams cut off in the body are retried**: `LLMError::is_transient()` now
+  recognizes reqwest/hyper messages such as `error decoding response body: stream
+  closed before response completed`, so a turn that is cut off midway
+  is resumed (at most 4 attempts) instead of failing right away.
 
 ### Changed
 
-- **Default `max_steps` 50 → 2000** (`AgentConfig` dan `RunnerConfig::default`).
-  Batas validasi server `POST /config/agent` naik dari `1..=200` ke `1..=10000`.
-  Config tersimpan yang sudah ada (`config.json`) tetap dihormati dan tidak
-  dimigrasi paksa; setel ulang sekali via `--max-steps`, Settings, atau edit file.
+- **Default `max_steps` 50 → 2000** (`AgentConfig` and `RunnerConfig::default`).
+  The server validation limit of `POST /config/agent` rose from `1..=200` to `1..=10000`.
+  An existing saved config (`config.json`) is still honored and is not
+  force-migrated; reset it once with `--max-steps`, Settings, or by editing the file.
 
 ## [0.3.2] - 2026-10-14
 
-Patch release. Menghapus OpenCode config sync yang mengoverride pilihan model user.
+Patch release. Removes the OpenCode config sync that overrode the user's model choice.
 
 ### Added
 
-- **Memory Consolidation Tier 4 (Abstraction Synthesis)**: Setelah merge duplikat,
-  engine consolidation sekarang dapat mensintesis memory abstraksi tingkat tinggi
-  dari pola lintas memory dalam taxonomy branch yang sama. Abstraksi baru ditulis
-  dengan `[[Title]]` link balik ke source memories. Dikendalikan oleh
-  `ConsolidationConfig.abstraction` dan `abstraction_min_memories`.
-- **UI Settings Consolidation**: Tambah toggle consolidation dan abstraction di
-  Settings page desktop app.
+- **Memory Consolidation Tier 4 (Abstraction Synthesis)**: after merging duplicates,
+  the consolidation engine can now synthesize high-level abstraction memories
+  from patterns across memories in the same taxonomy branch. New abstractions are written
+  with `[[Title]]` links back to the source memories. Controlled by
+  `ConsolidationConfig.abstraction` and `abstraction_min_memories`.
+- **Consolidation Settings UI**: added consolidation and abstraction toggles to the
+  Settings page of the desktop app.
 
 ### Removed
 
-- **OpenCode config sync**: Menghapus `sync_from_opencode_if_present()` sepenuhnya.
-  Fungsi ini sebelumnya membaca `~/.config/opencode/opencode.json` saat setiap startup
-  dan mengoverride `active_model` serta provider `default_model` dengan nilai dari
-  OpenCode (misal `"auto"`), lalu menyimpan ulang config yang sudah ter-overwrite
-  ke disk. MauKode adalah project mandiri dan tidak seharusnya membaca config
-  OpenCode. Env-var API key fallback tetap dipertahankan.
+- **OpenCode config sync**: removed `sync_from_opencode_if_present()` entirely.
+  This function used to read `~/.config/opencode/opencode.json` at every startup
+  and override `active_model` and the provider `default_model` with the values from
+  OpenCode (for example `"auto"`), then save the overwritten config
+  back to disk. MauKode is a standalone project and should not read OpenCode's
+  config. The env-var API key fallback is kept.
 
 ## [0.3.1] - 2026-10-14
 
-Patch release. 1 PR (#72) sejak v0.3.0.
+Patch release. 1 PR (#72) since v0.3.0.
 
 ### Fixed
 
-- **Sinkronisasi Session Model**: Memperbaiki issue di mana pemilihan model via
-  TUI (`/model`, `ModelSelector` via F2, dan `ProviderSelector` via F3) atau saat
-  pembuatan sesi baru tidak tersinkronisasi ke sesi yang tersimpan di SQLite database.
-  Akibatnya server `effective_model` tetap terkunci pada model default sesi
-  (misal `"auto"`). Sekarang memanggil `set_session_model` (`PUT /api/v1/sessions/{id}/model`)
-  dan menyinkronkan status sesi secara konsisten.
-- **Propagasi CLI `--max-steps`**: Memperbaiki flag CLI `maukode --max-steps <N>` yang
-  sebelumnya terabaikan dan selalu fallback ke default 50 steps pada daemon mode
-  dan standalone TUI mode. Sekarang nilai `--max-steps` dikirim ke endpoint
-  `POST /api/v1/agent/config` (`client.set_agent_config`) pada daemon mode dan
-  diteruskan ke `run_tui` pada standalone mode.
-- **Context Window Gateway Routing (`"auto"`)**: Memperbaiki resolusi context window
-  estimator untuk alias routing seperti `"auto"` (yang umum digunakan oleh gateway
-  seperti LLMKita dengan target model 1M seperti GLM-5.3/Claude/GPT) agar tidak
-  fallback ke batas konservatif 128k, melainkan teresolusi ke 1.000.000 tokens (1M).
+- **Session Model Sync**: fixed an issue where choosing a model through the
+  TUI (`/model`, the `ModelSelector` via F2, and the `ProviderSelector` via F3) or when
+  creating a new session was not synchronized to the session stored in the SQLite database.
+  As a result the server's `effective_model` stayed locked to the session's default model
+  (for example `"auto"`). It now calls `set_session_model` (`PUT /api/v1/sessions/{id}/model`)
+  and synchronizes the session state consistently.
+- **CLI `--max-steps` propagation**: fixed the CLI flag `maukode --max-steps <N>`, which
+  used to be ignored and always fell back to the default of 50 steps in daemon mode
+  and standalone TUI mode. The `--max-steps` value is now sent to the
+  `POST /api/v1/agent/config` endpoint (`client.set_agent_config`) in daemon mode and
+  passed on to `run_tui` in standalone mode.
+- **Context Window Gateway Routing (`"auto"`)**: fixed context window resolution in the
+  estimator for routing aliases such as `"auto"` (commonly used by gateways
+  like LLMKita with 1M target models such as GLM-5.3/Claude/GPT) so it no longer
+  falls back to the conservative 128k limit and resolves to 1,000,000 tokens (1M).
 
 ### Release Process
 
-- Bump versi ke 0.3.1 di seluruh manifest (workspace Cargo.toml, Tauri Cargo.toml,
-  tauri.conf.json, package.json, kedua Cargo.lock)
+- Bumped the version to 0.3.1 in all manifests (workspace Cargo.toml, Tauri Cargo.toml,
+  tauri.conf.json, package.json, both Cargo.lock files)
 
 ## [0.3.0] - 2026-10-13
 
-Minor release. 1 PR (#69) sejak v0.2.1.
+Minor release. 1 PR (#69) since v0.2.1.
 
 ### Added — Post-Turn Reflection Loop
 
-- **Reflection engine** (`crates/maukode-core/src/reflection.rs`): setelah sebuah
-  turn selesai, agent mengevaluasi performanya sendiri dan mengekstrak lessons
-  yang durable dari percakapan yang telah diselesaikan.
-- **`ReflectionConfig`**: opt-in via config dengan parameter:
+- **Reflection engine** (`crates/maukode-core/src/reflection.rs`): after a
+  turn finishes, the agent evaluates its own performance and extracts durable
+  lessons from the completed conversation.
+- **`ReflectionConfig`**: opt-in via config with these parameters:
   - `enabled` — master switch (default: false)
-  - `min_tool_calls` — minimum jumlah tool calls dalam turn sebelum reflection
-    triggers (default: 3), menghindari refleksi pada turn trivial
-  - `skill_creation` — mengizinkan engine menulis skill files baru ke
+  - `min_tool_calls` — the minimum number of tool calls in a turn before reflection
+    triggers (default: 3), which avoids reflecting on trivial turns
+  - `skill_creation` — lets the engine write new skill files to
     `.maukode/skills/learned/` (default: false)
-- **Lesson extraction**: parsing output LLM untuk `[memory: title | taxonomy: X,
-  content]` blocks, dengan taxonomy extraction (gotchas, conventions, dll)
-- **Skill proposal**: parsing `SKILL:` blocks menjadi `ProposedSkill` dengan
-  name, description, dan prompt
-- **SessionRunner integration**: `with_reflection_config()` builder method
-- **CLI flag**: `--reflection` untuk mengaktifkan reflection di TUI
-- **Server API**: field `reflection` di `AgentConfig` dan `SetAgentConfigRequest`
-  untuk mengatur reflection via REST API
-- **Desktop Settings**: UI toggle untuk reflection config di Settings page
-- **TS bindings**: `ReflectionConfig.ts` generated untuk desktop app
+- **Lesson extraction**: parsing LLM output for `[memory: title | taxonomy: X,
+  content]` blocks, with taxonomy extraction (gotchas, conventions, etc.)
+- **Skill proposal**: parsing `SKILL:` blocks into `ProposedSkill` with
+  name, description, and prompt
+- **SessionRunner integration**: the `with_reflection_config()` builder method
+- **CLI flag**: `--reflection` to enable reflection in the TUI
+- **Server API**: a `reflection` field in `AgentConfig` and `SetAgentConfigRequest`
+  to configure reflection through the REST API
+- **Desktop Settings**: a UI toggle for the reflection config on the Settings page
+- **TS bindings**: `ReflectionConfig.ts` generated for the desktop app
 
 ### Changed
 
-- `AgentConfig` tidak lagi mengimplementasikan `Copy` (menambahkan field
-  non-Copy `ReflectionConfig`). Handler server di-update untuk menggunakan
+- `AgentConfig` no longer implements `Copy` (it gained the non-Copy
+  `ReflectionConfig` field). Server handlers were updated to use
   `.clone()`.
-- Workspace version bumped dari 0.2.1 ke 0.3.0
+- Workspace version bumped from 0.2.1 to 0.3.0
 
 ### Release Process
 
-- Bump versi ke 0.3.0 di seluruh manifest (workspace Cargo.toml, Tauri Cargo.toml,
-  tauri.conf.json, package.json, kedua Cargo.lock)
+- Bumped the version to 0.3.0 in all manifests (workspace Cargo.toml, Tauri Cargo.toml,
+  tauri.conf.json, package.json, both Cargo.lock files)
 
 ## [0.2.1] - 2026-10-13
 
-Patch release. 1 PR (#66) sejak v0.2.0.
+Patch release. 1 PR (#66) since v0.2.0.
 
 ### Fixed
 
-- **Compaction context window sizes**: Ganti hardcoded 200K-for-all-Claude dan
-  128K default dengan ukuran context window per-model yang akurat, bersumber
-  dari dokumentasi provider resmi:
-  - **Claude**: 5 family (opus/sonnet/haiku/fable/mythos) + Opus 4.7/4.8 → 1M;
+- **Compaction context window sizes**: replaced the hardcoded 200K-for-all-Claude and
+  128K default with accurate per-model context window sizes, sourced
+  from the official provider documentation:
+  - **Claude**: the 5 families (opus/sonnet/haiku/fable/mythos) + Opus 4.7/4.8 → 1M;
     Opus 4/4.5, Sonnet 4/4.5, Haiku 3.5, 3.x → 200K
-  - **GPT**: GPT-6/5.4/5.6 → 1.050.000; GPT-5/5.1 → 400.000; GPT-4o → 128.000;
-    GPT-4 → 8.192; GPT-4-32k → 32.768; GPT-3.5 → 16.384
-  - **GLM**: GLM-5.x → 1.000.000; GLM-4.x → 131.072
-  - Pattern matching mendukung notasi dashed (`claude-opus-4-8`) dan dotted
-    (`claude-opus-4.8`)
+  - **GPT**: GPT-6/5.4/5.6 → 1,050,000; GPT-5/5.1 → 400,000; GPT-4o → 128,000;
+    GPT-4 → 8,192; GPT-4-32k → 32,768; GPT-3.5 → 16,384
+  - **GLM**: GLM-5.x → 1,000,000; GLM-4.x → 131,072
+  - Pattern matching supports dashed (`claude-opus-4-8`) and dotted
+    (`claude-opus-4.8`) notation
 
 ### Release Process
 
-- Bump versi ke 0.2.1 di seluruh manifest (workspace Cargo.toml, Tauri Cargo.toml,
-  tauri.conf.json, package.json, kedua Cargo.lock)
-- Tag `v0.2.1` sebelumnya dibuat tanpa release commit — versi masih 0.2.0.
-  Perbaikan ini memastikan binary melaporkan versi yang benar.
+- Bumped the version to 0.2.1 in all manifests (workspace Cargo.toml, Tauri Cargo.toml,
+  tauri.conf.json, package.json, both Cargo.lock files)
+- The `v0.2.1` tag was previously created without a release commit — the version was still 0.2.0.
+  This fix makes sure the binary reports the correct version.
 
 ## [0.2.0] - 2026-10-13
 
-144 commit, 41 PR (#18–#64) sejak v0.1.0. ~27.000 baris kode baru.
+144 commits, 41 PRs (#18–#64) since v0.1.0. About 27,000 new lines of code.
 
 ### Added — Desktop App (Tauri + React)
 
-- Aplikasi desktop native berbasis Tauri dengan WebView sistem (`apps/desktop/`)
-- UI chat-style: sidebar session list, panel chat, composer dengan context
-  mentions, token gauge, chips, dan footer affordances
-- Migrasi ke Tailwind v4 + shadcn/ui (Radix UI + lucide icons)
-- Manajemen session: pencarian, filter status, pinning, archive, rename, model
-  switcher per-session
-- Command Palette dan Shortcuts modal (navigasi keyboard-first)
-- Settings page dengan Radix UI, plugins management, dan flow sign-in ChatGPT
+- A native desktop app based on Tauri with the system WebView (`apps/desktop/`)
+- A chat-style UI: a sidebar session list, a chat panel, a composer with context
+  mentions, a token gauge, chips, and footer affordances
+- Migration to Tailwind v4 + shadcn/ui (Radix UI + lucide icons)
+- Session management: search, status filter, pinning, archive, rename, a per-session model
+  switcher
+- Command Palette and Shortcuts modal (keyboard-first navigation)
+- A Settings page with Radix UI, plugin management, and the ChatGPT sign-in flow
 - Review panel: per-file diffs, undo, worktree commit/merge/delete
-- Subagent cards interaktif dengan trace drawer slide-over
-- Native notifications dan repository picker
+- Interactive subagent cards with a slide-over trace drawer
+- Native notifications and a repository picker
 - External editor integration
-- Project context (branch name, info project) di session list dan header
-- Playwright e2e tests untuk desktop UI
+- Project context (branch name, project info) in the session list and header
+- Playwright e2e tests for the desktop UI
 
 ### Added — Memory & Knowledge Store
 
-- Crate baru `maukode-memory` dengan 7 modul:
+- The new `maukode-memory` crate with 7 modules:
   - Project-scoped knowledge store
   - FTS5 full-text search
-  - Memory extraction otomatis dari konteks percakapan
-  - Memory links (relasi antar knowledge items)
-  - Memory tools (ekspos memory ke agent)
+  - Automatic memory extraction from conversation context
+  - Memory links (relations between knowledge items)
+  - Memory tools (exposing memory to the agent)
   - Scope & models
-  - Error handling khusus
+  - Dedicated error handling
 
 ### Added — Security & Sandboxing
 
-- Runtime command sandbox dengan mode: `off`, `path_jail`, `bubblewrap`, `auto`
+- A runtime command sandbox with the modes `off`, `path_jail`, `bubblewrap`, and `auto`
 - MCP server process sandboxing
-- API endpoint untuk mengubah mode sandbox runtime
-- Private tool review mode (gate akses ke likely secrets behind approval)
-- DNS-rebinding Host guard untuk proteksi server
+- An API endpoint to change the sandbox mode at runtime
+- Private tool review mode (gates access to likely secrets behind approval)
+- A DNS-rebinding Host guard to protect the server
 
 ### Added — Subagent System
 
 - SubagentTool implementation (child SessionRunner invocation)
 - Subagent profiles: `codebase_researcher`, `security_auditor`
-- MCP scoping & tool filtering untuk subagent
-- Subagent registry (read-only) untuk discovery
-- Server route `/api/v1/subagents` untuk list profiles
-- Subagent events masuk ke global event feed
+- MCP scoping & tool filtering for subagents
+- A subagent registry (read-only) for discovery
+- The server route `/api/v1/subagents` to list profiles
+- Subagent events enter the global event feed
 
 ### Added — Skills Engine
 
-- Backend skills engine dengan discovery dari markdown files
-- Server endpoints untuk list dan manage skills
-- SkillDefinition protocol schema
+- A backend skills engine with discovery from markdown files
+- Server endpoints to list and manage skills
+- The SkillDefinition protocol schema
 
 ### Added — Plugin System
 
-- Backend plugin system: discovery, loading, management
-- Plugin management API (enable/disable)
+- A backend plugin system: discovery, loading, management
+- A plugin management API (enable/disable)
 - Plugin MCP server config
 
 ### Added — Plans, Timeline & Prompt Queuing
 
 - Structured plans: PlanStep, Plan, StepStatus, FinishReason
-- Timeline tracking step-by-step
+- Step-by-step timeline tracking
 - Prompt queuing & steering (QueueSteeringPrompt)
-- Live plan checklist widget di TUI
+- A live plan checklist widget in the TUI
 
 ### Added — Audit System
 
-- Audit provenance viewer di UI
-- Permission provenance (record semua permission decisions)
-- Compaction provenance (record automatic compaction events)
+- An audit provenance viewer in the UI
+- Permission provenance (records all permission decisions)
+- Compaction provenance (records automatic compaction events)
 - Persistent session turn identifiers
-- SQLite tables untuk permission dan compaction audit
+- SQLite tables for the permission and compaction audit
 
 ### Added — Preview System
 
-- Sandboxed preview lifecycle API (#61): start/stop/refresh preview dev-server
-- Live dev-server preview panel (#62): reverse proxy untuk preview web app
-- PreviewInfo response: status, port, URL, readiness, error
+- A sandboxed preview lifecycle API (#61): start/stop/refresh the preview dev server
+- A live dev-server preview panel (#62): a reverse proxy for the preview web app
+- The PreviewInfo response: status, port, URL, readiness, error
 
 ### Added — Worktree & Parallel Agents
 
-- Parallel-agent management dengan git worktrees
-- Worktree status: commit/merge/delete dari UI
-- Per-session model (setiap session bisa pakai model berbeda)
+- Parallel-agent management with git worktrees
+- Worktree status: commit/merge/delete from the UI
+- Per-session model (every session can use a different model)
 
 ### Added — ChatGPT Authentication
 
 - Sign in with ChatGPT provider (#18)
-- ChatGPT auth flow (`chatgpt_auth.rs`, `chatgpt_client.rs`)
+- The ChatGPT auth flow (`chatgpt_auth.rs`, `chatgpt_client.rs`)
 - Login lifecycle: login status, account management, use account
 
 ### Added — Server API
 
-- SSE event replay dengan sequence numbers untuk reconnect
-- Per-session permissions (permission mode per session, fork-able)
+- SSE event replay with sequence numbers for reconnects
+- Per-session permissions (permission mode per session, forkable)
 - Session titles (set/get)
-- Structured audit trail
+- A structured audit trail
 - Parallel-agent API: worktree, per-session model, global feed
-- DNS-rebinding guard (Host header validation)
+- A DNS-rebinding guard (Host header validation)
 - Routes: auth, events, plugins, preview, settings, skills
 
 ### Added — CI & Release Infrastructure
 
-- Linux build workflow (`linux-build.yml`): tarball release untuk x86_64,
-  smoke test under Xvfb, upload artifact
-- Desktop CI checks: compile + smoke-test Tauri shell
+- A Linux build workflow (`linux-build.yml`): a tarball release for x86_64,
+  a smoke test under Xvfb, an artifact upload
+- Desktop CI checks: compile + smoke-test the Tauri shell
 - Self-hosted runner (#57)
 - Blacksmith build cache
 - TS bindings sync via `cargo test --features ts`
 
 ### Added — TUI Enhancements
 
-- Markdown rendering dengan pulldown-cmark (`markdown.rs`)
-- Render cache (`render_cache.rs`) untuk stop O(history) redraws
+- Markdown rendering with pulldown-cmark (`markdown.rs`)
+- A render cache (`render_cache.rs`) to stop O(history) redraws
 - Loading animations
 - Turn cancellation (cancel generation mid-stream)
-- Idle redraw skip (hemat CPU)
-- Subagent trace inspector modal
-- Plan checklist widget
+- Idle redraw skip (saves CPU)
+- A subagent trace inspector modal
+- A plan checklist widget
 
 ### Changed
 
-- Workspace version bumped dari 0.1.0 ke 0.2.0
-- Desktop app migrated dari native HTML selects ke Radix UI components
-- Server event system menggunakan sequence-numbered SSE replay
+- Workspace version bumped from 0.1.0 to 0.2.0
+- The desktop app migrated from native HTML selects to Radix UI components
+- The server event system uses sequence-numbered SSE replay
 
 ### Fixed
 
-- Agent never ends turn silently (push model untuk finish tasks)
-- LLM stream tolerance: EOF, flaky SSE streams, retry transient failures
-- SQLite lock contention saat first open (flaky CI fix)
-- Store cleanup: empty sessions, prevent `read_file` panic (#53)
-- Send bound fix: box-pin `start_turn` future untuk ensure `Send`
+- The agent never ends a turn silently (a push model for finishing tasks)
+- LLM stream tolerance: EOF, flaky SSE streams, retrying transient failures
+- SQLite lock contention at first open (a flaky CI fix)
+- Store cleanup: empty sessions, preventing a `read_file` panic (#53)
+- A Send bound fix: box-pin the `start_turn` future to ensure `Send`
 - Multiple desktop UI fixes: cropping, focus, sidebar toggle, localStorage
   guard, platform helpers
-- PreviewRequest TypeScript type: add missing `sandbox_mode` field (#63)
-- Tauri Cargo.lock out-of-date untuk `--locked` release build (#64)
+- PreviewRequest TypeScript type: added the missing `sandbox_mode` field (#63)
+- Tauri Cargo.lock out of date for the `--locked` release build (#64)
 
 ## [0.1.0] - 2026-10-03
 

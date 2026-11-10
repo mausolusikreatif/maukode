@@ -8,10 +8,10 @@ import { Composer } from "./Composer";
 import { PromptPanel } from "./PromptPanel";
 
 const EXEC_LABEL: Record<string, { text: string; hint: string }> = {
-  host: { text: "Host", hint: "Perintah berjalan langsung di mesin ini" },
-  process: { text: "Proses terisolasi", hint: "Perintah berjalan di sel lawang (bubblewrap), kernel sama dengan host" },
-  sandbox: { text: "Sandbox", hint: "Perintah berjalan di sel lawang dengan kernel gVisor" },
-  vm: { text: "VM", hint: "Perintah berjalan di mesin virtual dengan kernel sendiri" },
+  host: { text: "Host", hint: "Commands run directly on this machine" },
+  process: { text: "Isolated process", hint: "Commands run in a lawang cell (bubblewrap) on the same kernel as the host" },
+  sandbox: { text: "Sandbox", hint: "Commands run in a lawang cell with the gVisor kernel" },
+  vm: { text: "VM", hint: "Commands run in a virtual machine with its own kernel" },
 };
 
 /** Where this session's commands run. Hidden until the server has answered. */
@@ -37,15 +37,15 @@ function TitleEditor({ id, title }: { id: string; title: string }) {
   };
   if (!editing) {
     return (
-      <button className="title-btn t trunc" title="Ubah nama sesi" onClick={() => { setValue(title); setEditing(true); }}>
-        {title || "Tanpa judul"}
+      <button className="title-btn t trunc" title="Rename the session" onClick={() => { setValue(title); setEditing(true); }}>
+        {title || "Untitled"}
       </button>
     );
   }
   return (
     <form onSubmit={(e) => { e.preventDefault(); void save(); }} style={{ display: "grid", gap: 2 }}>
       <input
-        className="field" style={{ minHeight: "1.9rem" }} autoFocus value={value} aria-label="Nama sesi"
+        className="field" style={{ minHeight: "1.9rem" }} autoFocus value={value} aria-label="Session name"
         onChange={(e) => setValue(e.target.value)} onBlur={() => !error && setEditing(false)}
         onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
       />
@@ -94,7 +94,7 @@ export function Session({ onBack, reviewOpen, onToggleReview }: {
   return (
     <>
       <header className="head">
-        <button className="btn back-narrow" onClick={onBack} aria-label="Kembali ke daftar">Kembali</button>
+        <button className="btn back-narrow" onClick={onBack} aria-label="Back to the list">Back</button>
         <div className="head-title">
           <TitleEditor key={activeId} id={activeId} title={meta?.title || item?.title || ""} />
           <div className="small muted trunc">
@@ -102,13 +102,13 @@ export function Session({ onBack, reviewOpen, onToggleReview }: {
             {" "}{!item?.chat && <ExecTag />}
           </div>
         </div>
-        <span className={`dot ${state}`} title={state === "hold" ? "menunggu izin" : state === "run" ? "berjalan" : "siap"} />
+        <span className={`dot ${state}`} title={state === "hold" ? "waiting for permission" : state === "run" ? "running" : "ready"} />
         <ModelPicker id={activeId} provider={meta?.provider ?? null} model={meta?.model ?? null} />
-        <button className="btn" aria-pressed={promptOpen} onClick={() => setPromptOpen(!promptOpen)} title="System prompt dan skema tool yang dikirim ke model">
+        <button className="btn" aria-pressed={promptOpen} onClick={() => setPromptOpen(!promptOpen)} title="The system prompt and tool schemas sent to the model">
           Prompt
         </button>
         <button className="btn" aria-pressed={reviewOpen} onClick={onToggleReview}>
-          Perubahan{reviewFiles > 0 ? ` ${reviewFiles}` : ""}
+          Changes{reviewFiles > 0 ? ` ${reviewFiles}` : ""}
         </button>
       </header>
       {promptOpen && <PromptPanel id={activeId} />}

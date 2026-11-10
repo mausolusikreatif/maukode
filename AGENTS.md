@@ -48,13 +48,14 @@ cargo fmt --all
 
 ## Key Directories
 - `crates/`: Core project components (Rust workspace members)
-- `apps/desktop/`: Web UI (React + TypeScript), served by the daemon; there is no desktop shell
+- `apps/web/`: Web UI (React + TypeScript), served by the daemon; there is no desktop shell
 - `docs/`: Architecture, configuration, API, and roadmap documents
 - `packaging/linux/`: Release tarball installer
 
 ## Documentation
-- **Language**: `README.md`, `docs/`, code comments, and commit messages are written in English.
-  `CHANGELOG.md` entries are written in Indonesian. The web UI's user-facing strings are Indonesian.
+- **Language**: everything is written in English: `README.md`, `docs/`, `CHANGELOG.md`, code
+  comments, commit messages, and the user-facing strings of the web UI and the TUI. Do not add
+  Indonesian text anywhere.
 - **Feature status** lives only in `docs/ROADMAP.md` (**done** / **partial** / **backend only** /
   **planned**, with a file, route, or symbol as evidence). When a PR ships, changes, or removes a
   feature, update its row in the same PR. `docs/WEB_UI_ROADMAP.md` and `docs/TUI_ROADMAP.md`

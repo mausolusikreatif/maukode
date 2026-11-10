@@ -5,8 +5,8 @@ import { CHAT_GROUP, filterSessions, groupSessionsByProject } from "../state/ses
 import type { SessionListItem } from "../api/types";
 
 function stateOf(s: SessionListItem): { cls: string; label: string } {
-  if (s.pending_permission_count > 0) return { cls: "hold", label: "menunggu izin" };
-  if (s.running) return { cls: "run", label: "berjalan" };
+  if (s.pending_permission_count > 0) return { cls: "hold", label: "waiting for permission" };
+  if (s.running) return { cls: "run", label: "running" };
   return { cls: "", label: shortAgo(s.updated_at) };
 }
 
@@ -44,29 +44,29 @@ export function Sidebar({ tab, onGo, onOpened }: {
 
   return (
     <>
-      <aside className="side" aria-label="Sesi">
+      <aside className="side" aria-label="Sessions">
         <div className="head">
           <div className="head-title"><div className="t">MauKode</div></div>
           <span className="small muted" style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <span className={`dot ${online ? "on" : ""}`} />
-            {online ? "terhubung" : connection === "reconnecting" ? "menyambung ulang" : "terputus"}
+            {online ? "connected" : connection === "reconnecting" ? "reconnecting" : "disconnected"}
           </span>
         </div>
         <div className="side-head">
-          <button className="btn send desk-only" onClick={() => onGo("new")}>Sesi baru</button>
+          <button className="btn send desk-only" onClick={() => onGo("new")}>New session</button>
           <div className="side-nav">
             <button className="btn quiet small" aria-current={tab === "overview"} onClick={() => onGo("overview")}>
-              Ringkasan{inboxCount > 0 ? ` (${inboxCount})` : ""}
+              Overview{inboxCount > 0 ? ` (${inboxCount})` : ""}
             </button>
-            <button className="btn quiet small" aria-current={tab === "settings"} onClick={() => onGo("settings")}>Pengaturan</button>
+            <button className="btn quiet small" aria-current={tab === "settings"} onClick={() => onGo("settings")}>Settings</button>
           </div>
           <input
-            className="field" placeholder="Cari sesi" value={query} aria-label="Cari sesi"
+            className="field" placeholder="Search sessions" value={query} aria-label="Search sessions"
             onChange={(e) => setSessionSearchQuery(e.target.value)}
           />
           {(archived.length > 0 || showArchived) && (
             <button className="btn quiet small" aria-pressed={showArchived} onClick={() => setShowArchived((v) => !v)}>
-              {showArchived ? "Kembali ke sesi aktif" : `Arsip (${archived.length})`}
+              {showArchived ? "Back to active sessions" : `Archive (${archived.length})`}
             </button>
           )}
         </div>
@@ -74,20 +74,20 @@ export function Sidebar({ tab, onGo, onOpened }: {
           {groups.length === 0 && (
             <p className="muted small" style={{ padding: "1rem" }}>
               {sessions.length === 0
-                ? "Belum ada sesi. Mulai dengan Sesi baru."
-                : showArchived ? "Tidak ada sesi di arsip yang cocok." : "Tidak ada sesi yang cocok."}
+                ? "No sessions yet. Start with New session."
+                : showArchived ? "No matching archived sessions." : "No matching sessions."}
             </p>
           )}
           {groups.map(([project, items]) => (
             <section key={project}>
               <div className="group-head">
-                <span className="group-name trunc" title={project}>{baseName(project) || "Tanpa proyek"}</span>
+                <span className="group-name trunc" title={project}>{baseName(project) || "No project"}</span>
                 {project && (
                   <button
-                    className="btn quiet small" aria-label={`Sesi baru di ${baseName(project)}`}
+                    className="btn quiet small" aria-label={`New session in ${baseName(project)}`}
                     onClick={() => { useApp.getState().openNewSession(project === CHAT_GROUP ? "" : project); onGo("new"); }}
                   >
-                    + Baru
+                    + New
                   </button>
                 )}
               </div>
@@ -103,7 +103,7 @@ export function Sidebar({ tab, onGo, onOpened }: {
                       <span className={`dot ${st.cls}`} />
                       <span style={{ minWidth: 0 }}>
                         <span className="sess-title trunc" style={{ display: "block" }}>
-                          {isPinned ? "* " : ""}{s.title || "Tanpa judul"}
+                          {isPinned ? "* " : ""}{s.title || "Untitled"}
                         </span>
                         <span className="sess-meta trunc" style={{ display: "block" }}>
                           {s.worktree_branch ? s.worktree_branch.replace(/^maukode\//, "") : s.model}
@@ -114,17 +114,17 @@ export function Sidebar({ tab, onGo, onOpened }: {
                     {s.id === activeId && (
                       <div style={{ display: "flex", gap: 4, padding: "0 1rem 0.4rem 2.2rem" }}>
                         <button className="btn quiet small" onClick={() => togglePinSession(s.id)}>
-                          {isPinned ? "Lepas sematan" : "Sematkan"}
+                          {isPinned ? "Unpin" : "Pin"}
                         </button>
                         <button className="btn quiet small" onClick={() => void toggleArchiveSession(s.id)}>
-                          {archived.includes(s.id) ? "Pulihkan" : "Arsipkan"}
+                          {archived.includes(s.id) ? "Restore" : "Archive"}
                         </button>
                         {confirmId === s.id ? (
                           <button className="btn deny small" onClick={() => { setConfirmId(null); void deleteSession(s.id); }}>
-                            Hapus sesi ini
+                            Delete this session
                           </button>
                         ) : (
-                          <button className="btn quiet small" onClick={() => setConfirmId(s.id)}>Hapus</button>
+                          <button className="btn quiet small" onClick={() => setConfirmId(s.id)}>Delete</button>
                         )}
                       </div>
                     )}

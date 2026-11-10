@@ -39,11 +39,11 @@ MauKode supports autonomous multi-agent decomposition to solve complex software 
 
 ### Core Invariants
 
-1. **Backend / Daemon Native**: Subagent orchestration lives entirely in `maukode-core` and `maukode-server`. Neither the Desktop app nor the TUI runs agent logic locally; both connect to daemon SSE event streams.
+1. **Backend / Daemon Native**: Subagent orchestration lives entirely in `maukode-core` and `maukode-server`. Neither the web UI nor the TUI runs agent logic locally; both connect to daemon SSE event streams.
 2. **Context Window Isolation**: Each subagent executes with a fresh, dedicated context window. Raw exploratory outputs (hundreds of grep lines, dozens of file reads) never pollute the parent conversation context.
 3. **Hardware & Token Budgets**: Each subagent operates within strict token budgets (e.g., max 32k tokens, max 15 tool iterations) to prevent runaway loops.
 4. **Physical Safety Boundaries**: Read-only subagents (e.g., `researcher`, `auditor`) receive an immutable `ToolRegistry` (`create_readonly_registry`) where mutating tools (`edit_file`, `write_file`, mutating `bash`) are physically absent.
-5. **Hierarchical Observability**: Subagent execution streams fine-grained lifecycle events over SSE, allowing clients (both Desktop and TUI) to render nested progress indicators without mixing child text into the parent response.
+5. **Hierarchical Observability**: Subagent execution streams fine-grained lifecycle events over SSE, allowing clients (both the web UI and TUI) to render nested progress indicators without mixing child text into the parent response.
 
 ---
 
@@ -198,7 +198,7 @@ The Axum daemon (`maukode-server`) exposes endpoints for subagent discovery and 
 
 ## 5. Client Interface Specifications
 
-### 5.1 Desktop Interface (`apps/desktop`)
+### 5.1 Web Interface (`apps/web`)
 
 - **Subagent Card in Message Stream**:
   Displays an expandable component showing child agent avatar, role, goal, live tool activity, and token count.
@@ -224,4 +224,4 @@ The Axum daemon (`maukode-server`) exposes endpoints for subagent discovery and 
 | **P2: Core Runner & Invocation** | Child session runner, `invoke_subagent` tool, token budgeting | `maukode-core` |
 | **P3: Server REST & Event Streaming** | Axum subagent routes, child event forwarding over SSE | `maukode-server` |
 | **P4: TUI Subagent Experience** | In-stream cards, trace viewer modal, subagent hotkeys | `maukode-tui` |
-| **P5: Desktop Subagent Experience** | Interactive timeline nodes, trace drawer, child logs | `apps/desktop` |
+| **P5: Web UI Subagent Experience** | Interactive timeline nodes, trace drawer, child logs | `apps/web` |

@@ -2,7 +2,7 @@ use crate::app::{ActiveModal, App, ChatRole};
 use crate::theme::{self, *};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
@@ -178,9 +178,9 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 
     let (mode_badge, mode_color) = if let Some(ref client) = app.server_client {
         if client.base_url().contains("127.0.0.1") || client.base_url().contains("localhost") {
-            ("● daemon:4096", COLOR_MINT)
+            ("● daemon:4096", COLOR_GREEN)
         } else {
-            ("● remote:vps", COLOR_CYAN)
+            ("● remote:vps", COLOR_FG)
         }
     } else {
         ("○ standalone", COLOR_MUTED)
@@ -201,7 +201,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" │ ", theme::border_style()),
         Span::styled(
             format!("#{session_id_str}"),
-            Style::default().fg(COLOR_BLUE),
+            Style::default().fg(COLOR_MUTED),
         ),
     ];
 
@@ -230,13 +230,13 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         left_spans.push(Span::styled(" │ ", theme::border_style()));
         left_spans.push(Span::styled(
             format!("{} queued", app.queued_prompts.len()),
-            Style::default().fg(COLOR_AMBER),
+            Style::default().fg(COLOR_HOLD),
         ));
     }
 
     if let Some((ref status, _)) = app.status_message {
         left_spans.push(Span::styled(" │ ", theme::border_style()));
-        left_spans.push(Span::styled(status, Style::default().fg(COLOR_AMBER)));
+        left_spans.push(Span::styled(status, Style::default().fg(COLOR_HOLD)));
     }
 
     let header_line = Paragraph::new(Line::from(left_spans)).alignment(Alignment::Left);
@@ -269,7 +269,7 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
         ChatRole::Assistant => {
             lines.push(Line::from(vec![Span::styled(
                 "● MauKode",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             )]));
 
             lines.extend(crate::markdown::render(&item.content));
@@ -364,22 +364,22 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
             let (badge, status_style) = match status {
                 None => (
                     "◉ Running",
-                    Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                    Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
                 ),
                 Some(maukode_protocol::SubagentStatus::Completed) => (
                     "✓ Completed",
-                    Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+                    Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD),
                 ),
                 Some(maukode_protocol::SubagentStatus::Failed) => (
                     "✗ Failed",
                     Style::default()
-                        .fg(COLOR_AMBER)
+                        .fg(COLOR_HOLD)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Some(maukode_protocol::SubagentStatus::BudgetExceeded) => (
                     "⚠ Budget Exceeded",
                     Style::default()
-                        .fg(COLOR_AMBER)
+                        .fg(COLOR_HOLD)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Some(maukode_protocol::SubagentStatus::Cancelled) => {
@@ -466,7 +466,7 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
         }
         ChatRole::System => {
             lines.push(Line::from(vec![
-                Span::styled("ℹ ", Style::default().fg(COLOR_AMBER)),
+                Span::styled("ℹ ", Style::default().fg(COLOR_HOLD)),
                 Span::styled(item.content.clone(), theme::muted_style()),
             ]));
             lines.push(Line::from(""));
@@ -521,7 +521,7 @@ fn draw_messages(
         theme::dim_style()
     } else {
         Style::default()
-            .fg(COLOR_AMBER)
+            .fg(COLOR_HOLD)
             .add_modifier(Modifier::BOLD)
     };
 
@@ -688,7 +688,7 @@ fn draw_input(
     let title = if is_busy {
         Span::styled(
             format!(" {spinner} MauKode is thinking... (press Esc to cancel) "),
-            Style::default().fg(COLOR_AMBER),
+            Style::default().fg(COLOR_HOLD),
         )
     } else {
         Span::styled(" Prompt ", theme::dim_style())
@@ -742,7 +742,7 @@ fn draw_input(
             Span::styled("Queue  ", theme::dim_style()),
             Span::styled("Alt+Enter ", theme::brand_style()),
             Span::styled("Steer  ", theme::dim_style()),
-            Span::styled("Esc ", Style::default().fg(COLOR_AMBER)),
+            Span::styled("Esc ", Style::default().fg(COLOR_HOLD)),
             Span::styled("Cancel  ", theme::dim_style()),
             Span::styled("^C ", Style::default().fg(COLOR_RED)),
             Span::styled("Quit", theme::dim_style()),
@@ -751,23 +751,23 @@ fn draw_input(
         vec![
             Span::styled("@ ", theme::brand_style()),
             Span::styled("File  ", theme::dim_style()),
-            Span::styled("/model ", Style::default().fg(COLOR_TOOL)),
+            Span::styled("/model ", Style::default().fg(COLOR_MUTED)),
             Span::styled("Model  ", theme::dim_style()),
-            Span::styled("/provider ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("/provider ", Style::default().fg(COLOR_FG)),
             Span::styled("Provider  ", theme::dim_style()),
-            Span::styled("/sessions ", Style::default().fg(COLOR_BLUE)),
+            Span::styled("/sessions ", Style::default().fg(COLOR_MUTED)),
             Span::styled("History  ", theme::dim_style()),
-            Span::styled("/diff ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("/diff ", Style::default().fg(COLOR_FG)),
             Span::styled("Diff  ", theme::dim_style()),
-            Span::styled("/undo ", Style::default().fg(COLOR_AMBER)),
+            Span::styled("/undo ", Style::default().fg(COLOR_HOLD)),
             Span::styled("Undo  ", theme::dim_style()),
-            Span::styled("/map ", Style::default().fg(COLOR_MINT)),
+            Span::styled("/map ", Style::default().fg(COLOR_FG)),
             Span::styled("Map  ", theme::dim_style()),
-            Span::styled("/init ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("/init ", Style::default().fg(COLOR_FG)),
             Span::styled("Init  ", theme::dim_style()),
-            Span::styled("/mcp ", Style::default().fg(COLOR_TOOL)),
+            Span::styled("/mcp ", Style::default().fg(COLOR_MUTED)),
             Span::styled("MCP  ", theme::dim_style()),
-            Span::styled("/compact ", Style::default().fg(COLOR_AMBER)),
+            Span::styled("/compact ", Style::default().fg(COLOR_HOLD)),
             Span::styled("Compact  ", theme::dim_style()),
             Span::styled("/help ", theme::muted_style()),
             Span::styled("Commands  ", theme::dim_style()),
@@ -822,7 +822,7 @@ fn draw_model_modal(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_MINT))
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(Span::styled(title, theme::brand_style()));
 
     let inner = Layout::default()
@@ -947,7 +947,7 @@ fn draw_provider_modal(f: &mut Frame, app: &App, selected_idx: usize) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_TOOL))
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(Span::styled(" Select AI Provider ", theme::tool_style()));
 
     let inner = Layout::default()
@@ -1034,10 +1034,10 @@ fn draw_sessions_modal(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_BLUE))
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(Span::styled(
             " Resume Session History ",
-            Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD),
+            Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD),
         ));
 
     let inner = Layout::default()
@@ -1075,7 +1075,7 @@ fn draw_sessions_modal(
             ListItem::new(Line::from(vec![
                 Span::styled(prefix, style),
                 Span::styled(&s.title, style),
-                Span::styled(dir_label, Style::default().fg(COLOR_CYAN)),
+                Span::styled(dir_label, Style::default().fg(COLOR_FG)),
                 Span::styled(format!(" [{}]", s.model), theme::dim_style()),
                 Span::styled(
                     format!(" ({time_str}, {} msgs)", s.message_count),
@@ -1133,10 +1133,10 @@ fn draw_add_provider_modal(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_CYAN))
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(Span::styled(
             " Add Custom AI Provider ",
-            Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
         ));
 
     let inner = Layout::default()
@@ -1168,7 +1168,7 @@ fn draw_add_provider_modal(
 
     for (idx, (label, val)) in fields.iter().enumerate() {
         let is_active = idx == active_field;
-        let border_color = if is_active { COLOR_MINT } else { COLOR_BORDER };
+        let border_color = if is_active { COLOR_PRIMARY } else { COLOR_BORDER };
 
         let field_block = Block::default()
             .borders(Borders::ALL)
@@ -1217,7 +1217,7 @@ fn draw_help_modal(f: &mut Frame) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_MINT))
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(Span::styled(
             " MauKode Quick Reference ",
             theme::brand_style(),
@@ -1227,21 +1227,21 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/model          ",
-                Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD),
             ),
             Span::styled("Search and switch active LLM model", theme::text_style()),
         ]),
         Line::from(vec![
             Span::styled(
                 "/provider       ",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled("Switch or register an AI provider", theme::text_style()),
         ]),
         Line::from(vec![
             Span::styled(
                 "/sessions       ",
-                Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Browse and resume saved sessions from SQLite",
@@ -1251,7 +1251,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/permission    ",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Set ask/review/strict/trust tool execution mode",
@@ -1261,7 +1261,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/diff           ",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Inspect git shadow diff of session modifications",
@@ -1272,7 +1272,7 @@ fn draw_help_modal(f: &mut Frame) {
             Span::styled(
                 "/undo [N]       ",
                 Style::default()
-                    .fg(COLOR_AMBER)
+                    .fg(COLOR_HOLD)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -1283,7 +1283,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/map            ",
-                Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Inspect tree-sitter AST symbol skeleton of codebase",
@@ -1293,7 +1293,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/init [--force] ",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Scan project and generate standard AGENTS.md conventions",
@@ -1303,7 +1303,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/mcp            ",
-                Style::default().fg(COLOR_TOOL).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Inspect active MCP servers and registered dynamic tools",
@@ -1314,7 +1314,7 @@ fn draw_help_modal(f: &mut Frame) {
             Span::styled(
                 "/compact [focus]",
                 Style::default()
-                    .fg(COLOR_AMBER)
+                    .fg(COLOR_HOLD)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -1330,13 +1330,13 @@ fn draw_help_modal(f: &mut Frame) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("/cd <path>      ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("/cd <path>      ", Style::default().fg(COLOR_FG)),
             Span::styled("Switch working directory on the fly", theme::text_style()),
         ]),
         Line::from(vec![
             Span::styled(
                 "/plan           ",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Toggle active plan checklist widget (F2)",
@@ -1346,7 +1346,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/subagents      ",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Inspect child subagent traces and status (F3)",
@@ -1386,11 +1386,11 @@ fn draw_private_result_modal(f: &mut Frame, tool_name: &str, content: &str, scro
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(COLOR_HOLD))
         .title(Span::styled(
             format!(" Private result: {tool_name} (hidden from AI) "),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(COLOR_HOLD)
                 .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
@@ -1455,7 +1455,7 @@ fn draw_permission_modal(
     let border_color = if request.risk_level == "danger" {
         COLOR_RED
     } else {
-        COLOR_AMBER
+        COLOR_HOLD
     };
 
     let title_span = Span::styled(
@@ -1499,12 +1499,12 @@ fn draw_permission_modal(
     let effective_scroll = scroll.min(max_scroll);
     let cmd_para = Paragraph::new(format!("  $ {cmd_text}"))
         .scroll((effective_scroll.min(u16::MAX as usize) as u16, 0))
-        .style(Style::default().fg(Color::White).bg(Color::Rgb(25, 25, 35)))
+        .style(Style::default().fg(COLOR_FG).bg(COLOR_SURFACE))
         .wrap(Wrap { trim: false })
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
+                .border_style(Style::default().fg(COLOR_BORDER))
                 .title(if max_scroll > 0 {
                     " Command ↑↓ "
                 } else {
@@ -1540,7 +1540,7 @@ fn draw_permission_modal(
             Span::styled(
                 "Yes, Allow Once        ",
                 Style::default()
-                    .fg(Color::White)
+                    .fg(COLOR_FG)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("• Run this command one time", theme::dim_style()),
@@ -1549,13 +1549,13 @@ fn draw_permission_modal(
             Span::styled(
                 "  [p] ",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(COLOR_HOLD)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Run Privately          ",
                 Style::default()
-                    .fg(Color::White)
+                    .fg(COLOR_FG)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -1566,12 +1566,12 @@ fn draw_permission_modal(
         Line::from(vec![
             Span::styled(
                 "  [a] ",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Always Allow (Session) ",
                 Style::default()
-                    .fg(Color::White)
+                    .fg(COLOR_FG)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("• Whitelist command for this session", theme::dim_style()),
@@ -1584,7 +1584,7 @@ fn draw_permission_modal(
             Span::styled(
                 "No, Reject & Abort     ",
                 Style::default()
-                    .fg(Color::White)
+                    .fg(COLOR_FG)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("• Disallow execution (or press Esc)", theme::dim_style()),
@@ -1600,13 +1600,13 @@ fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
 
     let title_span = Span::styled(
         " 🔍 Session Changes Diff ",
-        Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+        Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
     );
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_CYAN))
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(title_span);
 
     let inner = Layout::default()
@@ -1663,7 +1663,7 @@ fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
             } else if l.starts_with("@@") {
                 theme::diff_hunk_style()
             } else if l.starts_with("diff --git") {
-                Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD)
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD)
             } else {
                 theme::dim_style()
             };
@@ -1699,10 +1699,10 @@ fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
         Span::styled(
             "[u] ",
             Style::default()
-                .fg(COLOR_AMBER)
+                .fg(COLOR_HOLD)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Undo Changes (Rollback)", Style::default().fg(COLOR_AMBER)),
+        Span::styled("Undo Changes (Rollback)", Style::default().fg(COLOR_HOLD)),
     ]);
     f.render_widget(
         Paragraph::new(footer).alignment(Alignment::Center),
@@ -1716,13 +1716,13 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
 
     let title_span = Span::styled(
         " 🗺️ Codebase Map (Tree-Sitter AST Skeleton) ",
-        Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+        Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
     );
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_MINT))
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(title_span);
 
     let inner = Layout::default()
@@ -1761,10 +1761,10 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
             if l.ends_with(':') {
                 // File header
                 map_lines.push(Line::from(vec![
-                    Span::styled("📁 ", Style::default().fg(COLOR_MINT)),
+                    Span::styled("📁 ", Style::default().fg(COLOR_FG)),
                     Span::styled(
                         l,
-                        Style::default().fg(COLOR_MINT).add_modifier(Modifier::BOLD),
+                        Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
                     ),
                 ]));
             } else if l.contains('│') {
@@ -1778,14 +1778,14 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
                     || content.contains("interface ")
                     || content.contains("trait ")
                 {
-                    Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)
+                    Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD)
                 } else if content.contains("fn ")
                     || content.contains("def ")
                     || content.contains("func ")
                 {
-                    Style::default().fg(COLOR_AMBER)
+                    Style::default().fg(COLOR_HOLD)
                 } else if content.contains("impl ") {
-                    Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)
+                    Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(COLOR_FG)
                 };
@@ -1855,7 +1855,7 @@ fn draw_plan_widget(f: &mut Frame, plan: &maukode_protocol::Plan, area: Rect) {
         .border_style(theme::border_style())
         .title(Span::styled(
             title,
-            Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
         ));
 
     let inner = block.inner(area);
@@ -1864,13 +1864,13 @@ fn draw_plan_widget(f: &mut Frame, plan: &maukode_protocol::Plan, area: Rect) {
     let mut lines = Vec::new();
     for (i, step) in plan.steps.iter().enumerate() {
         let (icon, style) = match step.status {
-            maukode_protocol::StepStatus::Completed => ("[✓]", Style::default().fg(COLOR_MINT)),
+            maukode_protocol::StepStatus::Completed => ("[✓]", Style::default().fg(COLOR_GREEN)),
             maukode_protocol::StepStatus::InProgress => (
                 "[◉]",
-                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             maukode_protocol::StepStatus::Pending => ("[○]", theme::dim_style()),
-            maukode_protocol::StepStatus::Failed => ("[✗]", Style::default().fg(COLOR_AMBER)),
+            maukode_protocol::StepStatus::Failed => ("[✗]", Style::default().fg(COLOR_HOLD)),
         };
 
         let step_title_style = if step.status == maukode_protocol::StepStatus::Completed {
@@ -1909,7 +1909,7 @@ fn draw_subagent_modal(
     let outer_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_CYAN))
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(Span::styled(title, theme::brand_style()));
 
     let inner = outer_block.inner(area);
@@ -1941,7 +1941,7 @@ fn draw_subagent_modal(
         let tab_style = if is_current {
             Style::default()
                 .fg(COLOR_SURFACE)
-                .bg(COLOR_CYAN)
+                .bg(COLOR_FG)
                 .add_modifier(Modifier::BOLD)
         } else {
             theme::dim_style()
@@ -1954,11 +1954,11 @@ fn draw_subagent_modal(
     // 1. Agent overview metadata
     if let Some(agent) = active_agent {
         let (status_str, status_color) = match agent.status {
-            None => ("◉ Running", COLOR_CYAN),
-            Some(maukode_protocol::SubagentStatus::Completed) => ("✓ Completed", COLOR_MINT),
-            Some(maukode_protocol::SubagentStatus::Failed) => ("✗ Failed", COLOR_AMBER),
+            None => ("◉ Running", COLOR_FG),
+            Some(maukode_protocol::SubagentStatus::Completed) => ("✓ Completed", COLOR_GREEN),
+            Some(maukode_protocol::SubagentStatus::Failed) => ("✗ Failed", COLOR_HOLD),
             Some(maukode_protocol::SubagentStatus::BudgetExceeded) => {
-                ("⚠ Budget Exceeded", COLOR_AMBER)
+                ("⚠ Budget Exceeded", COLOR_HOLD)
             }
             Some(maukode_protocol::SubagentStatus::Cancelled) => ("⊘ Cancelled", COLOR_MUTED),
         };

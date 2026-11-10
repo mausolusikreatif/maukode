@@ -1,6 +1,6 @@
 # Web UI Product Roadmap
 
-This document records the product direction for the MauKode web UI (`apps/desktop`): a React
+This document records the product direction for the MauKode web UI (`apps/web`): a React
 single-page app served by the daemon and used from a desktop browser or a phone. There is no native
 desktop shell; the Tauri shell was removed in PR #83.
 

@@ -3,19 +3,19 @@
 All builds and tests run in GitHub CI (`.github/workflows/ci.yml`); agents must not run them
 locally (see `AGENTS.md`).
 
-## Current baseline (2026-10-20)
+## Current baseline (2026-11-10)
 
-The `Rust CI` workflow runs on a self-hosted runner (`[self-hosted, rekarta]`) for every push to
-`master` and every pull request:
+The `Rust CI` workflow runs on GitHub-hosted runners (`ubuntu-24.04`) for every push to `master`
+and every pull request. There is no self-hosted runner any more.
 
 1. `cargo fmt --all --check`
 2. `cargo test --workspace --locked`
 3. TypeScript bindings check: `export_bindings` tests with the `ts` features, then a check that
-   `apps/desktop/src/api/generated` has no diff.
+   `apps/web/src/api/generated` has no diff.
 4. `cargo clippy --all-targets --all-features -- -D warnings`
 
-The web UI job (`npm ci`, `npm run typecheck`, `npm test` in `apps/desktop`) only runs on a manual
-`workflow_dispatch` with `run_desktop` enabled. `linux-build.yml` builds the release tarball on
+The web UI job (`npm ci`, `npm run typecheck`, `npm test` in `apps/web`) only runs on a manual
+`workflow_dispatch` with `run_web` enabled. `linux-build.yml` builds the release tarball on
 `v*` tags and `claude/**` branches.
 
 Test functions per crate (counted from `#[test]`/`#[tokio::test]` attributes):

@@ -189,7 +189,7 @@ used only when the project is trusted (`maukode trust`).
 
 ## 📝 Editor
 
-`editor.command` is how the web UI's "Buka di editor" opens a file, on the machine the daemon runs
+`editor.command` is how the web UI's "Open in editor" opens a file, on the machine the daemon runs
 on. The command is split on whitespace and run without a shell; `{path}` and `{line}` are replaced
 in each argument. It defaults to `code --goto {path}:{line}`.
 

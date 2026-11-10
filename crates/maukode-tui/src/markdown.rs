@@ -1,7 +1,5 @@
-use crate::theme::{
-    self, COLOR_AMBER, COLOR_BLUE, COLOR_CYAN, COLOR_MINT, COLOR_MUTED, COLOR_SURFACE_HOVER,
-};
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use crate::theme::{self, COLOR_FG, COLOR_HOLD, COLOR_MUTED, COLOR_SELECTED};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
@@ -50,7 +48,7 @@ impl Renderer {
             Event::Text(text) => self.text(text.as_ref()),
             Event::Code(code) => self.push(
                 code.into_string(),
-                Style::default().fg(COLOR_AMBER).bg(COLOR_SURFACE_HOVER),
+                Style::default().fg(COLOR_HOLD).bg(COLOR_SELECTED),
             ),
             Event::SoftBreak => self.line_break(),
             Event::HardBreak => self.line_break(),
@@ -65,11 +63,11 @@ impl Renderer {
                 self.push(if checked { "[x] " } else { "[ ] " }, theme::text_style());
             }
             Event::FootnoteReference(reference) => {
-                self.push(format!("[{}]", reference), Style::default().fg(COLOR_BLUE))
+                self.push(format!("[{}]", reference), Style::default().fg(COLOR_MUTED))
             }
             Event::Html(html) | Event::InlineHtml(html) => self.text(html.as_ref()),
             Event::InlineMath(math) | Event::DisplayMath(math) => {
-                self.push(math.into_string(), Style::default().fg(COLOR_AMBER))
+                self.push(math.into_string(), Style::default().fg(COLOR_HOLD))
             }
         }
     }
@@ -80,12 +78,9 @@ impl Renderer {
             Tag::Heading { level, .. } => {
                 self.flush();
                 self.ensure_prefix();
-                let color = match level {
-                    HeadingLevel::H1 | HeadingLevel::H2 => COLOR_MINT,
-                    _ => COLOR_CYAN,
-                };
+                // Headings differ by weight only; the accent colors keep their one meaning.
                 self.styles
-                    .push(Style::default().fg(color).add_modifier(Modifier::BOLD));
+                    .push(Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD));
             }
             Tag::BlockQuote(_) => {
                 self.flush();
@@ -127,7 +122,7 @@ impl Renderer {
                 );
                 self.spans.push(Span::raw("  ".repeat(depth)));
                 self.spans
-                    .push(Span::styled(marker, Style::default().fg(COLOR_CYAN)));
+                    .push(Span::styled(marker, Style::default().fg(COLOR_FG)));
             }
             Tag::Emphasis => self
                 .styles
@@ -140,10 +135,10 @@ impl Renderer {
                 .push(Style::default().add_modifier(Modifier::CROSSED_OUT)),
             Tag::Link { .. } => self.styles.push(
                 Style::default()
-                    .fg(COLOR_BLUE)
+                    .fg(COLOR_MUTED)
                     .add_modifier(Modifier::UNDERLINED),
             ),
-            Tag::Image { .. } => self.push("[image: ", Style::default().fg(COLOR_BLUE)),
+            Tag::Image { .. } => self.push("[image: ", Style::default().fg(COLOR_MUTED)),
             Tag::Table(_) => {
                 self.flush();
                 self.in_table = true;
@@ -186,7 +181,7 @@ impl Renderer {
             TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link => {
                 self.styles.pop();
             }
-            TagEnd::Image => self.push("]", Style::default().fg(COLOR_BLUE)),
+            TagEnd::Image => self.push("]", Style::default().fg(COLOR_MUTED)),
             TagEnd::Table => {
                 self.flush();
                 self.in_table = false;
@@ -218,7 +213,7 @@ impl Renderer {
                     } else if line.starts_with("@@") {
                         theme::diff_hunk_style()
                     } else {
-                        Style::default().fg(COLOR_MINT)
+                        Style::default().fg(COLOR_FG)
                     };
                     self.push(line.to_string(), style);
                 }
@@ -250,7 +245,7 @@ impl Renderer {
         if self.spans.is_empty() {
             self.spans.push(Span::styled(
                 "  │ ",
-                Style::default().fg(COLOR_MUTED).bg(COLOR_SURFACE_HOVER),
+                Style::default().fg(COLOR_MUTED).bg(COLOR_SELECTED),
             ));
         }
     }
@@ -326,8 +321,8 @@ mod tests {
             .find(|span| span.content.contains("Normal text"))
             .expect("should find the normal text span");
 
-        // The heading pushed BOLD + fg(MINT) onto the style stack.
-        // If it leaks, the normal text will also be BOLD + MINT.
+        // The heading pushed BOLD + fg(COLOR_FG) onto the style stack.
+        // If it leaks, the normal text will also be BOLD.
         assert!(
             !normal_span
                 .style
@@ -337,7 +332,7 @@ mod tests {
         );
         assert_eq!(
             normal_span.style.fg,
-            Some(ratatui::style::Color::Rgb(226, 232, 240)),
+            Some(COLOR_FG),
             "normal text after heading should have default fg, not heading color"
         );
     }

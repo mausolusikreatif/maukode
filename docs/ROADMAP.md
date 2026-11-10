@@ -27,7 +27,7 @@ remove a feature, update its row in the same PR.
 | Git worktree isolation per session | **done** | `worktree.rs`; web UI commit/merge in `ui/Review.tsx` |
 | Context pruning and automatic/manual compaction | **done** | `compaction/`; `/compact` |
 | Tree-Sitter repo map (Rust, TS/JS, Python, Go) | **done** | `repo_map/`; `get_codebase_map`; `/map`; a walk stops at 5,000 files or 5 s, and the system prompt carries no map for a home directory or `/` (`is_too_broad`) |
-| Chat-only sessions | **done** (web UI and API; no CLI/TUI flag) | `POST /sessions {chat: true}`: private empty folder `<data_dir>/maukode/chats/<id>` (`paths::is_chat_dir`), tools limited to `web_search`/`fetch_web_content` and the memory tools (global scope, `chat_context`), no codebase map, MCP, subagent, checkpoints or exec backend; web UI: an empty "Folder proyek" starts a chat; `SessionSummary.chat` groups them under "Chat" |
+| Chat-only sessions | **done** (web UI and API; no CLI/TUI flag) | `POST /sessions {chat: true}`: private empty folder `<data_dir>/maukode/chats/<id>` (`paths::is_chat_dir`), tools limited to `web_search`/`fetch_web_content` and the memory tools (global scope, `chat_context`), no codebase map, MCP, subagent, checkpoints or exec backend; web UI: an empty "Project folder" starts a chat; `SessionSummary.chat` groups them under "Chat" |
 | `AGENTS.md` discovery and `maukode init` | **done** | `rules/` |
 | MCP client (stdio) | **done** | `mcp/`; `/mcp`; tool lists refreshed after `notifications/tools/list_changed`, server `ping` answered |
 | Subagents | **done** | `subagent.rs`; `invoke_subagent` |
@@ -81,7 +81,7 @@ remove a feature, update its row in the same PR.
 | Session audit (permissions, mode changes, compactions) | **done** | `store/sqlite.rs` audit tables |
 | Scheduled automations | **planned** | no schedule entities in the store or protocol |
 
-### Web UI (`apps/desktop`)
+### Web UI (`apps/web`)
 
 The web UI was rebuilt from scratch in PR #83. Some capabilities of the previous UI were not carried
 over; they are listed as **planned** again below.
@@ -94,7 +94,7 @@ over; they are listed as **planned** again below.
 | Composer with `@` context chips (files, folders, symbols, changes), steering, queueing | **done** | `ui/Composer.tsx`, `components/composerContext.ts` |
 | Change review, undo, worktree commit and merge | **done** | `ui/Review.tsx` |
 | Session list: project grouping, search, pin, rename, delete | **done** | `ui/Sidebar.tsx`, `state/sessionFilters.ts`; pin state is browser-local |
-| Session archive | **done** | `PUT /sessions/{id}/archive`, `sessions.archived`; sidebar Archive toggle and Arsipkan/Pulihkan; browser-local archives move to the daemon once |
+| Session archive | **done** | `PUT /sessions/{id}/archive`, `sessions.archived`; sidebar Archive toggle and Archive/Restore; browser-local archives move to the daemon once |
 | Settings: providers, ChatGPT login, permissions, sandbox, agent limits, memory, MCP/plugins/skills, theme | **done** | `ui/Settings.tsx` |
 | Browser notifications for approvals and finished turns | **done** | `state/notify.ts` |
 | Phone layout with bottom tabs and history-based Back | **done** | `App.tsx` |
