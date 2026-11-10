@@ -56,7 +56,9 @@ pub fn border_style() -> Style {
 }
 
 pub fn tool_style() -> Style {
-    Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(COLOR_MUTED)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn thinking_style() -> Style {
@@ -84,7 +86,9 @@ pub fn diff_del_style() -> Style {
 }
 
 pub fn diff_hunk_style() -> Style {
-    Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(COLOR_MUTED)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn selected_style() -> Style {

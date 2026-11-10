@@ -368,19 +368,17 @@ pub fn build_item_lines(item: &crate::app::ChatItem) -> Vec<Line<'static>> {
                 ),
                 Some(maukode_protocol::SubagentStatus::Completed) => (
                     "✓ Completed",
-                    Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COLOR_GREEN)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Some(maukode_protocol::SubagentStatus::Failed) => (
                     "✗ Failed",
-                    Style::default()
-                        .fg(COLOR_HOLD)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(COLOR_HOLD).add_modifier(Modifier::BOLD),
                 ),
                 Some(maukode_protocol::SubagentStatus::BudgetExceeded) => (
                     "⚠ Budget Exceeded",
-                    Style::default()
-                        .fg(COLOR_HOLD)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(COLOR_HOLD).add_modifier(Modifier::BOLD),
                 ),
                 Some(maukode_protocol::SubagentStatus::Cancelled) => {
                     ("⊘ Cancelled", theme::dim_style())
@@ -520,9 +518,7 @@ fn draw_messages(
     let title_style = if auto_scroll {
         theme::dim_style()
     } else {
-        Style::default()
-            .fg(COLOR_HOLD)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(COLOR_HOLD).add_modifier(Modifier::BOLD)
     };
 
     let block = Block::default()
@@ -1037,7 +1033,9 @@ fn draw_sessions_modal(
         .border_style(Style::default().fg(COLOR_BORDER))
         .title(Span::styled(
             " Resume Session History ",
-            Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(COLOR_MUTED)
+                .add_modifier(Modifier::BOLD),
         ));
 
     let inner = Layout::default()
@@ -1168,7 +1166,11 @@ fn draw_add_provider_modal(
 
     for (idx, (label, val)) in fields.iter().enumerate() {
         let is_active = idx == active_field;
-        let border_color = if is_active { COLOR_PRIMARY } else { COLOR_BORDER };
+        let border_color = if is_active {
+            COLOR_PRIMARY
+        } else {
+            COLOR_BORDER
+        };
 
         let field_block = Block::default()
             .borders(Borders::ALL)
@@ -1227,7 +1229,9 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/model          ",
-                Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(COLOR_MUTED)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("Search and switch active LLM model", theme::text_style()),
         ]),
@@ -1241,7 +1245,9 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/sessions       ",
-                Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(COLOR_MUTED)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Browse and resume saved sessions from SQLite",
@@ -1271,9 +1277,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/undo [N]       ",
-                Style::default()
-                    .fg(COLOR_HOLD)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_HOLD).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Roll back modified/added files by N turns (default: 1)",
@@ -1303,7 +1307,9 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/mcp            ",
-                Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(COLOR_MUTED)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Inspect active MCP servers and registered dynamic tools",
@@ -1313,9 +1319,7 @@ fn draw_help_modal(f: &mut Frame) {
         Line::from(vec![
             Span::styled(
                 "/compact [focus]",
-                Style::default()
-                    .fg(COLOR_HOLD)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_HOLD).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Summarize older conversation turns & reclaim context tokens",
@@ -1389,9 +1393,7 @@ fn draw_private_result_modal(f: &mut Frame, tool_name: &str, content: &str, scro
         .border_style(Style::default().fg(COLOR_HOLD))
         .title(Span::styled(
             format!(" Private result: {tool_name} (hidden from AI) "),
-            Style::default()
-                .fg(COLOR_HOLD)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(COLOR_HOLD).add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
     let paragraph = Paragraph::new(content.to_string())
@@ -1539,24 +1541,18 @@ fn draw_permission_modal(
             ),
             Span::styled(
                 "Yes, Allow Once        ",
-                Style::default()
-                    .fg(COLOR_FG)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled("• Run this command one time", theme::dim_style()),
         ]),
         Line::from(vec![
             Span::styled(
                 "  [p] ",
-                Style::default()
-                    .fg(COLOR_HOLD)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_HOLD).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Run Privately          ",
-                Style::default()
-                    .fg(COLOR_FG)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "• Show result only to you; withhold it from AI",
@@ -1570,9 +1566,7 @@ fn draw_permission_modal(
             ),
             Span::styled(
                 "Always Allow (Session) ",
-                Style::default()
-                    .fg(COLOR_FG)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled("• Whitelist command for this session", theme::dim_style()),
         ]),
@@ -1583,9 +1577,7 @@ fn draw_permission_modal(
             ),
             Span::styled(
                 "No, Reject & Abort     ",
-                Style::default()
-                    .fg(COLOR_FG)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
             ),
             Span::styled("• Disallow execution (or press Esc)", theme::dim_style()),
         ]),
@@ -1698,9 +1690,7 @@ fn draw_diff_modal(f: &mut Frame, diff: &str, stat: &str, scroll: usize) {
         Span::styled("Fast  ", theme::dim_style()),
         Span::styled(
             "[u] ",
-            Style::default()
-                .fg(COLOR_HOLD)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(COLOR_HOLD).add_modifier(Modifier::BOLD),
         ),
         Span::styled("Undo Changes (Rollback)", Style::default().fg(COLOR_HOLD)),
     ]);
@@ -1785,7 +1775,9 @@ fn draw_codebase_map_modal(f: &mut Frame, map: &str, scroll: usize) {
                 {
                     Style::default().fg(COLOR_HOLD)
                 } else if content.contains("impl ") {
-                    Style::default().fg(COLOR_MUTED).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(COLOR_MUTED)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(COLOR_FG)
                 };

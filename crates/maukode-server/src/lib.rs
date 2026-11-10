@@ -64,10 +64,7 @@ pub fn discover_web_dir() -> Option<PathBuf> {
 
     // 1. Current working directory
     if let Ok(cwd) = std::env::current_dir() {
-        for candidate in [
-            cwd.join("apps").join("web").join("dist"),
-            cwd.join("dist"),
-        ] {
+        for candidate in [cwd.join("apps").join("web").join("dist"), cwd.join("dist")] {
             if is_web_dir(&candidate) {
                 return Some(candidate);
             }
