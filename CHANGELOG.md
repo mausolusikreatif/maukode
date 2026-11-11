@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-11
+
 ### Changed
 
 - The TUI palette now matches the web UI's dark-mode tokens (`--ink`, `--ink-2`, `--line`, `--surface`, `--cobalt`, `--hold`, `--green`, `--red`). Each accent color has one meaning: amber means the agent is waiting for you, red means deny or failure, and green means success or an added line. The mint, cyan, blue, and purple colors are gone; Markdown headings and tool names are told apart by weight instead of color. Modal borders are now flat (`--line`), and diffs use the `--add-bg`/`--del-bg` backgrounds.
