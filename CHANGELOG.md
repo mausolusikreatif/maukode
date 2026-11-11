@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Windows x86_64 release: each release now carries `maukode-windows-x86_64-<tag>.zip` with a `.sha256` file, built by `windows-build.yml`. `install.ps1` downloads it, verifies the checksum, and installs for the current user into `%LOCALAPPDATA%\Programs\MauKode` (no administrator rights; `-Uninstall` removes it). CI now also compiles the workspace on Windows.
+
+### Changed
+
+- On Windows, the `bash` tool and hooks use Git for Windows' `bash.exe` (or the path in `MAUKODE_BASH`) instead of whichever `bash` comes first on `PATH`, which is often the WSL launcher. `npm`, `npx`, and other `.cmd` launchers now resolve through `PATHEXT`, so the preview and MCP servers started with `npx` can start.
+- On Windows, the background daemon starts detached without a console window, and concurrent starters wait on a lock as they do on Unix.
+
 ## [0.7.2] - 2026-11-11
 
 ### Changed

@@ -6,6 +6,7 @@ pub mod grep;
 pub mod patch;
 pub mod registry;
 pub mod security;
+pub mod shell;
 pub mod tool;
 pub mod web;
 
@@ -22,6 +23,7 @@ pub use security::{
     assess_bash_command, bash_whitelist_allows, sandboxed_command, simple_command_words, PathJail,
     RiskAssessment, RiskLevel, SandboxMode,
 };
+pub use shell::resolve_program;
 pub use tool::{Tool, ToolDefinition, ToolError, ToolSource};
 pub use web::{html_to_clean_markdown, FetchWebContentTool, SearchResultItem, WebSearchTool};
 

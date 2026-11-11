@@ -45,6 +45,23 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+  windows:
+    # Compile check only (no tests): catches Unix-only code before a release build does.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ci-windows-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ci-windows-
+      - name: Check the workspace compiles on Windows
+        run: cargo check --workspace --locked
+
   web:
     if: github.event_name == 'workflow_dispatch' && inputs.run_web
     runs-on: ubuntu-24.04
