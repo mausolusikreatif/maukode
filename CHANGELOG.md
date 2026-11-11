@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-11
+
+### Fixed
+
+- The TUI on Windows no longer types every character twice: key release events are ignored.
+
 ## [0.7.3] - 2026-11-11
 
 ### Added
