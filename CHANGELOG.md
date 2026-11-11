@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-11
+
 ### Added
 
 - Windows x86_64 release: each release now carries `maukode-windows-x86_64-<tag>.zip` with a `.sha256` file, built by `windows-build.yml`. `install.ps1` downloads it, verifies the checksum, and installs for the current user into `%LOCALAPPDATA%\Programs\MauKode` (no administrator rights; `-Uninstall` removes it). CI now also compiles the workspace on Windows.
