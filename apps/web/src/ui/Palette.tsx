@@ -28,18 +28,18 @@ export function Palette({ onGo }: { onGo: (tab: Tab) => void }) {
   const commands = useMemo<PaletteCommand[]>(() => {
     const app = useApp.getState();
     const list: PaletteCommand[] = [
-      { id: "new", label: "Sesi baru", run: () => onGo("new") },
-      { id: "overview", label: "Buka ringkasan", run: () => onGo("overview") },
-      { id: "settings", label: "Buka pengaturan", run: () => onGo("settings") },
-      { id: "shortcuts", label: "Pintasan keyboard", hint: "?", run: () => app.toggleShortcuts() },
+      { id: "new", label: "New session", run: () => onGo("new") },
+      { id: "overview", label: "Open overview", run: () => onGo("overview") },
+      { id: "settings", label: "Open settings", run: () => onGo("settings") },
+      { id: "shortcuts", label: "Keyboard shortcuts", hint: "?", run: () => app.toggleShortcuts() },
     ];
     if (activeId) {
-      list.push({ id: "review", label: reviewOpen ? "Tutup panel perubahan" : "Lihat perubahan", run: () => void app.toggleReview() });
-      if (running) list.push({ id: "stop", label: "Hentikan agent", run: () => void app.stop() });
+      list.push({ id: "review", label: reviewOpen ? "Close the changes panel" : "View changes", run: () => void app.toggleReview() });
+      if (running) list.push({ id: "stop", label: "Stop the agent", run: () => void app.stop() });
       const isArchived = archived.includes(activeId);
       list.push({
         id: "archive",
-        label: isArchived ? "Pulihkan sesi ini dari arsip" : "Arsipkan sesi ini",
+        label: isArchived ? "Restore this session from the archive" : "Archive this session",
         run: () => void app.toggleArchiveSession(activeId),
       });
     }
@@ -47,8 +47,8 @@ export function Palette({ onGo }: { onGo: (tab: Tab) => void }) {
       if (s.id === activeId) continue;
       list.push({
         id: `open-${s.id}`,
-        label: `Buka sesi: ${s.title || "Tanpa judul"}`,
-        hint: `${baseName(s.project_dir ?? s.directory)}${s.archived ? " · arsip" : ""}`,
+        label: `Open session: ${s.title || "Untitled"}`,
+        hint: `${baseName(s.project_dir ?? s.directory)}${s.archived ? " · archived" : ""}`,
         run: () => void app.openSession(s.id),
       });
     }
@@ -67,10 +67,10 @@ export function Palette({ onGo }: { onGo: (tab: Tab) => void }) {
 
   return (
     <div className="overlay" role="presentation" onMouseDown={close}>
-      <div className="palette" role="dialog" aria-label="Palet perintah" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="palette" role="dialog" aria-label="Command palette" onMouseDown={(e) => e.stopPropagation()}>
         <input
-          ref={input} className="field" value={query} aria-label="Cari perintah"
-          placeholder={`Ketik perintah atau judul sesi (${primaryMod()}+K)`}
+          ref={input} className="field" value={query} aria-label="Search commands"
+          placeholder={`Type a command or session title (${primaryMod()}+K)`}
           onChange={(e) => { setQuery(e.target.value); setPick(0); }}
           onKeyDown={(e) => {
             if (e.key === "Escape") { e.preventDefault(); close(); }
@@ -79,8 +79,8 @@ export function Palette({ onGo }: { onGo: (tab: Tab) => void }) {
             if (e.key === "Enter") { e.preventDefault(); run(shown[pick]); }
           }}
         />
-        <ul role="listbox" aria-label="Perintah">
-          {shown.length === 0 && <li className="muted small" style={{ padding: "0.6rem 0.75rem" }}>Tidak ada perintah yang cocok.</li>}
+        <ul role="listbox" aria-label="Commands">
+          {shown.length === 0 && <li className="muted small" style={{ padding: "0.6rem 0.75rem" }}>No matching commands.</li>}
           {shown.map((c, i) => (
             <li key={c.id} role="option" aria-selected={i === pick}>
               <button className="mention-item" data-active={i === pick} onMouseEnter={() => setPick(i)} onClick={() => run(c)}>
@@ -101,18 +101,18 @@ export function Shortcuts() {
   if (!open) return null;
   const mod = primaryMod();
   const rows: [string, string][] = [
-    [`${mod}+K`, "Palet perintah: pindah sesi, navigasi, aksi sesi"],
-    ["?", "Tampilkan pintasan ini"],
-    ["Enter", "Kirim pesan (antre bila agent sedang bekerja)"],
-    ["Shift+Enter", "Baris baru"],
-    ["@", "Lampirkan file, folder, simbol, atau perubahan"],
-    ["Esc", "Tutup dialog atau daftar saran"],
+    [`${mod}+K`, "Command palette: switch session, navigate, session actions"],
+    ["?", "Show these shortcuts"],
+    ["Enter", "Send the message (queued while the agent is working)"],
+    ["Shift+Enter", "New line"],
+    ["@", "Attach a file, folder, symbol, or change"],
+    ["Esc", "Close the dialog or the suggestion list"],
   ];
   const close = () => useApp.getState().closeShortcuts();
   return (
     <div className="overlay" role="presentation" onMouseDown={close}>
-      <div className="palette" role="dialog" aria-label="Pintasan keyboard" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="strong" style={{ padding: "0.6rem 0.75rem" }}>Pintasan keyboard</div>
+      <div className="palette" role="dialog" aria-label="Keyboard shortcuts" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="strong" style={{ padding: "0.6rem 0.75rem" }}>Keyboard shortcuts</div>
         <table className="shortcuts">
           <tbody>
             {rows.map(([keys, what]) => (
@@ -121,7 +121,7 @@ export function Shortcuts() {
           </tbody>
         </table>
         <div style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>
-          <button className="btn" onClick={close}>Tutup</button>
+          <button className="btn" onClick={close}>Close</button>
         </div>
       </div>
     </div>

@@ -399,7 +399,7 @@ export const useApp = create<AppState>((set, get) => {
       try {
         await client.openInEditor(activeId, path, line ?? null);
       } catch (e) {
-        patchThread(activeId, (t) => addNotice(t, "error", `Gagal membuka editor: ${errorText(e)}`));
+        patchThread(activeId, (t) => addNotice(t, "error", `Could not open the editor: ${errorText(e)}`));
       }
     },
 

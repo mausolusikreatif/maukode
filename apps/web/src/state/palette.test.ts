@@ -5,10 +5,10 @@ const cmd = (id: string, label: string, hint?: string): PaletteCommand => ({ id,
 
 describe("command palette filtering", () => {
   const commands = [
-    cmd("new", "Sesi baru"),
-    cmd("settings", "Buka pengaturan"),
-    cmd("s1", "Buka sesi: Perbaiki login", "maukode"),
-    cmd("s2", "Buka sesi: Tulis dokumentasi", "web"),
+    cmd("new", "New session"),
+    cmd("settings", "Open settings"),
+    cmd("s1", "Open session: Fix login", "maukode"),
+    cmd("s2", "Open session: Write documentation", "web"),
   ];
 
   it("keeps every command for an empty query", () => {
@@ -16,8 +16,8 @@ describe("command palette filtering", () => {
   });
 
   it("needs every word and ranks label prefixes first", () => {
-    expect(filterCommands(commands, "sesi").map((c) => c.id)).toEqual(["new", "s1", "s2"]);
-    expect(filterCommands(commands, "buka login").map((c) => c.id)).toEqual(["s1"]);
+    expect(filterCommands(commands, "session").map((c) => c.id)).toEqual(["new", "s1", "s2"]);
+    expect(filterCommands(commands, "open login").map((c) => c.id)).toEqual(["s1"]);
     expect(filterCommands(commands, "web").map((c) => c.id)).toEqual(["s2"]);
     expect(filterCommands(commands, "xyz")).toEqual([]);
   });

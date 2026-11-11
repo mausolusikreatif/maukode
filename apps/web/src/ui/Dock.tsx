@@ -35,32 +35,32 @@ export function Dock({ pending, onRespond }: {
   if (!req) return null;
   const detail = req.command ?? req.path ?? req.description;
   return (
-    <section className="dock" role="alertdialog" aria-label="Permintaan izin" aria-live="assertive">
+    <section className="dock" role="alertdialog" aria-label="Permission request" aria-live="assertive">
       <div className="dock-top">
-        <span className="strong">Agent menunggu izin: {req.tool_name}</span>
+        <span className="strong">The agent is waiting for permission: {req.tool_name}</span>
         <span className="small muted">
-          risiko <span className="risk" data-r={req.risk_level}>{req.risk_level}</span>
-          {pending.length > 1 ? `, ${pending.length - 1} lagi antre` : ""}
+          risk <span className="risk" data-r={req.risk_level}>{req.risk_level}</span>
+          {pending.length > 1 ? `, ${pending.length - 1} more queued` : ""}
         </span>
       </div>
       {req.description && req.description !== detail && <div className="muted">{req.description}</div>}
       <pre className="cmd">{detail}</pre>
       <div className="acts">
         <button className="btn deny" onClick={() => onRespond(req.request_id, "deny")}>
-          Tolak <kbd>n</kbd>
+          Deny <kbd>n</kbd>
         </button>
         <button className="btn ink" onClick={() => onRespond(req.request_id, "allow_once")}>
-          Izinkan sekali <kbd>y</kbd>
+          Allow once <kbd>y</kbd>
         </button>
       </div>
       <div className="acts2">
         <button className="btn" onClick={() => onRespond(req.request_id, "allow_session")}>
-          <span>Izinkan untuk sesi ini <kbd>a</kbd></span>
-          <span className="small muted">Tidak bertanya lagi untuk aksi serupa</span>
+          <span>Allow for this session <kbd>a</kbd></span>
+          <span className="small muted">Does not ask again for similar actions</span>
         </button>
         <button className="btn" onClick={() => onRespond(req.request_id, "allow_private")}>
-          <span>Jalankan privat <kbd>p</kbd></span>
-          <span className="small muted">Hasil hanya untuk Anda, tidak dikirim ke model</span>
+          <span>Run privately <kbd>p</kbd></span>
+          <span className="small muted">The result is shown only to you and is not sent to the model</span>
         </button>
       </div>
     </section>

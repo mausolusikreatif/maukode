@@ -20,6 +20,11 @@ MauKode TUI is a first-class client in the MauKode workspace, built for develope
 - **High-Density Keyboard Ergonomics**: Every action is reachable via single-key hotkeys, vim-style navigation, or Telescope-style floating search modals.
 - **Client-Server Transparency**: Connects seamlessly to the local background daemon (`http://127.0.0.1:4096`) or remote VPS instances with bearer token authentication.
 - **Subagent & Plan Clarity**: Complex multi-step reasoning, plans, and subagent traces are rendered compactly with clean disclosure controls, avoiding terminal scrollback pollution.
+- **One Design System with the Web UI**: `crates/maukode-tui/src/theme.rs` uses the web UI's dark
+  tokens (`apps/web/src/index.css`). Accent colors keep one meaning in both clients: cobalt marks
+  the focused item and the action that sends work, amber means the agent is waiting for you, red
+  means refuse or fail, green means success. Everything else is ink or ink-2, with hierarchy from
+  weight. Change a token in both places.
 
 ---
 

@@ -5,20 +5,20 @@ import { projectOfSession } from "../state/sessionFilters";
 import type { PermissionRequest, SessionListItem, StopReason } from "../api/types";
 
 const STOP_LABEL: Record<StopReason, string> = {
-  completed: "selesai",
-  max_tokens: "batas token",
-  max_steps: "batas langkah",
-  cancelled: "dihentikan",
+  completed: "finished",
+  max_tokens: "token limit",
+  max_steps: "step limit",
+  cancelled: "stopped",
   error: "error",
 };
 
-/** "12m", "1j 5m": how long a turn has been running. */
+/** "12m", "1h 5m": how long a turn has been running. */
 function elapsed(iso: string | null): string {
   if (!iso) return "";
   const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 60) return `${s}d`;
+  if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}j ${m % 60}m`;
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
 function useTick(ms: number) {
@@ -37,20 +37,20 @@ function InboxCard({ req, title }: { req: PermissionRequest; title: string }) {
       <div className="dock-top">
         <span className="strong trunc">{title}</span>
         <span className="small muted">
-          {req.tool_name}, risiko <span className="risk" data-r={req.risk_level}>{req.risk_level}</span>
+          {req.tool_name}, risk <span className="risk" data-r={req.risk_level}>{req.risk_level}</span>
         </span>
       </div>
       <pre className="cmd">{detail}</pre>
       <div className="acts">
-        <button className="btn deny" onClick={() => void respondTo(req.session_id, req.request_id, "deny")}>Tolak</button>
-        <button className="btn ink" onClick={() => void respondTo(req.session_id, req.request_id, "allow_once")}>Izinkan sekali</button>
+        <button className="btn deny" onClick={() => void respondTo(req.session_id, req.request_id, "deny")}>Deny</button>
+        <button className="btn ink" onClick={() => void respondTo(req.session_id, req.request_id, "allow_once")}>Allow once</button>
       </div>
       <details className="more">
-        <summary>Opsi lain</summary>
+        <summary>More options</summary>
         <div className="acts2">
-          <button className="btn" onClick={() => void respondTo(req.session_id, req.request_id, "allow_session")}>Izinkan untuk sesi ini</button>
-          <button className="btn" onClick={() => void respondTo(req.session_id, req.request_id, "allow_private")}>Jalankan privat</button>
-          <button className="btn quiet" onClick={() => void openSession(req.session_id)}>Buka sesi</button>
+          <button className="btn" onClick={() => void respondTo(req.session_id, req.request_id, "allow_session")}>Allow for this session</button>
+          <button className="btn" onClick={() => void respondTo(req.session_id, req.request_id, "allow_private")}>Run privately</button>
+          <button className="btn quiet" onClick={() => void openSession(req.session_id)}>Open session</button>
         </div>
       </details>
     </section>
@@ -62,20 +62,20 @@ function Row({ s, note }: { s: SessionListItem; note?: string }) {
   return (
     <button className="orow" onClick={() => void useApp.getState().openSession(s.id)}>
       <span className="orow-top">
-        <span className="strong trunc">{s.title || "Tanpa judul"}</span>
+        <span className="strong trunc">{s.title || "Untitled"}</span>
         <span className="small muted">{s.running ? elapsed(s.turn_started_at) : note ?? shortAgo(s.updated_at)}</span>
       </span>
       <span className="small muted trunc">
-        {baseName(projectOfSession(s)) || "Tanpa proyek"}{s.worktree_branch ? ` / ${s.worktree_branch.replace(/^maukode\//, "")}` : ""}
+        {baseName(projectOfSession(s)) || "No project"}{s.worktree_branch ? ` / ${s.worktree_branch.replace(/^maukode\//, "")}` : ""}
       </span>
       {s.running && hasPlan && (
-        <span className="prog" role="progressbar" aria-valuemin={0} aria-valuemax={s.plan_total} aria-valuenow={s.plan_done} aria-label="Progres rencana">
+        <span className="prog" role="progressbar" aria-valuemin={0} aria-valuemax={s.plan_total} aria-valuenow={s.plan_done} aria-label="Plan progress">
           <span style={{ width: `${(s.plan_done / s.plan_total) * 100}%` }} />
         </span>
       )}
       {s.running && (
         <span className="small trunc">
-          {hasPlan ? `langkah ${s.plan_done}/${s.plan_total}` : "bekerja"}
+          {hasPlan ? `step ${s.plan_done}/${s.plan_total}` : "working"}
           {s.last_activity ? `, ${s.last_activity}` : ""}
         </span>
       )}
@@ -102,7 +102,7 @@ export function Overview({ onNew }: { onNew: () => void }) {
     () => sessions.filter((s) => project === null || projectOfSession(s) === project),
     [sessions, project],
   );
-  const titleOf = (id: string) => sessions.find((s) => s.id === id)?.title || "Tanpa judul";
+  const titleOf = (id: string) => sessions.find((s) => s.id === id)?.title || "Untitled";
   const waiting = inbox.filter((r) => visible.some((s) => s.id === r.session_id));
   const running = visible.filter((s) => s.running);
   // Archived sessions still show while they run or wait for approval, not among the recent ones.
@@ -113,45 +113,45 @@ export function Overview({ onNew }: { onNew: () => void }) {
 
   return (
     <>
-      <header className="head"><div className="head-title"><div className="t">Ringkasan</div></div></header>
+      <header className="head"><div className="head-title"><div className="t">Overview</div></div></header>
       <div className="home">
       <div className="home-in wide">
 
         {projects.length > 1 && (
-          <div className="chips" role="group" aria-label="Filter proyek">
-            <button className="btn small" aria-pressed={project === null} onClick={() => setProject(null)}>Semua</button>
+          <div className="chips" role="group" aria-label="Filter by project">
+            <button className="btn small" aria-pressed={project === null} onClick={() => setProject(null)}>All</button>
             {projects.map((p) => (
               <button key={p} className="btn small" aria-pressed={project === p} title={p} onClick={() => setProject(p)}>
-                {baseName(p) || "Tanpa proyek"}
+                {baseName(p) || "No project"}
               </button>
             ))}
           </div>
         )}
 
-        <section aria-label="Perlu keputusan">
-          <h2 className="osec hold">Perlu keputusan Anda{waiting.length ? ` (${waiting.length})` : ""}</h2>
+        <section aria-label="Needs your decision">
+          <h2 className="osec hold">Needs your decision{waiting.length ? ` (${waiting.length})` : ""}</h2>
           {waiting.length === 0 ? (
-            <p className="muted small">Tidak ada agent yang menunggu izin.</p>
+            <p className="muted small">No agent is waiting for permission.</p>
           ) : (
             <div className="stack">{waiting.map((r) => <InboxCard key={r.request_id} req={r} title={titleOf(r.session_id)} />)}</div>
           )}
         </section>
 
-        <section aria-label="Sedang berjalan">
-          <h2 className="osec">Sedang berjalan{running.length ? ` (${running.length})` : ""}</h2>
+        <section aria-label="Running">
+          <h2 className="osec">Running{running.length ? ` (${running.length})` : ""}</h2>
           {running.length === 0 ? (
-            <p className="muted small">Tidak ada agent yang bekerja sekarang.</p>
+            <p className="muted small">No agent is working right now.</p>
           ) : (
             <div className="list">{running.map((s) => <Row key={s.id} s={s} />)}</div>
           )}
         </section>
 
-        <section aria-label="Baru selesai">
-          <h2 className="osec">Aktivitas terakhir</h2>
+        <section aria-label="Recently finished">
+          <h2 className="osec">Recent activity</h2>
           {recent.length === 0 ? (
             <div className="stack">
-              <p className="muted small">Belum ada sesi.</p>
-              <button className="btn send" style={{ justifySelf: "start" }} onClick={onNew}>Mulai sesi baru</button>
+              <p className="muted small">No sessions yet.</p>
+              <button className="btn send" style={{ justifySelf: "start" }} onClick={onNew}>Start a new session</button>
             </div>
           ) : (
             <div className="list">

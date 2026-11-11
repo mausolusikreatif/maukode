@@ -10,7 +10,7 @@ export function Home() {
   const recents = useMemo(() => recentRepositories(loadRecentRepositories(), sessions), [sessions]);
   const presetDir = useApp((s) => s.newSessionInitialDir);
   const [dir, setDir] = useState(presetDir ?? recents[0] ?? "");
-  // A folder chosen from a project's "+ Baru" applies to this visit only.
+  // A folder chosen from a project's "+ New" applies to this visit only.
   useEffect(() => () => useApp.getState().closeNewSession(), []);
   const [worktree, setWorktree] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -38,22 +38,22 @@ export function Home() {
 
   return (
     <>
-    <header className="head"><div className="head-title"><div className="t">Sesi baru</div></div></header>
+    <header className="head"><div className="head-title"><div className="t">New session</div></div></header>
     <div className="home">
       <form className="home-in" onSubmit={(e) => { e.preventDefault(); void start(); }}>
         <p className="muted" style={{ margin: 0 }}>
-          Pilih folder proyek tempat agent bekerja. Kosongkan untuk chat saja: tanpa akses file dan shell,
-          hanya pencarian web dan memori.
+          Choose the project folder the agent works in. Leave it empty for a chat only: no file or shell
+          access, just web search and memory.
         </p>
-        <label className="label" htmlFor="dir">Folder proyek</label>
+        <label className="label" htmlFor="dir">Project folder</label>
         <input
-          id="dir" className="field" value={dir} placeholder="/home/kamu/proyek"
+          id="dir" className="field" value={dir} placeholder="/home/you/project"
           list="recent-dirs" autoCapitalize="off" autoCorrect="off" spellCheck={false}
           onChange={(e) => setDir(e.target.value)}
         />
         <datalist id="recent-dirs">{recents.map((r) => <option key={r} value={r} />)}</datalist>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          <button type="button" className="btn small" aria-pressed={chat} onClick={() => setDir("")}>Chat saja</button>
+          <button type="button" className="btn small" aria-pressed={chat} onClick={() => setDir("")}>Chat only</button>
           {recents.slice(0, 5).map((r) => (
             <button key={r} type="button" className="btn small" title={r} onClick={() => setDir(r)}>{baseName(r)}</button>
           ))}
@@ -61,15 +61,15 @@ export function Home() {
         <label className="checkrow">
           <input type="checkbox" checked={worktree && !chat} disabled={chat} onChange={(e) => setWorktree(e.target.checked)} />
           <span>
-            Jalankan di git worktree terpisah
+            Run in a separate git worktree
             <span className="muted small" style={{ display: "block" }}>
-              Agent bekerja di branch sendiri, jadi beberapa agent tidak saling menimpa.
+              The agent works on its own branch, so several agents do not overwrite each other.
             </span>
           </span>
         </label>
         {error && <div className="notice error">{error}</div>}
         <button className="btn send" type="submit" disabled={busy} style={{ justifySelf: "start" }}>
-          {busy ? "Membuat…" : chat ? "Mulai chat" : "Mulai sesi"}
+          {busy ? "Creating…" : chat ? "Start chat" : "Start session"}
         </button>
       </form>
     </div>

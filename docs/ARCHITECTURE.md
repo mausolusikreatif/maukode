@@ -5,7 +5,7 @@ This document describes the internal subsystems, design patterns, and protocols 
 ```
       ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
       │     Terminal UI      │   │       CLI REPL       │   │   Web UI (browser)   │
-      │  (ratatui/crossterm) │   │  `maukode --cli/run` │   │     apps/desktop     │
+      │  (ratatui/crossterm) │   │  `maukode --cli/run` │   │     apps/web     │
       └──────────┬───────────┘   └──────────┬───────────┘   └──────────┬───────────┘
                  └──────────────────────────┼──────────────────────────┘
                                             │ HTTP REST & SSE
@@ -61,7 +61,7 @@ MauKode separates the user interface from agent execution:
 - **Client Interfaces**:
   - `maukode-tui` and `maukode-cli` connect to the daemon over HTTP/SSE via `ServerClient`;
     `--standalone` runs the agent in-process instead.
-  - The web UI (`apps/desktop`) is a static bundle served by the daemon (`--web-dir`) and talks to
+  - The web UI (`apps/web`) is a static bundle served by the daemon (`--web-dir`) and talks to
     the same API (see [API.md](./API.md)).
   - Several clients, in different project directories, can use one daemon at the same time.
     Session events are kept in a replay log so a client can reconnect and resume a stream.

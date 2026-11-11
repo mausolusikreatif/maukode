@@ -30,9 +30,9 @@ export function PromptPanel({ id }: { id: string }) {
     return () => { live = false; };
   }, [client, id]);
 
-  if (load.kind === "loading") return <section className="prompt-panel small muted">Memuat…</section>;
+  if (load.kind === "loading") return <section className="prompt-panel small muted">Loading…</section>;
   if (load.kind === "none") {
-    return <section className="prompt-panel small muted">Belum ada permintaan ke model pada sesi ini.</section>;
+    return <section className="prompt-panel small muted">No request has been sent to the model in this session yet.</section>;
   }
   if (load.kind === "error") {
     return <section className="prompt-panel small" style={{ color: "var(--red)" }}>{load.message}</section>;
@@ -41,10 +41,10 @@ export function PromptPanel({ id }: { id: string }) {
   const { info } = load;
   const summary = promptSummary(info);
   return (
-    <section className="prompt-panel" aria-label="System prompt dan skema tool">
+    <section className="prompt-panel" aria-label="System prompt and tool schemas">
       <div className="dock-top">
         <span className="strong">Biaya tetap per permintaan: ≈{shortCount(summary.fixedTokens)} token</span>
-        <span className="small muted">dikirim ulang setiap kali</span>
+        <span className="small muted">sent again with every request</span>
       </div>
       <div className="small muted">
         System prompt ≈{shortCount(info.system_prompt_tokens)} · skema {summary.toolCount} tool ≈{shortCount(info.tool_schema_tokens)}
@@ -57,10 +57,10 @@ export function PromptPanel({ id }: { id: string }) {
         </div>
       )}
       <details className="more">
-        <summary>Lihat system prompt</summary>
+        <summary>View the system prompt</summary>
         <pre className="cmd">{info.system_prompt}</pre>
       </details>
-      <div className="small muted">Snapshot {info.hash.slice(0, 8)}, {shortAgo(info.created_at)} lalu. Angka adalah perkiraan.</div>
+      <div className="small muted">Snapshot {info.hash.slice(0, 8)}, {shortAgo(info.created_at)} ago. Numbers are estimates.</div>
     </section>
   );
 }

@@ -30,20 +30,20 @@ interface Attached {
 function readImage(file: File): Promise<Attached> {
   return new Promise((resolve, reject) => {
     if (!IMAGE_TYPES.includes(file.type)) {
-      reject(new Error(`${file.name}: hanya PNG, JPEG, GIF, atau WebP`));
+      reject(new Error(`${file.name}: only PNG, JPEG, GIF, or WebP`));
       return;
     }
     if (file.size > MAX_IMAGE_BYTES) {
-      reject(new Error(`${file.name}: lebih dari 5 MB`));
+      reject(new Error(`${file.name}: larger than 5 MB`));
       return;
     }
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`${file.name}: gagal dibaca`));
+    reader.onerror = () => reject(new Error(`${file.name}: could not be read`));
     reader.onload = () => {
       const url = String(reader.result);
       resolve({
         id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
-        name: file.name || "gambar",
+        name: file.name || "image",
         media_type: file.type,
         data: url.slice(url.indexOf(",") + 1),
       });
@@ -114,7 +114,7 @@ export function Composer({ thread }: { thread: ThreadState }) {
     const q = query.trim();
     // Always allow the typed path as-is, so @ works even when no file list is available.
     if (q && !found.some((i) => i.value === q)) {
-      found.push({ id: `manual-${q}`, kind: "file", value: q, label: `@${q}`, description: "Pakai path ini apa adanya", icon: "📄" });
+      found.push({ id: `manual-${q}`, kind: "file", value: q, label: `@${q}`, description: "Use this path as it is", icon: "📄" });
     }
     return found;
   }, [query, codebase, changed]);
@@ -130,7 +130,7 @@ export function Composer({ thread }: { thread: ThreadState }) {
       const failed = results.flatMap((r) => (r.status === "rejected" ? [String((r.reason as Error).message)] : []));
       setImages((current) => {
         const room = Math.max(0, MAX_IMAGES - current.length);
-        if (ok.length > room) failed.push(`Maksimal ${MAX_IMAGES} gambar per pesan`);
+        if (ok.length > room) failed.push(`At most ${MAX_IMAGES} images per message`);
         return [...current, ...ok.slice(0, room)];
       });
       if (failed.length > 0) setImageError(failed.join("; "));
@@ -194,38 +194,38 @@ export function Composer({ thread }: { thread: ThreadState }) {
     >
       {thread.queue.length > 0 && (
         <div className="queue">
-          <span>{thread.queue.length} pesan antre, dikirim setelah giliran ini</span>
-          <button className="btn quiet small" onClick={() => void clearQueue()}>Kosongkan</button>
+          <span>{thread.queue.length} message(s) queued, sent after this turn</span>
+          <button className="btn quiet small" onClick={() => void clearQueue()}>Clear</button>
         </div>
       )}
       {chips.length > 0 && (
-        <div className="ctx-chips" aria-label="Konteks terlampir">
+        <div className="ctx-chips" aria-label="Attached context">
           {chips.map((c) => (
             <span key={c.id} className="chip">
               <span className="trunc">{c.label}</span>
-              <button aria-label={`Lepas ${c.label}`} onClick={() => setChips((x) => x.filter((y) => y.id !== c.id))}>x</button>
+              <button aria-label={`Remove ${c.label}`} onClick={() => setChips((x) => x.filter((y) => y.id !== c.id))}>x</button>
             </span>
           ))}
         </div>
       )}
       {images.length > 0 && (
-        <div className="thumbs" aria-label="Gambar terlampir">
+        <div className="thumbs" aria-label="Attached images">
           {images.map((img) => (
             <span key={img.id} className="thumb-wrap">
               <img className="thumb" src={`data:${img.media_type};base64,${img.data}`} alt={img.name} />
-              <button aria-label={`Lepas ${img.name}`} onClick={() => setImages((x) => x.filter((y) => y.id !== img.id))}>x</button>
+              <button aria-label={`Remove ${img.name}`} onClick={() => setImages((x) => x.filter((y) => y.id !== img.id))}>x</button>
             </span>
           ))}
         </div>
       )}
       {imageError && <div className="small" style={{ color: "var(--red)" }}>{imageError}</div>}
-      {blocked && <div className="small muted">Gambar hanya bisa dikirim saat agent tidak sedang bekerja.</div>}
+      {blocked && <div className="small muted">Images can only be sent while the agent is not working.</div>}
       <div className="mention-wrap">
         {query !== null && (
-          <ul className="mention" role="listbox" aria-label="Rujukan konteks">
-            {mapState === "loading" && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>Memuat daftar file proyek…</li>}
-            {mapState === "failed" && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>Daftar file tidak tersedia untuk folder ini (kosong atau terlalu besar). Ketik path lengkapnya setelah @.</li>}
-            {mapState === "ready" && items.length === 0 && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>Tidak ada file, folder, atau simbol yang cocok.</li>}
+          <ul className="mention" role="listbox" aria-label="Context references">
+            {mapState === "loading" && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>Loading the project file list…</li>}
+            {mapState === "failed" && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>The file list is not available for this folder (empty or too large). Type the full path after @.</li>}
+            {mapState === "ready" && items.length === 0 && <li className="muted small" style={{ padding: "0.5rem 0.75rem" }}>No matching file, folder, or symbol.</li>}
             {items.map((it, i) => (
               <li key={it.id} role="option" aria-selected={i === pick}>
                 <button
@@ -240,8 +240,8 @@ export function Composer({ thread }: { thread: ThreadState }) {
           </ul>
         )}
         <textarea
-          ref={ref} rows={1} value={text} aria-label="Pesan untuk agent"
-          placeholder={running ? "Agent sedang bekerja. Pesan baru masuk antrean." : "Tulis tugas. Ketik @ untuk melampirkan file, folder, atau perubahan."}
+          ref={ref} rows={1} value={text} aria-label="Message for the agent"
+          placeholder={running ? "The agent is working. New messages are queued." : "Write a task. Type @ to attach a file, folder, or change."}
           onChange={(e) => onText(e.target.value, e.target.selectionStart)}
           onPaste={(e) => {
             const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
@@ -266,14 +266,14 @@ export function Composer({ thread }: { thread: ThreadState }) {
       </div>
       <div className="composer-row">
         <span className="small muted">
-          {running ? "berjalan" : "siap"}
+          {running ? "running" : "ready"}
           {tokens.tokens > 0 ? `, ±${tokens.tokens} token` : ""}
-          {context && <span title="Ukuran konteks pada request terakhir, bukan total"> · konteks {context}</span>}
-          {usage && <span title="Total semua request sesi ini; riwayat ikut terkirim ulang di tiap request"> · total {usage}</span>}
+          {context && <span title="Context size of the latest request, not a total"> · context {context}</span>}
+          {usage && <span title="Total of all requests in this session; the history is sent again with every request"> · total {usage}</span>}
         </span>
         <span style={{ display: "flex", gap: 6 }}>
           <button
-            className="btn" aria-label="Lampirkan konteks"
+            className="btn" aria-label="Attach context"
             onClick={() => { const el = ref.current; const v = text.endsWith(" ") || text === "" ? `${text}@` : `${text} @`; onText(v, v.length); el?.focus(); }}
           >
             @
@@ -282,19 +282,19 @@ export function Composer({ thread }: { thread: ThreadState }) {
             ref={fileInput} type="file" accept={IMAGE_TYPES.join(",")} multiple hidden
             onChange={(e) => { if (e.target.files) attach(e.target.files); e.target.value = ""; }}
           />
-          <button className="btn" aria-label="Lampirkan gambar" title="Lampirkan gambar (atau tempel / seret ke sini)" onClick={() => fileInput.current?.click()}>
-            Gambar
+          <button className="btn" aria-label="Attach an image" title="Attach an image (or paste / drag it here)" onClick={() => fileInput.current?.click()}>
+            Image
           </button>
           {running && (
             <>
               <button className="btn" disabled={!text.trim()} onClick={() => { const t = text.trim(); setText(""); void steer(t); }}>
-                Arahkan
+                Steer
               </button>
-              <button className="btn deny" onClick={() => void stop()}>Hentikan</button>
+              <button className="btn deny" onClick={() => void stop()}>Stop</button>
             </>
           )}
           <button className="btn send" disabled={empty || blocked} onClick={submit}>
-            {running ? "Antre" : "Kirim"}
+            {running ? "Queue" : "Send"}
           </button>
         </span>
       </div>

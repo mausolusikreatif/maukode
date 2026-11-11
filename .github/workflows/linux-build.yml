@@ -8,7 +8,7 @@ on:
     tags: ["v*"]
     branches: ["claude/**"]
     paths:
-      - "apps/desktop/**"
+      - "apps/web/**"
       - "crates/**"
       - "packaging/**"
       - "Cargo.*"
@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
+          cache-dependency-path: apps/web/package-lock.json
       - uses: actions/cache@v4
         with:
           path: |
@@ -46,7 +46,7 @@ jobs:
             target
           key: linux-release-${{ hashFiles('Cargo.lock') }}
       - name: Build UI
-        working-directory: apps/desktop
+        working-directory: apps/web
         run: |
           npm ci
           npm run build
@@ -59,7 +59,7 @@ jobs:
           D="maukode-linux-x86_64-$V"
           mkdir -p "$D"
           cp target/release/maukode "$D/"
-          cp -r apps/desktop/dist "$D/web"
+          cp -r apps/web/dist "$D/web"
           cp packaging/linux/{install.sh,README.txt} "$D/"
           strip "$D/maukode"
           echo "D=$D" >> "$GITHUB_ENV"

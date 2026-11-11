@@ -12,10 +12,10 @@ import { useTheme } from "./ui/theme";
 import { Palette, Shortcuts } from "./ui/Palette";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "overview", label: "Ringkasan" },
-  { id: "sessions", label: "Sesi" },
-  { id: "new", label: "Baru" },
-  { id: "settings", label: "Pengaturan" },
+  { id: "overview", label: "Overview" },
+  { id: "sessions", label: "Sessions" },
+  { id: "new", label: "New" },
+  { id: "settings", label: "Settings" },
 ];
 
 /** Where the user is, mirrored into the browser history so Back (button or swipe) works. */
@@ -102,7 +102,7 @@ export default function App() {
   /** Previous page; falls back to `fallback` when this is the first page of the visit. */
   const back = (fallback: () => void) => (depth() > 0 ? window.history.back() : fallback());
   if (!connected) {
-    return booted ? <Connect initialUrl={window.location.origin} /> : <main className="center muted">Memuat…</main>;
+    return booted ? <Connect initialUrl={window.location.origin} /> : <main className="center muted">Loading…</main>;
   }
 
   /** Switch tab; leaves any open session so the tab's page is what shows. */
@@ -131,7 +131,7 @@ export default function App() {
       {showReview && <Review onClose={() => void useApp.getState().toggleReview()} />}
       <Palette onGo={go} />
       <Shortcuts />
-      <nav className="tabbar" aria-label="Navigasi utama">
+      <nav className="tabbar" aria-label="Main navigation">
         {TABS.map((t) => (
           <button key={t.id} aria-current={!activeId && tab === t.id} onClick={() => go(t.id)}>
             {t.label}
