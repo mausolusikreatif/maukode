@@ -1,4 +1,6 @@
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    self, Event as CrosstermEvent, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind,
+};
 use maukode_protocol::LLMEvent;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -42,7 +44,12 @@ impl EventHandler {
                 if event::poll(Duration::from_millis(100)).unwrap_or(false) {
                     if let Ok(crossterm_event) = event::read() {
                         let to_send = match crossterm_event {
-                            CrosstermEvent::Key(key) => Some(AppEvent::Input(key)),
+                            // Windows also reports key releases (and repeats as presses), which
+                            // would type every character twice.
+                            CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                                Some(AppEvent::Input(key))
+                            }
+                            CrosstermEvent::Key(_) => None,
                             CrosstermEvent::Mouse(mouse) => {
                                 // Filter out raw mouse movements (Moved, Drag, Down, Up).
                                 // Only forward ScrollUp and ScrollDown to prevent flooding hundreds of events/sec!
