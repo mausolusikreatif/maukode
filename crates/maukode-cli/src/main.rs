@@ -1295,7 +1295,10 @@ async fn run_update(check: bool, version: Option<String>) -> anyhow::Result<()> 
     }
 
     if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        anyhow::bail!("release builds exist only for Linux x86_64; build from source instead");
+        anyhow::bail!(
+            "self-update works on Linux x86_64 only; on Windows, re-run install.ps1 to get the \
+             latest release"
+        );
     }
     let exe = std::env::current_exe()?;
     let Some(layout) = update::InstallLayout::of(&exe) else {

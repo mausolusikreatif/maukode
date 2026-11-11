@@ -75,7 +75,7 @@ pub fn sandboxed_command(
             Ok(command)
         }
         SandboxMode::Off | SandboxMode::PathJail | SandboxMode::Auto => {
-            let mut command = Command::new(program);
+            let mut command = Command::new(crate::shell::resolve_program(program));
             command.args(args).current_dir(cwd);
             Ok(command)
         }

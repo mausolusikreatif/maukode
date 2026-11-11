@@ -120,6 +120,8 @@ async fn acquire_start_lock() -> Result<StartLock> {
                 return Err(std::io::Error::last_os_error().into());
             }
         }
+        #[cfg(windows)]
+        file.lock()?;
         Ok(StartLock(file))
     })
     .await?
@@ -189,6 +191,15 @@ pub async fn ensure_daemon_running(default_port: u16, token: Option<String>) -> 
                 Ok(())
             });
         }
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window, and the daemon outlives this process and its console.
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
 
     let mut child = cmd

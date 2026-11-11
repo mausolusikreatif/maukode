@@ -87,6 +87,7 @@ maukode/
 │   └── maukode-cli/           # `maukode` binary and subcommands
 ├── apps/web/              # Web UI (React + TypeScript), served by the daemon
 ├── packaging/linux/           # Release tarball installer
+├── packaging/windows/         # Release zip installer
 └── docs/                      # Architecture, configuration, API, and roadmap documents
 ```
 
@@ -112,6 +113,24 @@ newer release exists, `--version vX.Y.Z` picks one). It verifies the download, r
 and the web UI, and restarts a running daemon. A binary from `cargo install` is not updated by it.
 Such an installation also checks for a newer release once a day in the background and mentions it
 on stderr; set `MAUKODE_NO_UPDATE_CHECK=1` to turn that off.
+
+### From a release (Windows x86_64)
+
+Install [Git for Windows](https://git-scm.com/download/win) first: the `bash` tool and hooks run
+commands with its `bash.exe` (set `MAUKODE_BASH` to use another one), and checkpoints use `git`.
+Then, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/mausolusikreatif/maukode/master/install.ps1 | iex
+```
+
+This downloads the latest release zip, verifies its sha256, and installs the daemon and the web UI
+into `%LOCALAPPDATA%\Programs\MauKode` and adds that folder to your user `PATH` (no administrator
+rights). Open a new terminal and run `maukode server start`. To pick a release or uninstall, run the
+script with `-Version v0.7.2` or `-Uninstall`; see `packaging/windows/README.txt`. The build is
+unsigned, so SmartScreen may warn. Windows is newer than Linux here: it is built and compiled in
+CI, but the test suite runs on Linux only, and `maukode update`, the bubblewrap sandbox, and lawang
+cells are Linux-only (re-run the installer to update).
 
 ### From source
 

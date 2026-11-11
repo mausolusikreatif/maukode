@@ -204,7 +204,7 @@ impl Hooks {
         session_id: &str,
         tool_name: Option<&str>,
     ) -> Outcome {
-        let mut command = tokio::process::Command::new("bash");
+        let mut command = tokio::process::Command::new(maukode_tools::resolve_program("bash"));
         command
             .arg("-c")
             .arg(&hook.command)
