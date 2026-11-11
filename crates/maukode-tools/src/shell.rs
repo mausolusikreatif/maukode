@@ -31,7 +31,12 @@ fn windows_bash() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("MAUKODE_BASH").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(path));
     }
-    for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LocalAppData"] {
+    for var in [
+        "ProgramFiles",
+        "ProgramW6432",
+        "ProgramFiles(x86)",
+        "LocalAppData",
+    ] {
         let Some(root) = std::env::var_os(var) else {
             continue;
         };
@@ -46,9 +51,11 @@ fn windows_bash() -> Option<PathBuf> {
             return Some(bash);
         }
     }
-    which::which_all("bash")
-        .ok()?
-        .find(|p| !p.to_string_lossy().to_ascii_lowercase().contains("\\system32\\"))
+    which::which_all("bash").ok()?.find(|p| {
+        !p.to_string_lossy()
+            .to_ascii_lowercase()
+            .contains("\\system32\\")
+    })
 }
 
 #[cfg(test)]
@@ -57,7 +64,10 @@ mod tests {
 
     #[test]
     fn a_path_is_returned_unchanged() {
-        assert_eq!(resolve_program("/usr/bin/env"), OsString::from("/usr/bin/env"));
+        assert_eq!(
+            resolve_program("/usr/bin/env"),
+            OsString::from("/usr/bin/env")
+        );
         assert_eq!(resolve_program(".\\tool"), OsString::from(".\\tool"));
     }
 
